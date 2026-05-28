@@ -1,29 +1,13 @@
-command: ["uvicorn", "server.app:app", "--host", "0.0.0.0", "--port", "8000"]
+command: ["uvicorn", "backend.app:app", "--host", "0.0.0.0", "--port", "8000"]
 
 # =============================================================================
-# Primary deployment: Databricks Asset Bundle (recommended)
-# =============================================================================
-#
-#   databricks bundle deploy -t prod \
-#     --var="warehouse_id=<your-warehouse-id>"
-#
-# The bundle (databricks.yml) provisions the Lakebase Autoscaling instance,
-# creates the postgres project/branch/endpoint, and deploys this app from
-# https://github.com/smathews13/cost-obs-lakebase (branch: main).
-# All resource bindings (Lakebase + SQL Warehouse) are declared in databricks.yml.
-# After bundle deploy, start the app with:
-#
-#   databricks bundle run cost_obs_app -t prod
-#
-# =============================================================================
-# Manual / UI deployment (fallback — no bundle)
+# Setup: configure in the Databricks Apps UI before deploying
 # =============================================================================
 #
 # 1. App resources → + Add resource → SQL warehouse
-#    Key: sql-warehouse, Permission: Can use
-# 2. App resources → + Add resource → Lakebase database
-#    Key: lakebase-db, Permission: CAN_CONNECT_AND_CREATE
-# 3. User authorization → + Add scope → sql (optional but recommended)
+#    Pick your existing Serverless Pro warehouse, set permission to "Can use",
+#    leave the resource key as "sql-warehouse".
+#    The app reads DATABRICKS_WAREHOUSE_ID (injected automatically) to connect.
 #
 # =============================================================================
 
@@ -32,10 +16,6 @@ resources:
     description: SQL Warehouse for cost observability queries
     sql_warehouse:
       permission: CAN_USE
-  - name: lakebase-db
-    description: Lakebase RW endpoint for materialized query results
-    postgres:
-      permission: CAN_CONNECT_AND_CREATE
 
 env:
   # Injected automatically by Databricks Apps from the sql-warehouse resource above.
@@ -43,30 +23,32 @@ env:
   - name: DATABRICKS_WAREHOUSE_ID
     valueFrom: sql-warehouse
 
-  # Unity Catalog location for materialized views (defaults: main / cost_obs)
-  - name: COST_OBS_CATALOG
-    value: main
-  - name: COST_OBS_SCHEMA
-    value: cost_obs
+  # Unity Catalog location for materialized views — REQUIRED, no default.
+  # Set these to a dedicated catalog and schema before deploying.
+  # The setup wizard will also prompt for these values on first launch.
+  # Example:
+  #   COST_OBS_CATALOG: my_catalog
+  #   COST_OBS_SCHEMA:  cost_obs_app
+  # - name: COST_OBS_CATALOG
+  #   value: <your-catalog>
+  # - name: COST_OBS_SCHEMA
+  #   value: <your-schema>
 
   # Optional: uncomment to point at a specific warehouse instead of the resource above
   # - name: DATABRICKS_HTTP_PATH
   #   value: /sql/1.0/warehouses/<id>
 
-  # Genie Space for AI cost queries (optional)
-  # - name: GENIE_SPACE_ID
-  #   value: <genie-space-id>
-
   # Azure subscription ID (shown in account banner on Azure workspaces)
   # - name: AZURE_SUBSCRIPTION_ID
   #   value: <subscription-id>
 
-  # Lakebase — PGHOST / PGDATABASE / PGPORT / PGSSLMODE / PGUSER are injected
-  # automatically by the Apps runtime from the lakebase-db resource binding.
-  # LAKEBASE_ENDPOINT resolves to the endpoint path via valueFrom so
-  # generate_database_credential(endpoint=...) always gets the correct bound endpoint.
-  - name: LAKEBASE_ENDPOINT
-    valueFrom: lakebase-db
+  # Workspace filter — restrict the dashboard to specific workspace(s).
+  # Value: comma-separated workspace IDs (from the setup wizard or Databricks account console).
+  # Single ID → workspace dropdown is hidden (data is implicitly scoped).
+  # Multiple IDs → dropdown appears so users can filter within the configured pool.
+  # Omit to show all workspaces (dropdown appears when the account has multiple).
+  # - name: COST_OBS_WORKSPACES
+  #   value: 3233745148968388
 
   # AWS / Azure actual cost tables (defaults: billing.aws / billing.azure)
   # - name: AWS_COST_CATALOG

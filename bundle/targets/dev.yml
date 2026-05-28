@@ -1,0 +1,12 @@
+targets:
+  dev:
+    mode: development
+    default: true
+    workspace:
+      host: ${var.workspace_host}
+    variables:
+      app_name: cost-observability-dev
+      catalog: main
+      schema: cost_obs_dev
+      lakebase_project_name: cost-obs-db-dev
+      lakebase_endpoint_name: cost-obs-endpoint-dev

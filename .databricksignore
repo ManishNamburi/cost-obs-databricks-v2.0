@@ -13,9 +13,9 @@ docs/
 scripts/
 notebooks/
 tests/
+databricks.yml
 app.yaml.template
 deploy_bundle.sh
 dba_deploy.sh
 dba_client.py
 dba_logz.py
-deploy.sh

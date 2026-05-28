@@ -1,0 +1,6 @@
+# Placeholder — add explicit permission grants here as needed.
+# Example: grant CAN_VIEW on the app to a group of analysts.
+#
+# permissions:
+#   - level: CAN_VIEW
+#     group_name: analysts

@@ -1,0 +1,16 @@
+targets:
+  prod:
+    mode: production
+    workspace:
+      host: ${var.workspace_host}
+    variables:
+      app_name: cost-observability
+      catalog: main
+      schema: cost_obs
+      lakebase_project_name: cost-obs-db
+      lakebase_endpoint_name: cost-obs-endpoint
+    permissions:
+      - level: CAN_VIEW
+        group_name: cost_obs_viewers
+      - level: CAN_MANAGE
+        group_name: cost_obs_admins

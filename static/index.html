@@ -20,14 +20,30 @@
       .animate-pulse { animation: co-pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite !important; }
       .animate-bounce { animation: co-bounce 1s infinite !important; }
     </style>
-    <script type="module" crossorigin src="/assets/index-CR89MyhW.js"></script>
+    <script type="module" crossorigin src="/assets/index-BEBvWuvr.js"></script>
     <link rel="modulepreload" crossorigin href="/assets/vendor-tanstack-qeOnR07A.js">
     <link rel="modulepreload" crossorigin href="/assets/vendor-recharts-Dlt5FHEy.js">
     <link rel="modulepreload" crossorigin href="/assets/vendor-pdf-wMx_gGlY.js">
-    <link rel="modulepreload" crossorigin href="/assets/vendor-date-cmK4yMLr.js">
-    <link rel="stylesheet" crossorigin href="/assets/index-C66dtrWM.css">
+    <link rel="modulepreload" crossorigin href="/assets/vendor-date-Ad7zlCii.js">
+    <link rel="stylesheet" crossorigin href="/assets/index-a6L_Wg6P.css">
   </head>
   <body>
-    <div id="root"></div>
+    <div id="root">
+      <!-- Inline loading shell — React replaces this on mount.
+           Shown immediately while the JS bundle downloads/executes. -->
+      <div style="display:flex;flex-direction:column;min-height:100vh;background:#f8f9fa;font-family:system-ui,-apple-system,sans-serif;">
+        <!-- Nav bar -->
+        <div style="background:#1B3139;padding:0 24px;height:56px;display:flex;align-items:center;gap:24px;flex-shrink:0;">
+          <div style="color:#fff;font-size:18px;font-weight:700;letter-spacing:.05em;">COST-OBS</div>
+        </div>
+        <!-- Content area -->
+        <div style="flex:1;display:flex;align-items:center;justify-content:center;">
+          <div style="text-align:center;">
+            <div style="width:40px;height:40px;border:3px solid #e5e7eb;border-top-color:#FF3621;border-radius:50%;animation:co-spin 1s linear infinite;margin:0 auto 16px;"></div>
+            <p style="color:#6b7280;font-size:14px;margin:0;">Loading Cost Observatory…</p>
+          </div>
+        </div>
+      </div>
+    </div>
   </body>
 </html>

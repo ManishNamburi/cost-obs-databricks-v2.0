@@ -1,0 +1,11 @@
+targets:
+  staging:
+    mode: development
+    workspace:
+      host: ${var.workspace_host}
+    variables:
+      app_name: cost-observability-staging
+      catalog: main
+      schema: cost_obs_staging
+      lakebase_project_name: cost-obs-db-staging
+      lakebase_endpoint_name: cost-obs-endpoint-staging

@@ -26,8 +26,9 @@ app.*.yaml
 # App settings (contains secrets)
 .settings/
 
-# Databricks local state
+# Databricks local state and bundle deployment state
 .databricks/
+bundle/.databricks/
 
 # IDE
 .idea/

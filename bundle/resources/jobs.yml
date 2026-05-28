@@ -1,0 +1,59 @@
+resources:
+  jobs:
+    cost_obs_setup:
+      name: cost-obs-setup
+      description: >
+        One-time onboarding job. Run once after first bundle deploy, or to repair a workspace.
+        Each task is idempotent — safe to re-run. Writes completion markers to Lakebase.
+      tasks:
+        - task_key: validate
+          description: Check environment variables, UC permissions, and warehouse connectivity
+          notebook_task:
+            notebook_path: ../setup/notebooks/01_validate_prereqs
+          environment_key: default
+
+        - task_key: bootstrap_lakebase
+          description: Create schema, OAuth role, grants, ALTER DEFAULT PRIVILEGES, setup_state table
+          depends_on:
+            - task_key: validate
+          notebook_task:
+            notebook_path: ../setup/notebooks/02_lakebase_bootstrap
+          environment_key: default
+
+        - task_key: migrate_delta
+          description: Migrate historical data from Delta tables into Lakebase (idempotent)
+          depends_on:
+            - task_key: bootstrap_lakebase
+          notebook_task:
+            notebook_path: ../setup/notebooks/02_lakebase_bootstrap
+          environment_key: default
+
+        - task_key: seed_genie
+          description: Create and configure Genie space with cost system tables (skipped if no space ID)
+          depends_on:
+            - task_key: bootstrap_lakebase
+          notebook_task:
+            notebook_path: ../setup/notebooks/03_seed_genie
+          environment_key: default
+
+        - task_key: setup_usage_policy
+          description: Create or validate serverless usage policy for cost attribution
+          depends_on:
+            - task_key: validate
+          notebook_task:
+            notebook_path: ../setup/notebooks/04_usage_policy_setup
+          environment_key: default
+
+        - task_key: verify
+          description: Run smoke checks and write final setup_state marker
+          depends_on:
+            - task_key: seed_genie
+            - task_key: setup_usage_policy
+          notebook_task:
+            notebook_path: ../setup/notebooks/05_post_setup_verify
+          environment_key: default
+
+      environments:
+        - environment_key: default
+          spec:
+            client: "1"

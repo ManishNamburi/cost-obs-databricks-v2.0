@@ -1,0 +1,25 @@
+resources:
+  apps:
+    cost_obs_app:
+      name: ${var.app_name}
+      description: Cost Observability App — V2
+      source_code_path: ../app
+      config:
+        command:
+          - uvicorn
+          - backend.app:app
+          - --host
+          - "0.0.0.0"
+          - --port
+          - "8000"
+        env:
+          - name: COST_OBS_CATALOG
+            value: ${var.catalog}
+          - name: COST_OBS_SCHEMA
+            value: ${var.schema}
+          - name: COST_OBS_WORKSPACES
+            value: ${var.workspace_scope}
+          - name: GENIE_SPACE_ID
+            value: ${var.genie_space_id}
+          - name: AI_GATEWAY_USAGE_TABLE
+            value: ${var.ai_gateway_usage_table}

@@ -1,0 +1,40 @@
+bundle:
+  name: cost-obs
+
+include:
+  - resources/*.yml
+  - targets/*.yml
+
+variables:
+  workspace_host:
+    description: Databricks workspace URL (e.g. https://my-workspace.azuredatabricks.net)
+  app_name:
+    description: Databricks App name
+    default: cost-observability
+  catalog:
+    description: Unity Catalog catalog for materialized views
+    default: main
+  schema:
+    description: Unity Catalog schema for materialized views
+    default: cost_obs
+  warehouse_id:
+    description: Serverless or Pro SQL warehouse ID
+    default: ""
+  workspace_scope:
+    description: Comma-separated workspace IDs to scope the dashboard (empty = all)
+    default: ""
+  lakebase_project_name:
+    description: Lakebase Autoscaling project name
+    default: cost-obs-db
+  lakebase_endpoint_name:
+    description: Lakebase endpoint name
+    default: cost-obs-endpoint
+  genie_space_id:
+    description: Genie space ID (optional — leave empty to skip Genie seeding)
+    default: ""
+  ai_gateway_usage_table:
+    description: Derived table granting app SP access to AI Gateway usage data
+    default: ""
+
+workspace:
+  auth_type: pat

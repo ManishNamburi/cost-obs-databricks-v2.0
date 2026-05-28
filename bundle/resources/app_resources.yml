@@ -1,0 +1,22 @@
+# App resource bindings — Databricks injects env vars for each resource automatically.
+# After bundle deploy, confirm each resource is visible in the App UI before running setup job.
+#
+# sql-warehouse  → DATABRICKS_WAREHOUSE_ID
+# lakebase       → PGHOST, PGPORT, PGDATABASE, PGUSER, PGSSLMODE, ENDPOINT_NAME
+
+resources:
+  apps:
+    cost_obs_app:
+      resources:
+        - name: sql-warehouse
+          description: Serverless or Pro SQL warehouse for system table queries
+          sql_warehouse:
+            id: ${var.warehouse_id}
+            permission: CAN_USE
+
+        - name: lakebase
+          description: Lakebase Autoscaling endpoint for durable app state
+          serving_endpoint:
+            # Lakebase endpoint resource reference — populated after lakebase.yml provisions it
+            name: ${var.lakebase_endpoint_name}
+            permission: CAN_CONNECT

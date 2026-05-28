@@ -1,4 +1,4 @@
-# Cost Observability & Control for Databricks
+# **cost-obs** app for Databricks
 
 [![Deploy to Databricks](https://img.shields.io/badge/Deploy%20to-Databricks-FF3621?style=for-the-badge&logo=databricks&logoColor=white)](https://accounts.cloud.databricks.com/select-workspace?destination_url=/apps/install?repo_url=https://github.com/smathews13/cost-obs-databricks)
 
@@ -12,209 +12,191 @@
 
 A full-stack Databricks App for account-level compute cost visibility, chargeback, and anomaly detection across your entire Databricks platform.
 
-Built on FastAPI + React, deployed as a [Databricks App](https://docs.databricks.com/en/dev-tools/databricks-apps/index.html) with OAuth authentication and serverless compute built in. Supports **multi-cloud deployment** across AWS and Azure with automatic cloud detection.
+Built on FastAPI + React, deployed as a [Databricks App](https://docs.databricks.com/en/dev-tools/databricks-apps/index.html) with service principal authentication and serverless compute built in. Supports **multi-cloud deployment** across AWS, Azure, and GCP with automatic cloud detection.
+
+---
+
+## What's changed in the new deployment model
+
+- **Setup is simpler.** The SQL warehouse is bound as an Apps resource and injected as `DATABRICKS_WAREHOUSE_ID`. Workspace scoping is controlled with `COST_OBS_WORKSPACES`. Customers no longer need to select a warehouse or change workspace scope inside the app UI.
+
+- **Fake zeros are gone.** If a required grant is missing, the app shows that the affected metric is unavailable and points to the fix — instead of rendering a misleading $0.00 value.
+
+- **Setup experience is consistent across tabs.** Permissions, config, and readiness share the same underlying state so customers do not see one tab report healthy while another shows stale errors after a grant or rebuild.
+
+- **Diagnostics surface actionable next steps.** Instead of raw error details, the app maps failures to specific actions — **Grant SQL**, **Rebuild**, or **Configure** — so customers can move directly to the fix.
+
+**Deploy from Git** is the recommended deployment path. The app's first-run flow is built around an environment check, permissions check, and table creation step.
 
 ---
 
 ## Deployment
 
-### Prerequisites
+### Setup Requirements
 
-Before deploying, confirm the following are in place:
+#### Required
 
-| Requirement | Why |
+| Requirement | Notes |
 |---|---|
-| **A running Serverless Pro SQL Warehouse** | **Required before deploying.** The app cannot create a warehouse on your behalf (the service principal lacks that permission by default). Create one in **SQL → SQL Warehouses → Create Warehouse** before running the setup wizard. |
-| **Workspace Admin** (at minimum) | Required to grant the app's service principal `SELECT` on system tables |
-| **Unity Catalog enabled** | All billing data is in `system.*` tables under UC — the app will not function without it |
-| **System tables enabled** | Contact your Databricks account team if `system.billing.usage` is not accessible in your workspace |
-| **Databricks Apps enabled** | Available on Premium plan and above |
-| **Deploy from Git preview** *(recommended)* | Enables deploying directly from this GitHub repo — no file uploads needed. Enable in **Settings → Workspace Previews → "Deploy Databricks apps from Git repositories (Beta)"** — see [Deploy from Git](#1-deploy-from-git-beta) below. |
-| **User authorization preview + `sql` scope** *(recommended)* | Runs queries as the logged-in user instead of the service principal — system table access is automatic for workspace admins. See [Authenticate as User](#2-authenticate-as-user-user-authorization) below. |
-| **Account Tables (`system.billing.account_prices`)** *(optional)* | Unlocks the Account Prices toggle for negotiated pricing. Private preview — contact your Databricks account team. See [Account Tables](#3-account-tables-private-preview) below. |
+| **Databricks workspace with Apps enabled** | Deploy from Git is available in supported workspaces with Databricks Apps enabled |
+| **Unity Catalog enabled** | Required — the app reads from UC system tables and stores app-managed tables in UC |
+| **Access to core system tables** | At minimum: `system.billing.usage` and `system.billing.list_prices` |
+| **SQL warehouse** | A warehouse must be bound to the app. The recommended path is a SQL warehouse resource bound as `sql-warehouse` so the app receives `DATABRICKS_WAREHOUSE_ID` automatically |
+| **Workspace Admin role** | Needed to create the app and, if required, remediate warehouse access |
+| **Metastore Admin role, or access to one** | Needed to run the required Unity Catalog system table grants during setup |
 
-> The setup wizard will show all available warehouses in a picker. In rare cases (typically Azure) where no warehouses appear, it will display the exact `GRANT USE ON WAREHOUSE` statement to run as a workspace admin.
+#### Recommended warehouse
 
-### Deploy from Git
+Use a **Serverless SQL warehouse**. The app is designed to read through a bound warehouse resource — add a `sql-warehouse` resource in app configuration rather than relying on manual runtime switching.
 
-Deploy directly from this repository using Databricks Apps' built-in Git integration. No local clone or file sync required.
+A **Medium** warehouse is a sensible starting point for initial table creation and normal dashboard usage. If you use Pro or Classic instead, expect slower startup and rebuild times.
 
-> **Enable the Deploy from Git preview first**
-> If you don't see a **Git repository** option when creating an app, you need to enable the beta feature in your workspace:
-> 1. Sign in as a workspace admin
-> 2. Go to **Settings → Workspace Previews** (see [Databricks docs](https://docs.databricks.com/aws/en/admin/workspace-settings/manage-previews#-manage-workspace-level-previews) for navigation steps)
-> 3. Find **"Deploy Databricks apps from Git repositories (Beta)"** under the Databricks Apps section
-> 4. Toggle it **ON** and save
+#### Optional system tables
 
-#### Step 1 — Create the app
+These are not required for the initial deployment, but they unlock additional parts of the app:
 
-1. In your Databricks workspace, go to **Apps → Create App**
-2. Choose **Git repository** as the source
-3. Enter the repo URL: `https://github.com/smathews13/cost-obs-databricks`
-4. Give the app a name and click **Create**
-
-#### Step 2 — Deploy
-
-1. Once the app is created, click **Deploy**
-2. Set the git reference:
-   - **Branch:** `main`
-   - **Reference type:** `Branch`
-   - **Source code path:** leave empty
-3. Click **Deploy** — no environment variables required
-
-Or click the **Deploy to Databricks** button at the top of this README.
-
-### Lakebase Setup (Recommended)
-
-Lakebase stores pre-aggregated billing data in a Databricks-managed PostgreSQL database so dashboard queries return in milliseconds instead of hitting the SQL warehouse on every page load. The app falls back to Delta materialized views if Lakebase is not configured, but Lakebase is recommended for production deployments.
-
-#### Step 1 — Create a Lakebase instance
-
-In your Databricks workspace, go to **Lakebase → Create database** and configure:
-
-| Setting | Value |
+| Optional access | What it enables |
 |---|---|
-| **Type** | Autoscaling *(not Provisioned — deprecated)* |
-| **PostgreSQL version** | 17 |
-| **Endpoint type** | Read-Write |
-| **Min compute units** | 1 CU |
-| **Max compute units** | 4 CU |
+| `system.query.history` | SQL Warehousing views, query attribution, and warehouse rightsizing |
+| `system.compute.clusters` | Cluster metadata and compute-oriented breakdowns |
+| `system.lakeflow.*` | Job and pipeline name resolution and workflow KPIs |
+| `system.serving.served_entities` | Model serving and AI/ML enrichment |
+| `system.access.workspaces_latest` | Human-readable workspace names |
 
-The project, branch, and endpoint names can be anything — they are not referenced by the app.
+---
 
-#### Step 2 — Bind the resource to the app
+### Step 1 — Create the app from Git
 
-In the Apps UI, open your app → **Configure → Add resource** and add:
+> **Workspace preview required:** If you do not see a **Git repository** option when creating an app, enable it first: go to **Settings → Workspace Previews**, find **"Deploy Databricks apps from Git repositories (Beta)"**, and toggle it **ON**. This is a per-workspace setting and requires workspace admin access.
 
-| Field | Value |
-|---|---|
-| **Resource type** | Lakebase database |
-| **Resource key** | `lakebase-db` *(must match exactly)* |
-| **Permission** | `Can Connect and Create` |
+1. In your Databricks workspace, open **Apps**
+2. Click **Create app**
+3. Select **Git repository** as the source
+4. Enter the repository URL: `https://github.com/smathews13/cost-obs-databricks`
+5. Use the `main` branch
+6. Give the app a name such as `cost-observability`
+7. Click **Create**
 
-The permission must be `Can Connect and Create` — the app creates the `cost_obs` schema and all tables on first start. `Can Connect` alone will cause the startup bootstrap to fail.
+---
 
-#### What happens automatically on first start
+### Step 2 — Bind the SQL warehouse resource and add SQL scope
 
-Once the resource is bound, the Apps runtime injects `PGHOST`, `PGDATABASE`, `PGPORT`, `PGSSLMODE`, and `PGUSER` into the app environment. `LAKEBASE_ENDPOINT` is resolved automatically via the resource binding. No environment variables need to be set manually.
+Bind a SQL warehouse resource in the Apps UI so the warehouse ID is injected automatically. This is the recommended pattern for Databricks Apps and avoids manual warehouse wiring.
 
-On startup the app:
+1. Open the app's **Settings** page (three-dot menu on the app card)
+2. In **Resources**, click **Add resource**
+3. Choose **SQL warehouse**
+4. Select the warehouse you want the app to use
+5. Set the permission to **Can use**
+6. Leave the resource key as `sql-warehouse`
+7. Under **User authorization**, click **Add scope** and add the `sql` scope
+8. Save the configuration
 
-1. Creates the `cost_obs` schema and all tables (idempotent — safe on every restart)
-2. Populates tables from your `system.*` billing data via the SQL warehouse
-3. Schedules a daily 2 AM UTC refresh to keep data current
+---
 
-### Environment Variables
+### Step 3 — Review environment variables
 
-**No environment variables are required to deploy.** Databricks Apps injects OAuth credentials and the workspace host automatically.
+The app keeps the initial deployment as simple as possible. For most customers, only these three variables are relevant. They are set at deploy time and are not intended to be changed inside the app UI.
+
+> The SQL warehouse, workspace scope, and table location are configured once and held constant. If you need to change them, delete the app and recreate it.
+
+| Variable | Default | Change if… |
+|---|---|---|
+| `COST_OBS_CATALOG` | Set by setup wizard | You want to pre-configure the catalog instead of choosing it in the setup wizard |
+| `COST_OBS_SCHEMA` | Set by setup wizard | You want to pre-configure the schema name |
+| `COST_OBS_WORKSPACES` | All workspaces | You want to scope the app to a comma-separated list of workspace IDs |
+
+Keep the first deployment minimal. Add optional cloud-cost or advanced integrations only after the base app is healthy.
 
 <details>
-<summary>Optional environment variable overrides</summary>
+<summary>All environment variable overrides</summary>
 
 | Variable | Default | Description |
 |---|---|---|
 | `DATABRICKS_HOST` | Auto-detected | Override the workspace URL if not picked up automatically |
-| `DATABRICKS_HTTP_PATH` | Auto-created | Point to an existing warehouse, or omit to auto-create one |
-| `COST_OBS_CATALOG` | `main` | Unity Catalog catalog for materialized views |
-| `COST_OBS_SCHEMA` | `cost_obs` | Schema name for materialized views |
-| `GENIE_SPACE_ID` | — | Genie Space ID for AI cost chat |
+| `DATABRICKS_HTTP_PATH` | Auto-detected from resource binding | Point to an existing warehouse, or omit to use the bound resource |
+| `COST_OBS_CATALOG` | Set by setup wizard | Unity Catalog catalog for app-managed tables. When set, takes precedence over the wizard value |
+| `COST_OBS_SCHEMA` | Set by setup wizard | Schema name for app-managed tables. When set, takes precedence over the wizard value |
+| `COST_OBS_WORKSPACES` | All workspaces | Comma-separated workspace IDs to scope the dashboard |
 | `AZURE_SUBSCRIPTION_ID` | — | Azure subscription ID (shown in account banner on Azure) |
 | `SMTP_HOST` / `SMTP_*` | — | Email alert configuration |
-| `LAKEBASE_ENDPOINT` | Injected via resource binding | Lakebase endpoint path for OAuth token generation — set automatically when the `lakebase-db` resource is bound; falls back to Delta tables if not set |
 | `AWS_COST_CATALOG` / `AWS_COST_SCHEMA` | `billing` / `aws` | AWS CUR actual cost tables |
 | `AZURE_COST_CATALOG` / `AZURE_COST_SCHEMA` | `billing` / `azure` | Azure cost export tables |
-| `DATABRICKS_TOKEN` | — | Only needed for **local development** — the setup wizard can generate one for you |
+| `DATABRICKS_TOKEN` | — | Service principal token override; not needed when deployed as a Databricks App |
 
 </details>
 
-### First-Run Setup Wizard
+---
 
-On first deploy, the app detects that materialized views haven't been created yet and launches a 3-step setup wizard. The dashboard does not render until setup is complete.
+### Step 4 — Deploy
 
-#### Step 1 — Environment
+1. Click **Deploy**
+2. Wait for the app status to show **Running**
+3. Open the app URL
 
-Confirms your workspace host, cloud provider (AWS/Azure/GCP), authenticated identity, catalog, and schema.
-
-**SQL Warehouse:** The recommended setup is to add a `sql-warehouse` resource in your app configuration (Apps UI → Configure → Add resource → SQL warehouse) and set it to `CAN USE`. The app reads the warehouse from this resource automatically — no environment variables needed.
-
-If no warehouse resource is configured, this step shows a searchable list of existing warehouses to select from, plus an option to create a new serverless Pro warehouse. If no warehouses are visible at all, the app displays the exact `GRANT` statement to run as a workspace admin:
-
-```sql
-GRANT USE ON WAREHOUSE <warehouse-name> TO `<app-service-principal>`;
-```
-
-#### Step 2 — Permissions
-
-Checks access to the required system tables. On first deploy, the app automatically attempts to grant the necessary permissions to the service principal and (when the `sql` scope is configured) to the authenticated user.
-
-If any permissions are still missing after the auto-grant, the wizard shows the exact statements to run:
-
-```sql
-GRANT USE CATALOG ON CATALOG system TO `<service-principal>`;
-GRANT USE SCHEMA ON SCHEMA system.billing TO `<service-principal>`;
-GRANT SELECT ON TABLE system.billing.usage TO `<service-principal>`;
--- (plus any others shown as missing)
-```
-
-Click **Re-check** after running any manual grants to confirm before proceeding.
-
-#### Step 3 — Create Tables
-
-Creates 6 pre-aggregated Delta tables from your billing history. This typically takes 2–5 minutes depending on data volume. Progress is shown in real time.
-
-#### Complete
-
-Click **Go to Dashboard**. The user who completes setup is automatically added as an app admin.
-
-The wizard can be re-launched at any time from **Settings → Re-run Setup Wizard**.
+The deployment installs dependencies, starts the backend, and serves the frontend. Once the app is running, the first-run setup flow begins.
 
 ---
 
-## Databricks Preview Features
+### Step 5 — Complete first-run setup
 
-The following workspace previews unlock additional functionality in this app. Enable any that are available in your workspace — the app gracefully falls back when a preview is not enabled. All are enabled per workspace by a workspace admin via **Settings → Workspace Previews**.
+On first open, the app checks the environment, validates permissions, and creates the app-managed tables.
 
-### 1. Deploy from Git (Beta)
+#### 5a — Confirm readiness
 
-Enables deploying this app directly from GitHub — no file uploads or local tooling required. This is the recommended deployment path.
+The app shows whether the warehouse, core system tables, and optional feature dependencies are ready. If the app reports a missing dependency, remediate it before proceeding.
 
-**To enable:**
+#### 5b — Complete the Setup Wizard
 
-1. Sign in as a workspace admin
-2. Go to **Settings → Workspace Previews**
-3. Find **"Deploy Databricks apps from Git repositories (Beta)"** and toggle it **ON**
+The built-in Setup Wizard handles grants and table creation on first run. You do not need to navigate into Settings manually for initial setup.
 
-Once enabled, go to **Apps → Create App** and choose **Git repository** as the source. Enter `https://github.com/smathews13/cost-obs-databricks` and deploy from the `main` branch.
+- **Grants:** The wizard attempts the required grants automatically using the permissions of the logged-in user. Click the grant button, then click **Re-check** to confirm they applied. If the automatic grant fails due to insufficient privileges, the wizard displays the SQL to copy and run manually as the appropriate admin.
 
-### 2. Authenticate as User (User Authorization)
+- **Table build:** Once grants pass, the wizard prompts you to build the pre-aggregated tables used by the dashboard. Click **Build**. This runs in the background on your warehouse and typically takes 3–8 minutes.
 
-When enabled, the app runs SQL queries as the logged-in user's identity rather than the shared app service principal. Benefits:
+- **Workspace filter:** If `COST_OBS_WORKSPACES` was not set at deploy time, the wizard prompts you to choose workspace scope before completion. If workspace IDs were set as an environment variable, this step is skipped.
 
-- System table queries respect each user's individual permissions
-- Audit logs show the real user, not the service principal
-- Workspace admins get system table access automatically — no manual GRANTs needed for them
-- The app automatically grants required permissions to the SP on startup for non-admin users
+If you need to re-apply grants or rebuild tables later, use **Settings → Permissions** and **Settings → Config**. These are the ongoing management surfaces after initial setup.
 
-**To enable:**
+---
 
-1. Sign in as a workspace admin
-2. Go to **Settings → Workspace Previews**
-3. Find **"User authorization for Databricks Apps"** and toggle it **ON**
-4. In your app configuration (Apps UI), go to **Configure → Add scope → `sql`**
+### Step 6 — Verify the deployment
 
-When the `sql` scope is configured, the app automatically uses user authentication for all SQL queries. If the scope is not configured, it falls back to the service principal seamlessly.
+After setup completes, confirm:
 
-### 3. Account Tables (Private Preview)
+- The main billing views load
+- Readiness is green for core dependencies
+- Optional areas only show as unavailable if their supporting system tables were not granted
+- No dashboard tile is blocked by a missing warehouse or system table grant
 
-Enables the **Account Prices** toggle in the DBU Overview tab. When toggled on, the app reads from `system.billing.account_prices` to show your negotiated/discounted prices instead of standard list prices.
+If anything is degraded, go to **Settings → Permissions** or **Settings → Config** to identify whether the issue is warehouse access, missing system table grants, missing app-managed tables, or a schema mismatch.
 
-This system table is a private preview. Contact your Databricks account team to request access. When available, the app automatically grants the required permissions on startup — no manual `GRANT` statements needed.
+---
+
+### Minimum access for end users
+
+This deployment path uses the **app service principal** for SQL execution. End users do not need any additional authentication for normal app usage.
+
+Use **Settings → Permissions** to manage who can administer or view the app.
+
+---
+
+### Troubleshooting
+
+| Symptom | Likely cause | Recommended action |
+|---|---|---|
+| Warehouse access failure after deploy | Warehouse resource missing, wrong warehouse selected, or access drift | Verify the bound SQL warehouse resource; rerun the warehouse-related remediation SQL if prompted |
+| Billing tabs show no data | Core system table grants not applied | Run the required runtime grants from **Settings → Permissions**, then click **Re-check** |
+| Optional tabs are unavailable | Optional system tables (`system.query.history`, `system.compute.clusters`, etc.) were not granted | Grant the optional dependencies you want to enable, then re-check readiness |
+| Rebuild required or schema mismatch | App-managed tables are missing or out of sync | Rebuild from **Settings → Config** |
+| Deploy from Git option not visible | Workspace preview not enabled | Enable the Git deployment preview in **Settings → Workspace Previews** |
+| Data looks stale | App-managed tables have not been refreshed recently | Refresh from **Settings → Config → Rebuild** |
 
 ---
 
 ## What It Does
 
-### DBU Overview
+### $DBU Spend
 | Feature | Description |
 |---|---|
 | **Spend Over Time** | Daily spend timeseries by product category |
@@ -226,13 +208,6 @@ This system table is a private preview. Contact your Databricks account team to 
 | **ETL Breakdown** | Jobs and SDP pipeline spend with type filters, pagination, and historical toggle |
 | **Account Prices Toggle** | Switch between list prices and negotiated account prices (from `system.billing.account_prices`, private preview) |
 
-### KPIs & Trends
-| Feature | Description |
-|---|---|
-| **Platform KPIs** | Total spend, DBUs, successful runs, active clusters, workspaces, models served |
-| **KPI Drill-Downs** | Click any KPI to see daily/monthly trend lines in a modal |
-| **Spend Anomalies** | Largest day-over-day spend changes with date search and AI analysis |
-
 ### SQL
 | Feature | Description |
 |---|---|
@@ -243,18 +218,6 @@ This system table is a private preview. Contact your Databricks account team to 
 | **Query Source Breakdown** | Drill-down table by source type |
 | **Most Expensive Queries** | Top queries with historical toggle, pagination, and query profile links |
 | **Warehouse Rightsizing** | Automated recommendations to right-size overprovisioned warehouses based on `system.query.history` utilization heuristics |
-
-### Cloud Costs
-| Feature | Description |
-|---|---|
-| **Multi-Cloud Support** | Auto-detects AWS or Azure from workspace URL; displays cloud-specific logos, instance types, pricing links, and setup guides |
-| **Infrastructure KPIs** | Total cloud cost, DBU hours, avg active clusters/day, avg cluster cost — all derived from billing data |
-| **Cost Over Time** | Area chart of estimated infrastructure costs with instance family filter bubbles |
-| **Instance Family Usage** | DBU hours by EC2 (AWS) or VM series (Azure) instance family |
-| **Cluster Table** | Per-cluster cost attribution with instance types, pricing links, pagination, and historical toggle |
-| **Actual Costs Integration** | Toggle between estimated and actual costs when AWS CUR 2.0 or Azure Cost Management Export is configured |
-| **Cloud Integration Wizard** | In-app 5-step setup guide for both AWS and Azure actual cost integration |
-| **2025 Pricing** | Updated EC2 and Azure VM pricing covering: AWS m7i, r7i, c7i, i4i, g6; Azure Dv6, Ev5/v6, NC A100 v4, ND A100 v4, NVadsA10 v5 |
 
 ### AI/ML
 | Feature | Description |
@@ -287,12 +250,31 @@ This system table is a private preview. Contact your Databricks account team to 
 | **Product Breakdown** | Cost split by product category per user |
 | **User Growth Trend** | Active user count over time |
 
+### KPIs & Trends
+| Feature | Description |
+|---|---|
+| **Platform KPIs** | Total spend, DBUs, successful runs, active clusters, workspaces, models served |
+| **KPI Drill-Downs** | Click any KPI to see daily/monthly trend lines in a modal |
+| **Spend Anomalies** | Largest day-over-day spend changes with date search and AI analysis |
+
+### Cloud Costs
+| Feature | Description |
+|---|---|
+| **Multi-Cloud Support** | Auto-detects AWS, Azure, or GCP from workspace URL; displays cloud-specific logos, instance types, pricing links, and setup guides |
+| **Infrastructure KPIs** | Total cloud cost, DBU hours, avg active clusters/day, avg cluster cost — all derived from billing data |
+| **Cost Over Time** | Area chart of estimated infrastructure costs with instance family filter bubbles |
+| **Instance Family Usage** | DBU hours by EC2 (AWS), VM series (Azure), or machine type (GCP) instance family |
+| **Cluster Table** | Per-cluster cost attribution with instance types, pricing links, pagination, and historical toggle |
+| **Actual Costs Integration** | Toggle between estimated and actual costs when AWS CUR 2.0, Azure Cost Management Export, or GCP Billing Export is configured |
+| **Cloud Integration Wizard** | In-app 5-step setup guide for AWS, Azure, and GCP actual cost integration |
+| **2025 Pricing** | Updated EC2 and Azure VM pricing covering: AWS m7i, r7i, c7i, i4i, g6; Azure Dv6, Ev5/v6, NC A100 v4, ND A100 v4, NVadsA10 v5 |
+
 ### Settings
 | Feature | Description |
 |---|---|
-| **General** | Date range selection and display preferences |
-| **Configuration** | Warehouse, catalog, schema, and Genie Space configuration |
-| **Connections** | Shows the default Databricks workspace environment (cloud provider + host) |
+| **General** | Date range selection, display preferences, and automatic refresh schedule |
+| **Configuration** | Table status and rebuild |
+| **Permissions** | System table access checks and service principal grant management |
 | **User Permissions** | Admin-only management of who has admin vs. read-only access to the app |
 | **Account Pricing** | Toggle between standard list prices and negotiated account prices |
 
@@ -326,18 +308,23 @@ This system table is a private preview. Contact your Databricks account team to 
                       │   │  system.lakeflow.*           │ │
                       │   │  system.serving.*            │ │
                       │   │  system.access.*             │ │
-                      │   │  6 Materialized Views (MV)   │ │
+                      │   │  6 app-managed Delta tables  │ │
                       │   └──────────────────────────────┘ │
                       │         Databricks                 │
                       └────────────────────────────────────┘
                                         │
                       ┌─────────────────▼──────────────────┐
-                      │  Lakebase (optional, PostgreSQL 17) │
-                      │  Pre-aggregated billing cache;      │
-                      │  falls back to Delta tables if not  │
-                      │  configured                         │
+                      │  Delta tables (app-managed)         │
+                      │  App state: alerts, permissions,    │
+                      │  settings, user preferences         │
                       └────────────────────────────────────┘
 ```
+
+### Authentication
+
+All dashboard queries run as the app's **service principal** (SP). The SP is automatically granted access to the required system tables during the setup wizard's Permissions step. End users do not need any additional authentication for normal app usage.
+
+The catalog and schema created during setup are owned by the SP. The installing user receives `USE CATALOG`, `USE SCHEMA`, `SELECT`, and `MANAGE` grants automatically — giving them full visibility in the Unity Catalog browser and the ability to re-grant the SP on future redeploys.
 
 ### Data Sources
 
@@ -357,24 +344,28 @@ All billing and compute data is **account-level** — queries run against Unity 
 | `system.serving.served_entities` | ML endpoint metadata |
 | `system.access.workspaces_latest` | Workspace name resolution |
 
-### Materialized Views
+### App-Managed Tables
 
-The setup wizard creates **6 pre-aggregated Delta tables** in your Unity Catalog (`main.cost_obs` by default). These are the only persistent objects the app creates in your environment.
+The setup wizard creates **6 pre-aggregated Delta tables** in the Unity Catalog location you configure. These are the only persistent objects the app creates in your environment.
 
 | Table | What it stores | Rows (est.) |
 |---|---|---|
 | `daily_usage_summary` | Total DBUs + spend per day | ~365 |
-| `daily_product_breakdown` | DBUs + spend per day × product category (SQL, ETL, Interactive, etc.) | ~3,600 |
+| `daily_product_breakdown` | DBUs + spend per day × product category | ~3,600 |
 | `daily_workspace_breakdown` | DBUs + spend per day × workspace | ~3,600–36,000 |
 | `sql_tool_attribution` | Genie vs DBSQL spend split per day × warehouse | ~730–7,000 |
 | `daily_query_stats` | Query count, rows read, compute time per day | ~365 |
 | `dbsql_cost_per_query` | Per-query cost attribution for the last 90 days | ~90k–900k |
 
+Tables are built automatically when the setup wizard completes. The dashboard works immediately using direct system table queries while the background build runs (typically 3–8 minutes), then switches to the pre-aggregated tables automatically.
+
 ### Keeping Tables Fresh
 
-**Tables must be refreshed manually** — there is no automated nightly job. Refresh whenever you want to pull in the latest billing data (recommended: once a day or before sharing reports with stakeholders).
+Tables are automatically refreshed on a nightly schedule (default: 05:00 UTC). The scheduler runs incremental updates using MERGE INTO, so only new data is processed after the initial full build — refresh times after the first run are typically under a minute for most deployments.
 
-To refresh: go to **Settings → Tables & Storage → Refresh**. This rebuilds all 6 tables from the latest `system.*` data. The refresh runs in the background and typically takes 2–5 minutes depending on data volume and warehouse warmup. Progress is shown in real time.
+The refresh frequency and scheduled time are configurable under **Settings → General**. Options include nightly (default) and every 6 hours.
+
+To rebuild on demand, go to **Settings → Config → Rebuild**. This triggers a full rebuild of all 6 tables from the latest `system.*` data and typically takes 3–8 minutes. Progress is shown in real time.
 
 Tables can be dropped and recreated at any time with no data loss — all source data lives in `system.*` tables managed by Databricks.
 
@@ -382,7 +373,7 @@ Tables can be dropped and recreated at any time with no data loss — all source
 
 | Optimization | Detail |
 |---|---|
-| **Materialized Views** | Pre-aggregated Delta tables for sub-second dashboard loads |
+| **Pre-aggregated Tables** | 6 Delta tables for sub-second dashboard loads |
 | **Parallel Query Execution** | `ThreadPoolExecutor` (10 workers) runs 6–8 queries concurrently per bundle endpoint |
 | **4-Hour Query Cache** | `TTLCache` with 500 entries — cost data changes at most once per day |
 | **SDK Call Caching** | Pipeline names, group membership, and app registry cached for 1 hour |
@@ -392,56 +383,9 @@ Tables can be dropped and recreated at any time with no data loss — all source
 
 ---
 
-## Local Development
-
-### Prerequisites
-- Python 3.11+
-- [Bun](https://bun.sh) (frontend)
-- Databricks workspace with system tables enabled
-- A SQL warehouse HTTP path
-
-### Setup
-
-```bash
-# Clone
-git clone https://github.com/smathews13/cost-obs-databricks
-cd cost-obs-databricks
-
-# Backend
-python -m venv .venv
-source .venv/bin/activate
-pip install -e ".[dev]"
-
-# Frontend
-cd client && bun install && cd ..
-
-# Configure
-cp app.yaml.example app.yaml
-# Edit app.yaml with your Databricks credentials
-```
-
-### Start Dev Servers
-
-```bash
-# Backend (port 8000)
-source .venv/bin/activate
-DATABRICKS_HOST=https://your-workspace.cloud.databricks.com \
-DATABRICKS_TOKEN=dapi... \
-DATABRICKS_HTTP_PATH=/sql/1.0/warehouses/your-id \
-COST_OBS_CATALOG=main \
-uvicorn server.app:app --host 0.0.0.0 --port 8000 --reload
-
-# Frontend (port 5173, separate terminal)
-cd client && bun run dev
-```
-
-Open http://localhost:5173
-
----
-
 ## Cloud Cost Integration
 
-The Cloud Costs tab displays estimated infrastructure costs out of the box. It can also show **actual** AWS or Azure billing data when configured. Full step-by-step setup instructions for both clouds are built into the app — open the Cloud Costs tab and click **Set Up Actual Costs** to launch the in-app wizard.
+The Cloud Costs tab displays estimated infrastructure costs out of the box. It can also show **actual** AWS, Azure, or GCP billing data when configured. Full step-by-step setup instructions are built into the app — open the Cloud Costs tab and click **Set Up Actual Costs** to launch the in-app wizard.
 
 ### AWS (CUR 2.0)
 
@@ -451,25 +395,23 @@ The app reads from `billing.aws.actuals_gold`. Setup steps are available in the 
 
 The app reads from `billing.azure.actuals_gold`. Setup steps are available in the in-app wizard, and the table location can be overridden via `AZURE_COST_CATALOG` / `AZURE_COST_SCHEMA`.
 
----
+### GCP (BigQuery Billing Export)
 
-## App Observability
+The app reads directly from your GCP billing export synced into a Databricks catalog via [BigQuery data sharing](https://docs.databricks.com/aws/en/delta-sharing/share-data-databricks). The default table is `billing.gcp.gcp_billing_export_v1` — override via environment variables:
 
-Databricks Apps has built-in [OpenTelemetry-based observability](https://docs.databricks.com/aws/en/dev-tools/databricks-apps/observability) that automatically captures traces, logs, and metrics into Unity Catalog tables:
+| Variable | Default | Description |
+|---|---|---|
+| `GCP_COST_CATALOG` | `billing` (or `COST_OBS_CATALOG`) | Catalog containing the GCP billing table |
+| `GCP_COST_SCHEMA` | `gcp` | Schema containing the GCP billing table |
+| `GCP_COST_TABLE` | `gcp_billing_export_v1` | Table name — use `gcp_billing_export_resource_v1` for resource-level detail, or `actuals_gold` if you have a pre-aggregated gold table |
 
-| UC Table | Contents |
-|---|---|
-| `otel_metrics` | Request counts, latency histograms, error rates |
-| `otel_spans` | Distributed traces for API requests end-to-end |
-| `otel_logs` | App log output with trace correlation |
-
-All telemetry is queryable via SQL in your workspace.
+Setup steps are available in the in-app wizard under Cloud Costs → Set Up Actual Costs → GCP.
 
 ---
 
 ## Security
 
-- All dashboard API endpoints are authenticated via Databricks OAuth (handled by the Databricks Apps platform)
+- All dashboard API endpoints are authenticated by the Databricks Apps platform
 - The `X-Forwarded-Email` header is used to identify the requesting user
 - Settings mutation endpoints (cloud connections, webhook config, user permissions) require **admin role** — enforced server-side before any state change
 - Webhook URLs are masked in API responses (never returned in plaintext after save)
@@ -483,7 +425,6 @@ cost-obs-databricks/
 ├── server/                      # FastAPI backend
 │   ├── app.py                   # Entry point, startup tasks, router registration
 │   ├── db.py                    # SQL connector, 4h TTL query cache, connection pool
-│   ├── postgres.py              # Lakebase PostgreSQL connection pool (optional)
 │   ├── materialized_views.py    # MV creation, refresh, and query templates
 │   ├── alerting.py              # Spike detection logic
 │   ├── alert_manager.py         # Alert persistence and delivery
@@ -502,7 +443,6 @@ cost-obs-databricks/
 │       ├── alerts.py            # Threshold alerts and notifications
 │       ├── use_cases.py         # Business use case tracking
 │       ├── users_groups.py      # User spend analytics
-│       ├── genie.py             # Genie AI integration
 │       ├── settings.py          # App config, cloud connections, user permissions
 │       └── setup.py             # First-run setup wizard
 │
@@ -540,7 +480,6 @@ The backend exposes a REST API at `/api/`. Key endpoints:
 | `GET /api/tagging/dashboard-bundle` | Tagging hub data |
 | `GET /api/billing/platform-kpis-bundle` | Platform KPIs and anomalies |
 | `GET /api/users-groups/bundle` | User spend analytics |
-| `POST /api/genie/message` | Natural language cost query via Genie |
 | `GET /api/health` | Health check |
 
 Full interactive API docs at `http://localhost:8000/docs` (FastAPI Swagger UI).
@@ -554,18 +493,6 @@ Full interactive API docs at `http://localhost:8000/docs` (FastAPI Swagger UI).
 | Frontend | React 19, TypeScript, Vite, Tailwind CSS 4, Recharts, TanStack Query v5 |
 | Backend | Python 3.11+, FastAPI, Databricks SQL Connector, Databricks SDK 0.81+ |
 | Data | Databricks system tables (account-level), Unity Catalog, Delta materialized views |
-| Persistence | Lakebase (optional, Databricks-managed PostgreSQL 16); Delta table fallback |
-| Deployment | Databricks Apps (managed OAuth, serverless compute), multi-cloud (AWS + Azure) |
+| Persistence | Delta materialized views (app-managed), TTL in-memory cache |
+| Deployment | Databricks Apps (service principal auth, serverless compute), multi-cloud (AWS + Azure) |
 | Caching | TTLCache (4h query cache, 1h SDK cache), React Query (30min stale time) |
-
----
-
-## Docs
-
-| Doc | Description |
-|---|---|
-| [Pre-Deployment Checklist](docs/PRE_DEPLOYMENT_CHECKLIST.md) | Required permissions and environment prerequisites |
-| [Genie Setup](docs/GENIE_SETUP.md) | Configure Databricks Genie for AI cost queries |
-| [Alerting System](docs/alerting_system.md) | Alert types, thresholds, and email/webhook setup |
-| [DBSQL Cost Architecture](docs/dbsql_cost_architecture.md) | How SQL warehouse costs are attributed |
-| [Performance](docs/PERFORMANCE_AUDIT.md) | Query optimization and materialized view strategy |
