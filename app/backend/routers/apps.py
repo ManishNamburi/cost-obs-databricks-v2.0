@@ -18,8 +18,8 @@ from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import Response
 
 from backend.db import execute_query, execute_queries_parallel, get_workspace_client, bundle_cache_key, delta_cache_get, delta_cache_put
-from server import workspace_filter as wf
-from server import cache_ttls
+from backend import workspace_filter as wf
+from backend import cache_ttls
 
 router = APIRouter()
 logger = logging.getLogger(__name__)

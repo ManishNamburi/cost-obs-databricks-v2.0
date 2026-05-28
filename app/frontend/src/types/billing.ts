@@ -425,6 +425,82 @@ export interface AIMLDashboardBundle {
   end_date: string;
 }
 
+// AI Gateway Types
+export interface AIGatewaySummary {
+  total_requests: number;
+  success_count: number;
+  error_count: number;
+  error_rate_pct: number;
+  route_count: number;
+  model_count: number;
+  user_count: number;
+  total_input_tokens: number;
+  total_output_tokens: number;
+  total_tokens: number;
+  avg_latency_ms: number;
+  total_estimated_cost_usd: number;
+}
+
+export interface AIGatewayModelRow {
+  model_name: string;
+  request_count: number;
+  input_tokens: number;
+  output_tokens: number;
+  total_tokens: number;
+  avg_latency_ms: number;
+  error_count: number;
+  estimated_cost_usd: number;
+  cost_source: "billing" | "token_estimate" | "unavailable";
+}
+
+export interface AIGatewayRouteRow {
+  route_name: string;
+  model_name: string;
+  request_count: number;
+  input_tokens: number;
+  output_tokens: number;
+  total_tokens: number;
+  avg_latency_ms: number;
+  error_count: number;
+  estimated_cost_usd: number;
+  cost_source: "billing" | "token_estimate" | "unavailable";
+}
+
+export interface AIGatewayUserRow {
+  client_user: string;
+  request_count: number;
+  routes_used: number;
+  input_tokens: number;
+  output_tokens: number;
+  total_tokens: number;
+  avg_latency_ms: number;
+}
+
+export interface AIGatewayTimeseriesRow {
+  usage_date: string;
+  model_name: string;
+  request_count: number;
+  input_tokens: number;
+  output_tokens: number;
+  total_tokens: number;
+  avg_latency_ms: number;
+  estimated_cost_usd: number;
+  cost_source: "billing" | "token_estimate" | "unavailable";
+}
+
+export interface AIGatewayDashboardBundle {
+  configured: boolean;
+  table?: string;
+  message?: string;
+  start_date?: string;
+  end_date?: string;
+  summary?: AIGatewaySummary;
+  by_model?: AIGatewayModelRow[];
+  by_route?: AIGatewayRouteRow[];
+  top_users?: AIGatewayUserRow[];
+  timeseries?: AIGatewayTimeseriesRow[];
+}
+
 // Apps Tab Types
 export interface AppsSummary {
   total_dbus: number;

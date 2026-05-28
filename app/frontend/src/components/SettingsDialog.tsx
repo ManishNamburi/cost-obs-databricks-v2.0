@@ -10,6 +10,7 @@ export interface TabVisibility {
   infra: boolean;
   kpis: boolean;
   aiml: boolean;
+  "ai-gateway": boolean;
   sql: boolean;
   apps: boolean;
   tagging: boolean;
@@ -24,6 +25,7 @@ const DEFAULT_VISIBILITY: TabVisibility = {
   infra: true,
   kpis: true,
   aiml: true,
+  "ai-gateway": true,
   sql: true,
   apps: true,
   tagging: true,

@@ -39,9 +39,13 @@ async def detailed_health_check() -> dict[str, Any]:
         "checks": {},
     }
 
-    # Check database connectivity
+    # Check DBSQL connectivity
     db_status = await _check_database()
     checks["checks"]["database"] = db_status
+
+    # Check Lakebase connectivity
+    lakebase_status = await _check_lakebase()
+    checks["checks"]["lakebase"] = lakebase_status
 
     # Get cache statistics
     cache_status = _get_cache_stats()
@@ -51,10 +55,11 @@ async def detailed_health_check() -> dict[str, Any]:
     memory_status = _get_memory_info()
     checks["checks"]["memory"] = memory_status
 
-    # Determine overall health
+    # Lakebase degraded is non-fatal — only DBSQL failure marks overall unhealthy
     all_healthy = all(
         check.get("status") == "healthy"
-        for check in checks["checks"].values()
+        for key, check in checks["checks"].items()
+        if key != "lakebase"
     )
     checks["status"] = "healthy" if all_healthy else "degraded"
 
@@ -118,6 +123,27 @@ async def get_sql_warehouse_status() -> dict[str, Any]:
         return {"status": "warm", "state": None, "latency_ms": latency_ms, "warehouse_id": warehouse_id}
     except Exception:
         return {"status": "warming_up", "state": None, "latency_ms": None, "warehouse_id": warehouse_id}
+
+
+async def _check_lakebase() -> dict[str, Any]:
+    """Test Lakebase connectivity (non-fatal — returns degraded not unhealthy)."""
+    import os
+    if not os.environ.get("PGHOST"):
+        return {"status": "not_configured", "message": "PGHOST not set — Lakebase disabled"}
+    try:
+        import asyncio
+        from backend.db import lakebase_healthy
+        loop = asyncio.get_running_loop()
+        t0 = time.time()
+        ok = await asyncio.wait_for(loop.run_in_executor(None, lakebase_healthy), timeout=5.0)
+        latency_ms = round((time.time() - t0) * 1000, 2)
+        if ok:
+            return {"status": "healthy", "latency_ms": latency_ms}
+        return {"status": "degraded", "message": "Lakebase ping failed"}
+    except asyncio.TimeoutError:
+        return {"status": "degraded", "message": "Lakebase health check timed out"}
+    except Exception as e:
+        return {"status": "degraded", "error": str(e)}
 
 
 async def _check_database() -> dict[str, Any]:

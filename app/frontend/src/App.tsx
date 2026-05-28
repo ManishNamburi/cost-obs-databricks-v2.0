@@ -28,6 +28,7 @@ const InteractiveBreakdown = lazy(() => lazyWithRetry(() => import("@/components
 const CloudCostsView = lazy(() => lazyWithRetry(() => import("@/components/CloudCostsView").then(m => ({ default: m.CloudCostsView }))));
 const PlatformKPIsView = lazy(() => lazyWithRetry(() => import("@/components/PlatformKPIsView").then(m => ({ default: m.PlatformKPIsView }))));
 const AIMLCostCenter = lazy(() => lazyWithRetry(() => import("@/components/AIMLCostCenter").then(m => ({ default: m.AIMLCostCenter }))));
+const AIGatewayView = lazy(() => lazyWithRetry(() => import("@/components/AIGatewayView").then(m => ({ default: m.AIGatewayView }))));
 const AppsCostCenter = lazy(() => lazyWithRetry(() => import("@/components/AppsCostCenter").then(m => ({ default: m.AppsCostCenter }))));
 const TaggingHub = lazy(() => lazyWithRetry(() => import("@/components/TaggingHub").then(m => ({ default: m.TaggingHub }))));
 const SQLWarehousing360 = lazy(() => lazyWithRetry(() => import("@/components/SQLWarehousing360").then(m => ({ default: m.SQLWarehousing360 }))));
@@ -45,6 +46,7 @@ function preloadTabChunks() {
   import("@/components/CloudCostsView");
   import("@/components/PlatformKPIsView");
   import("@/components/AIMLCostCenter");
+  import("@/components/AIGatewayView");
   import("@/components/AppsCostCenter");
   import("@/components/TaggingHub");
   import("@/components/SQLWarehousing360");
@@ -74,6 +76,7 @@ import {
   useSKUBreakdown,
   useDefaultDateRange,
   useAIMLDashboardBundle,
+  useAIGatewayDashboardBundle,
   useAppsDashboardBundle,
   useTaggingDashboardBundle,
   useDBSQLQueryCosts,
@@ -101,7 +104,7 @@ function useKeepAlive() {
   }, []);
 }
 
-type ViewTab = "dbu" | "sql" | "infra" | "kpis" | "aiml" | "apps" | "tagging" | "use-cases" | "alerts" | "forecasting" | "users-groups" | "contract";
+type ViewTab = "dbu" | "sql" | "infra" | "kpis" | "aiml" | "ai-gateway" | "apps" | "tagging" | "use-cases" | "alerts" | "forecasting" | "users-groups" | "contract";
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -443,6 +446,7 @@ function Dashboard() {
   const kpisLoading = kpisBundleLoading;
 
   const { data: aimlData, isLoading: aimlLoading } = useAIMLDashboardBundle(dateRange, _wsIds, true);
+  const { data: aiGatewayData, isLoading: aiGatewayLoading } = useAIGatewayDashboardBundle(dateRange, _wsIds, activeTab === "ai-gateway");
   const { data: appsData, isLoading: appsLoading } = useAppsDashboardBundle(dateRange, _wsIds, true);
   const { data: taggingData, isLoading: taggingLoading } = useTaggingDashboardBundle(dateRange, _wsIds, true);
 
@@ -890,6 +894,21 @@ function Dashboard() {
                 AI/ML
               </button>
               )}
+              {tabVisibility["ai-gateway"] && (
+              <button
+                onClick={() => setActiveTab("ai-gateway")}
+                className={`whitespace-nowrap border-b-2 px-1 py-3 text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-gray-400 ${
+                  activeTab === "ai-gateway"
+                    ? "border-[#FF3621] text-[#FF3621]"
+                    : "border-transparent text-gray-500 hover:border-gray-300 hover:text-gray-700"
+                }`}
+              >
+                <svg className="mr-2 -mt-0.5 inline h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 9l3 3-3 3m5 0h3M5 20h14a2 2 0 002-2V6a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                </svg>
+                AI Gateway
+              </button>
+              )}
               {tabVisibility.apps && (
               <button
                 onClick={() => setActiveTab("apps")}
@@ -1090,6 +1109,13 @@ function Dashboard() {
             host={accountInfo?.host}
             workspaceIds={_wsIds}
             workspaceNameMap={workspaceNameMap}
+          />
+          </TabErrorBoundary>
+        ) : activeTab === "ai-gateway" ? (
+          <TabErrorBoundary tabName="AI Gateway">
+          <AIGatewayView
+            data={aiGatewayData}
+            isLoading={aiGatewayLoading}
           />
           </TabErrorBoundary>
         ) : activeTab === "apps" ? (

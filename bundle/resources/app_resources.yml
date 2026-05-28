@@ -3,10 +3,22 @@
 #
 # sql-warehouse  → DATABRICKS_WAREHOUSE_ID
 # lakebase       → PGHOST, PGPORT, PGDATABASE, PGUSER, PGSSLMODE, ENDPOINT_NAME
+#
+# Custom env vars injected via the app config below:
+# AI_GATEWAY_USAGE_TABLE → admin-managed derived table path (optional)
 
 resources:
   apps:
     cost_obs_app:
+      config:
+        command: ["uvicorn", "backend.app:app", "--host", "0.0.0.0", "--port", "8000"]
+        env:
+          - name: COST_OBS_CATALOG
+            value: ${var.catalog}
+          - name: COST_OBS_SCHEMA
+            value: ${var.schema}
+          - name: AI_GATEWAY_USAGE_TABLE
+            value: ${var.ai_gateway_usage_table}
       resources:
         - name: sql-warehouse
           description: Serverless or Pro SQL warehouse for system table queries
@@ -17,6 +29,5 @@ resources:
         - name: lakebase
           description: Lakebase Autoscaling endpoint for durable app state
           serving_endpoint:
-            # Lakebase endpoint resource reference — populated after lakebase.yml provisions it
             name: ${var.lakebase_endpoint_name}
             permission: CAN_CONNECT

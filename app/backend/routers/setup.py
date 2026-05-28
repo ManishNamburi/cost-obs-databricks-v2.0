@@ -44,7 +44,7 @@ def _persist_task_state() -> None:
     except Exception as exc:
         logger.debug("Could not persist task state to file: %s", exc)
     try:
-        from backend.db import write_dbfs_build_state
+        from backend.db import write_build_state as write_dbfs_build_state
         write_dbfs_build_state(payload)
     except Exception as exc:
         logger.warning("Could not persist task state to DBFS: %s", exc)
@@ -61,7 +61,7 @@ def _restore_task_state() -> None:
             saved = json.load(fh)
     except FileNotFoundError:
         try:
-            from backend.db import read_dbfs_build_state
+            from backend.db import read_build_state as read_dbfs_build_state
             saved = read_dbfs_build_state()
             if saved:
                 logger.info("Restored build task state from DBFS (pod restart recovery)")
@@ -309,7 +309,7 @@ async def get_setup_status() -> dict[str, Any]:
     # .settings/) but DBFS records a previous completion, restore the local file
     # and return "ready" without hitting the SQL warehouse (which may be cold).
     if not os.path.exists(SETUP_DONE_FILE):
-        from backend.db import read_dbfs_setup_complete
+        from backend.db import read_setup_complete as read_dbfs_setup_complete
         if read_dbfs_setup_complete():
             try:
                 import datetime as _dt
@@ -353,7 +353,7 @@ async def get_setup_status() -> dict[str, Any]:
             # Also restore the DBFS flag so future redeployments use the fast
             # short-circuit instead of hitting UC API again.
             try:
-                from backend.db import write_dbfs_setup_complete as _write_dbfs_flag
+                from backend.db import write_setup_complete as _write_dbfs_flag
                 _write_dbfs_flag()
             except Exception as _dbfs_e:
                 logger.warning(f"Could not restore DBFS setup_complete during auto-heal: {_dbfs_e}")
@@ -446,7 +446,7 @@ async def mark_setup_complete(background_tasks: BackgroundTasks) -> dict[str, An
 
     # Persist to DBFS so the flag survives container restarts (Databricks Apps
     # recreates the container from scratch on every stop/start, wiping .settings/).
-    from backend.db import write_dbfs_setup_complete
+    from backend.db import write_setup_complete as write_dbfs_setup_complete
     write_dbfs_setup_complete()
 
     # Invalidate the settings/tables cache so the post-setup check shows fresh data.

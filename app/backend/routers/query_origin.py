@@ -11,7 +11,7 @@ from typing import Any
 from fastapi import APIRouter, Query
 
 from backend.db import execute_query, execute_queries_parallel, get_catalog_schema, bundle_cache_key, delta_cache_get, delta_cache_put
-from server import cache_ttls
+from backend import cache_ttls
 
 router = APIRouter()
 logger = logging.getLogger(__name__)

@@ -18,6 +18,7 @@ import type {
   DashboardBundleFast,
   DateRange,
   AIMLDashboardBundle,
+  AIGatewayDashboardBundle,
   AppsDashboardBundle,
   TaggingDashboardBundle,
   DBSQLDashboardBundle,
@@ -363,6 +364,18 @@ export function useAIMLDashboardBundle(dateRange?: DateRange, workspaceIds?: str
   return useQuery<AIMLDashboardBundle>({
     queryKey: ["aiml", "dashboard-bundle", dateRange, workspaceIds?.join(",") ?? null],
     queryFn: () => fetchJson(buildUrlWithWs("/api/aiml/dashboard-bundle", dateRange, workspaceIds)),
+    staleTime: 5 * 60 * 1000,
+    enabled,
+  });
+}
+
+/**
+ * AI Gateway dashboard bundle
+ */
+export function useAIGatewayDashboardBundle(dateRange?: DateRange, workspaceIds?: string[], enabled: boolean = true) {
+  return useQuery<AIGatewayDashboardBundle>({
+    queryKey: ["ai-gateway", "dashboard-bundle", dateRange, workspaceIds?.join(",") ?? null],
+    queryFn: () => fetchJson(buildUrlWithWs("/api/ai-gateway/dashboard-bundle", dateRange, workspaceIds)),
     staleTime: 5 * 60 * 1000,
     enabled,
   });

@@ -12,7 +12,7 @@ from fastapi import APIRouter, Query, Request
 from pydantic import BaseModel
 
 from backend.db import execute_query, execute_queries_parallel, get_workspace_client, bundle_cache_key, delta_cache_get, delta_cache_put
-from server import workspace_filter as wf
+from backend import workspace_filter as wf
 from backend.email_service import send_alert_email
 
 logger = logging.getLogger(__name__)

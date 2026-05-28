@@ -12,7 +12,7 @@ from cachetools import TTLCache
 from fastapi import APIRouter, Query
 
 from backend.db import execute_query, execute_queries_parallel, get_catalog_schema, get_host_url, get_workspace_client, bundle_cache_key, delta_cache_get, delta_cache_put
-from server import cache_ttls
+from backend import cache_ttls
 from backend.queries import (
     ACCOUNT_INFO,
     AWS_COST_BY_INSTANCE_TYPE,
@@ -136,7 +136,7 @@ def _exec_mv(mv_template: str, params: dict, ws_filter: str = "") -> list[dict]:
 
 def _mv_ws_clause(id_list: list[str] | None) -> str:
     """Build a workspace filter clause for MV queries (plain workspace_id column, no table alias)."""
-    from server import workspace_filter as wf
+    from backend import workspace_filter as wf
     return wf.build_ws_filter_clause(col="workspace_id", id_list=id_list)
 
 
@@ -223,7 +223,7 @@ async def get_billing_summary(
     workspace_ids: str = Query(default=None, description="Comma-separated workspace IDs to filter"),
 ) -> dict[str, Any]:
     """Get overall billing summary (total spend, DBUs, etc.)."""
-    from server import workspace_filter as wf
+    from backend import workspace_filter as wf
     params = {
         "start_date": start_date or get_default_start_date(),
         "end_date": end_date or get_default_end_date(),
@@ -393,7 +393,7 @@ async def get_sql_breakdown(
         return _dcached
 
     try:
-        from server import workspace_filter as wf
+        from backend import workspace_filter as wf
         ws_clause = wf.build_ws_filter_clause(id_list=id_list)
         use_mv = _check_mv_available()
         if use_mv:
@@ -489,7 +489,7 @@ async def get_pipeline_objects(
     workspace_ids: str = Query(default=None, description="Comma-separated workspace IDs to filter"),
 ) -> dict[str, Any]:
     """Get spend breakdown by pipeline objects (Jobs and SDP pipelines)."""
-    from server import workspace_filter as wf
+    from backend import workspace_filter as wf
     params = {
         "start_date": start_date or get_default_start_date(),
         "end_date": end_date or get_default_end_date(),
@@ -556,7 +556,7 @@ async def get_interactive_breakdown(
     workspace_ids: str = Query(default=None, description="Comma-separated workspace IDs to filter"),
 ) -> dict[str, Any]:
     """Get Interactive compute breakdown by notebook, user, and cluster."""
-    from server import workspace_filter as wf
+    from backend import workspace_filter as wf
     params = {
         "start_date": start_date or get_default_start_date(),
         "end_date": end_date or get_default_end_date(),
@@ -791,7 +791,7 @@ async def get_infra_bundle(
     workspace_ids: str = Query(default=None, description="Comma-separated workspace IDs to filter"),
 ) -> dict[str, Any]:
     """Bundled infra endpoint: runs cluster costs, instance families, and timeseries in parallel."""
-    from server import workspace_filter as wf
+    from backend import workspace_filter as wf
     params = {
         "start_date": start_date or get_default_start_date(),
         "end_date": end_date or get_default_end_date(),
@@ -1230,7 +1230,7 @@ async def get_workspace_list(
     end_date: str = Query(default=None),
 ) -> dict[str, Any]:
     """All workspaces with billing activity, scoped to COST_OBS_WORKSPACES when set."""
-    from server import workspace_filter as wf
+    from backend import workspace_filter as wf
     params = {
         "start_date": start_date or get_default_start_date(),
         "end_date": end_date or get_default_end_date(),
@@ -1277,7 +1277,7 @@ async def get_dashboard_bundle_fast(
 
     Expected load time: <1 second with MVs, 2-5 seconds without.
     """
-    from server import workspace_filter as wf
+    from backend import workspace_filter as wf
     params = {
         "start_date": start_date or get_default_start_date(),
         "end_date": end_date or get_default_end_date(),
@@ -1726,7 +1726,7 @@ async def get_sku_breakdown(
 
     Returns spend and usage metrics grouped by SKU name.
     """
-    from server import workspace_filter as wf
+    from backend import workspace_filter as wf
     params = {
         "start_date": start_date or get_default_start_date(),
         "end_date": end_date or get_default_end_date(),
@@ -2032,7 +2032,7 @@ async def get_kpis_bundle(
     workspace_ids: str = Query(default=None, description="Comma-separated workspace IDs to filter"),
 ) -> dict[str, Any]:
     """Bundled KPIs endpoint: runs platform KPIs and spend anomalies in parallel."""
-    from server import workspace_filter as wf
+    from backend import workspace_filter as wf
     params = {
         "start_date": start_date or get_default_start_date(),
         "end_date": end_date or get_default_end_date(),
@@ -2188,7 +2188,7 @@ async def get_kpi_trend(
     workspace_ids: str = Query(default=None, description="Comma-separated workspace IDs to filter"),
 ) -> dict[str, Any]:
     """Get trend data for a specific KPI over time."""
-    from server import workspace_filter as wf
+    from backend import workspace_filter as wf
     params = {
         "start_date": start_date or get_default_start_date(),
         "end_date": end_date or get_default_end_date(),
@@ -2699,7 +2699,7 @@ async def get_platform_kpi_trend(
     workspace_ids: str = Query(default=None, description="Comma-separated workspace IDs to filter"),
 ) -> dict[str, Any]:
     """Get trend data for platform KPIs over time."""
-    from server import workspace_filter as wf
+    from backend import workspace_filter as wf
     params = {
         "start_date": start_date or get_default_start_date(),
         "end_date": end_date or get_default_end_date(),

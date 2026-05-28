@@ -1028,6 +1028,249 @@ def get_auth_status() -> dict:
     }
 
 
+# ── Lakebase connection pool ──────────────────────────────────────────────────
+# psycopg3 + psycopg_pool with OAuth token rotation.
+# Tokens expire ~60 min; the pool's connect factory generates a fresh credential
+# on every NEW physical connection, so tokens are always valid for the life of
+# the connection.  PgBouncer is not compatible with OAuth roles — connect directly
+# to the Lakebase endpoint.
+
+try:
+    import psycopg
+    import psycopg_pool
+    _PSYCOPG_AVAILABLE = True
+except ImportError:
+    _PSYCOPG_AVAILABLE = False
+    logger.debug("psycopg/psycopg_pool not installed — Lakebase disabled")
+
+_lakebase_pool: "psycopg_pool.ConnectionPool | None" = None
+_lakebase_pool_lock = __import__("threading").Lock()
+
+
+def _lakebase_conninfo() -> str:
+    host = os.environ.get("PGHOST", "")
+    if not host:
+        return ""
+    port = os.environ.get("PGPORT", "5432")
+    database = os.environ.get("PGDATABASE", "")
+    user = os.environ.get("PGUSER", "")
+    sslmode = os.environ.get("PGSSLMODE", "require")
+    return f"host={host} port={port} dbname={database} user={user} sslmode={sslmode}"
+
+
+def _make_lakebase_connection(conninfo: str) -> "psycopg.Connection":
+    """Open a psycopg3 connection using a fresh OAuth token from the SDK."""
+    w = get_workspace_client()
+    endpoint_name = os.environ.get("ENDPOINT_NAME", "")
+    cred = w.postgres.generate_database_credential(endpoint_name=endpoint_name)
+    return psycopg.connect(conninfo, password=cred.token, autocommit=False)
+
+
+def _get_lakebase_pool() -> "psycopg_pool.ConnectionPool | None":
+    """Return the singleton Lakebase pool, initialising it on first call.
+
+    Returns None when Lakebase is not configured (PGHOST unset) or psycopg
+    is not installed.  All callers must handle None gracefully.
+    """
+    global _lakebase_pool
+    if not _PSYCOPG_AVAILABLE:
+        return None
+    conninfo = _lakebase_conninfo()
+    if not conninfo:
+        return None
+    if _lakebase_pool is not None:
+        return _lakebase_pool
+    with _lakebase_pool_lock:
+        if _lakebase_pool is not None:
+            return _lakebase_pool
+        try:
+            pool = psycopg_pool.ConnectionPool(
+                conninfo=conninfo,
+                kwargs={},
+                min_size=1,
+                max_size=10,
+                open=False,
+                connection_class=psycopg.Connection,
+                # Use the OAuth factory — called once per NEW physical connection.
+                configure=None,
+            )
+            # Override the pool's connect method to inject OAuth credentials.
+            pool._connect = lambda: _make_lakebase_connection(conninfo)  # type: ignore[attr-defined]
+            pool.open(wait=False)
+            _lakebase_pool = pool
+            logger.info("Lakebase connection pool initialised (min=1 max=10)")
+        except Exception as e:
+            logger.warning("Could not initialise Lakebase pool (non-fatal): %s", e)
+            return None
+    return _lakebase_pool
+
+
+@contextmanager
+def get_pg_conn() -> "Generator[psycopg.Connection, None, None]":
+    """Acquire a Lakebase connection from the pool as a context manager.
+
+    Commits on clean exit, rolls back on exception.  Raises RuntimeError when
+    Lakebase is not configured so callers can fall back gracefully.
+    """
+    pool = _get_lakebase_pool()
+    if pool is None:
+        raise RuntimeError("Lakebase not available — PGHOST not configured or psycopg not installed")
+    conn = pool.getconn()
+    try:
+        yield conn
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        pool.putconn(conn)
+
+
+def lakebase_healthy() -> bool:
+    """Return True if the Lakebase pool is up and can execute a trivial query."""
+    try:
+        with get_pg_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute("SELECT 1")
+        return True
+    except Exception as e:
+        logger.debug("Lakebase health check failed: %s", e)
+        return False
+
+
+# ── Lakebase-backed app state ─────────────────────────────────────────────────
+# These functions mirror the DBFS helpers above but read/write from Lakebase.
+# On read, they fall back to DBFS if Lakebase is unavailable (pre-setup pods).
+# On write, they write to both so a rollback to V1 doesn't lose state.
+
+def lb_get_config(key: str) -> dict | str | None:
+    """Read a config value from app_config. Returns parsed JSON value or None."""
+    try:
+        with get_pg_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute("SELECT value FROM app_config WHERE key = %s", (key,))
+                row = cur.fetchone()
+        if row:
+            import psycopg.types.json as _pj
+            val = row[0]
+            return val.obj if hasattr(val, "obj") else val
+    except Exception as e:
+        logger.debug("lb_get_config(%s) failed (non-fatal): %s", key, e)
+    return None
+
+
+def lb_set_config(key: str, value: dict | str | list | None) -> None:
+    """Upsert a config value into app_config. Best-effort, non-fatal."""
+    try:
+        import psycopg.types.json as _pj
+        with get_pg_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    INSERT INTO app_config (key, value, updated_at)
+                    VALUES (%s, %s, now())
+                    ON CONFLICT (key) DO UPDATE
+                      SET value = EXCLUDED.value,
+                          updated_at = EXCLUDED.updated_at
+                    """,
+                    (key, psycopg.types.json.Jsonb(value)),
+                )
+    except Exception as e:
+        logger.debug("lb_set_config(%s) failed (non-fatal): %s", key, e)
+
+
+def lb_read_setup_complete() -> bool:
+    """Return True if setup_complete step is recorded in Lakebase."""
+    try:
+        with get_pg_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute("SELECT 1 FROM setup_state WHERE step = 'setup_complete'")
+                return cur.fetchone() is not None
+    except Exception as e:
+        logger.debug("lb_read_setup_complete failed (non-fatal): %s", e)
+    return False
+
+
+def lb_write_setup_complete() -> None:
+    """Record setup_complete in Lakebase. Best-effort, non-fatal."""
+    try:
+        from datetime import datetime, timezone
+        import psycopg.types.json as _pj
+        with get_pg_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    INSERT INTO setup_state (step, completed_at, metadata)
+                    VALUES ('setup_complete', %s, %s)
+                    ON CONFLICT (step) DO UPDATE
+                      SET completed_at = EXCLUDED.completed_at,
+                          metadata = EXCLUDED.metadata
+                    """,
+                    (datetime.now(timezone.utc), psycopg.types.json.Jsonb({})),
+                )
+        logger.info("Lakebase setup_complete flag written")
+    except Exception as e:
+        logger.debug("lb_write_setup_complete failed (non-fatal): %s", e)
+
+
+def lb_read_build_state() -> dict | None:
+    """Return the most recent build progress payload from Lakebase, or None."""
+    try:
+        with get_pg_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "SELECT payload FROM build_progress ORDER BY recorded_at DESC LIMIT 1"
+                )
+                row = cur.fetchone()
+        if row:
+            val = row[0]
+            return val.obj if hasattr(val, "obj") else val
+    except Exception as e:
+        logger.debug("lb_read_build_state failed (non-fatal): %s", e)
+    return None
+
+
+def lb_write_build_state(state: dict) -> None:
+    """Append a build progress snapshot to Lakebase. Best-effort, non-fatal."""
+    try:
+        import psycopg.types.json as _pj
+        with get_pg_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "INSERT INTO build_progress (status, payload) VALUES (%s, %s)",
+                    (state.get("status", "unknown"), psycopg.types.json.Jsonb(state)),
+                )
+    except Exception as e:
+        logger.debug("lb_write_build_state failed (non-fatal): %s", e)
+
+
+def read_setup_complete() -> bool:
+    """Return True if setup is complete. Checks Lakebase first, DBFS fallback."""
+    if lb_read_setup_complete():
+        return True
+    return read_dbfs_setup_complete()
+
+
+def write_setup_complete() -> None:
+    """Mark setup complete in both Lakebase and DBFS."""
+    lb_write_setup_complete()
+    write_dbfs_setup_complete()
+
+
+def read_build_state() -> dict | None:
+    """Return last build state. Checks Lakebase first, DBFS fallback."""
+    lb_state = lb_read_build_state()
+    if lb_state:
+        return lb_state
+    return read_dbfs_build_state()
+
+
+def write_build_state(state: dict) -> None:
+    """Persist build state to Lakebase and DBFS."""
+    lb_write_build_state(state)
+    write_dbfs_build_state(state)
+
+
 def execute_queries_parallel(
     query_funcs: list[tuple[str, Callable[[], list[dict[str, Any]]]]],
     timeout: float | None = None,

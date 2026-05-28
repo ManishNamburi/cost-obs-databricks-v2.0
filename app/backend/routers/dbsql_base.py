@@ -14,8 +14,8 @@ from typing import Any
 from fastapi import APIRouter, Query
 
 from backend.db import execute_query, get_catalog_schema, get_host_url, bundle_cache_key, delta_cache_get, delta_cache_put
-from server import workspace_filter as wf
-from server import cache_ttls
+from backend import workspace_filter as wf
+from backend import cache_ttls
 
 logger = logging.getLogger(__name__)
 

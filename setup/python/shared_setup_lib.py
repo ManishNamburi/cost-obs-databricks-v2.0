@@ -131,22 +131,107 @@ def validate() -> None:
     print("[validate] All prerequisites satisfied.")
 
 
+def _get_app_sp_uuid() -> str:
+    """Return the UUID of the app service principal (not the client_id string).
+
+    Lakebase OAuth roles are mapped by UUID, not by the display name or client_id.
+    """
+    w = _get_workspace_client()
+    client_id = os.environ.get("DATABRICKS_CLIENT_ID", "").strip()
+    if not client_id:
+        raise EnvironmentError("DATABRICKS_CLIENT_ID not set — cannot derive SP UUID")
+    sps = list(w.service_principals.list(filter=f"applicationId eq {client_id}"))
+    if not sps:
+        raise RuntimeError(f"Service principal with client_id={client_id} not found in workspace")
+    sp_id = str(sps[0].id)
+    return sp_id
+
+
+def _run_migration_file(conn: psycopg.Connection, path: str) -> None:
+    """Execute a SQL migration file as a single transaction."""
+    with open(path) as f:
+        sql = f.read()
+    with conn.cursor() as cur:
+        cur.execute(sql)
+    print(f"[bootstrap_lakebase] Ran migration: {path}")
+
+
 def bootstrap_lakebase() -> None:
-    """Create schema, OAuth role, grants, and setup_state table."""
-    catalog = os.environ["COST_OBS_CATALOG"]
+    """Create schema, OAuth role, grants, ALTER DEFAULT PRIVILEGES, and all tables."""
+    import os as _os
     schema = os.environ["COST_OBS_SCHEMA"]
+    catalog = os.environ["COST_OBS_CATALOG"]
 
     with pg_conn() as conn:
         if _is_step_done(conn, "bootstrap_lakebase"):
             print("[bootstrap_lakebase] Already complete — skipping.")
             return
 
+        # 1. Create working schema
         with conn.cursor() as cur:
             cur.execute(f"CREATE SCHEMA IF NOT EXISTS {schema}")
-            print(f"[bootstrap_lakebase] Schema '{schema}' ready.")
+        print(f"[bootstrap_lakebase] Schema '{schema}' ready.")
 
+        # 2. Create OAuth role mapped to the app SP's UUID
+        sp_uuid = _get_app_sp_uuid()
+        with conn.cursor() as cur:
+            # CREATE ROLE IF NOT EXISTS is not available in all PG versions — catch duplicate
+            try:
+                cur.execute(f'CREATE ROLE "{sp_uuid}" LOGIN')
+                print(f"[bootstrap_lakebase] Created OAuth role for SP UUID {sp_uuid}")
+            except Exception as e:
+                if "already exists" in str(e).lower():
+                    conn.rollback()
+                    print(f"[bootstrap_lakebase] OAuth role for SP {sp_uuid} already exists")
+                else:
+                    raise
+
+        # 3. Grant schema access + existing tables
+        with conn.cursor() as cur:
+            cur.execute(f'GRANT USAGE ON SCHEMA {schema} TO "{sp_uuid}"')
+            cur.execute(
+                f'GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA {schema} TO "{sp_uuid}"'
+            )
+            cur.execute(
+                f'GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA {schema} TO "{sp_uuid}"'
+            )
+        print(f"[bootstrap_lakebase] Grants applied for {sp_uuid} on schema {schema}")
+
+        # 4. ALTER DEFAULT PRIVILEGES — future tables inherit access automatically
+        current_role_row = None
+        with conn.cursor() as cur:
+            cur.execute("SELECT current_role()")
+            current_role_row = cur.fetchone()
+        current_role = current_role_row[0] if current_role_row else "current_user"
+        with conn.cursor() as cur:
+            cur.execute(
+                f'ALTER DEFAULT PRIVILEGES FOR ROLE {current_role} IN SCHEMA {schema} '
+                f'GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO "{sp_uuid}"'
+            )
+            cur.execute(
+                f'ALTER DEFAULT PRIVILEGES FOR ROLE {current_role} IN SCHEMA {schema} '
+                f'GRANT USAGE, SELECT ON SEQUENCES TO "{sp_uuid}"'
+            )
+        print(f"[bootstrap_lakebase] ALTER DEFAULT PRIVILEGES set for role {current_role}")
+
+        # 5. Run schema migration 001 (creates all application tables)
         _ensure_setup_state(conn)
-        _mark_step_done(conn, "bootstrap_lakebase", {"catalog": catalog, "schema": schema})
+        migration_dir = _os.path.join(
+            _os.path.dirname(_os.path.dirname(_os.path.dirname(__file__))),
+            "migrations", "lakebase",
+        )
+        migration_001 = _os.path.join(migration_dir, "001_initial_schema.sql")
+        if _os.path.exists(migration_001):
+            _run_migration_file(conn, migration_001)
+        else:
+            print(f"[bootstrap_lakebase] WARNING: migration file not found at {migration_001}")
+
+        _mark_step_done(conn, "bootstrap_lakebase", {
+            "catalog": catalog,
+            "schema": schema,
+            "sp_uuid": sp_uuid,
+            "current_role": current_role,
+        })
         print("[bootstrap_lakebase] Complete.")
 
 

@@ -7,7 +7,7 @@ from typing import Any
 from fastapi import APIRouter, Query
 
 from backend.db import execute_query, execute_queries_parallel, bundle_cache_key, delta_cache_get, delta_cache_put
-from server import workspace_filter as wf
+from backend import workspace_filter as wf
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
