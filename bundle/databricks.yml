@@ -39,6 +39,12 @@ variables:
       by a scheduled job.  Format: catalog.schema.table_name
       Example: main.cost_obs.ai_gateway_usage_shared
     default: ""
+  databricks_account_id:
+    description: >
+      Databricks account UUID. Required for account-level APIs (budgets, usage policies).
+      Not injected automatically by the Apps runtime — set this explicitly.
+      Find it in the Databricks account console under your user menu.
+    default: ""
 
 workspace:
   auth_type: pat

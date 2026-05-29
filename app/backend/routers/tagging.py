@@ -1,5 +1,6 @@
 """Tagging Hub API endpoints for untagged resource discovery and tag cost attribution."""
 
+import asyncio
 import logging
 from datetime import date, timedelta
 from typing import Any
@@ -553,7 +554,7 @@ async def get_tagging_summary(
         "end_date": end_date or get_default_end_date(),
     }
 
-    results = execute_query(TAGGING_SUMMARY, params)
+    results = await asyncio.to_thread(execute_query, TAGGING_SUMMARY, params)
 
     if not results:
         return {
@@ -597,7 +598,7 @@ async def get_untagged_clusters(
         "end_date": end_date or get_default_end_date(),
     }
 
-    results = execute_query(UNTAGGED_CLUSTERS, params)
+    results = await asyncio.to_thread(execute_query, UNTAGGED_CLUSTERS, params)
 
     clusters = []
     total_spend = 0
@@ -638,7 +639,7 @@ async def get_untagged_jobs(
         "end_date": end_date or get_default_end_date(),
     }
 
-    results = execute_query(UNTAGGED_JOBS, params)
+    results = await asyncio.to_thread(execute_query, UNTAGGED_JOBS, params)
 
     jobs = []
     total_spend = 0
@@ -677,7 +678,7 @@ async def get_untagged_pipelines(
         "end_date": end_date or get_default_end_date(),
     }
 
-    results = execute_query(UNTAGGED_PIPELINES, params)
+    results = await asyncio.to_thread(execute_query, UNTAGGED_PIPELINES, params)
 
     pipelines = []
     total_spend = 0
@@ -716,7 +717,7 @@ async def get_untagged_warehouses(
         "end_date": end_date or get_default_end_date(),
     }
 
-    results = execute_query(UNTAGGED_WAREHOUSES, params)
+    results = await asyncio.to_thread(execute_query, UNTAGGED_WAREHOUSES, params)
 
     warehouses = []
     total_spend = 0
@@ -755,7 +756,7 @@ async def get_untagged_endpoints(
         "end_date": end_date or get_default_end_date(),
     }
 
-    results = execute_query(UNTAGGED_ENDPOINTS, params)
+    results = await asyncio.to_thread(execute_query, UNTAGGED_ENDPOINTS, params)
 
     endpoints = []
     total_spend = 0
@@ -793,7 +794,7 @@ async def get_cost_by_tag(
         "end_date": end_date or get_default_end_date(),
     }
 
-    results = execute_query(COST_BY_TAG, params)
+    results = await asyncio.to_thread(execute_query, COST_BY_TAG, params)
 
     tags = []
     total_spend = 0
@@ -839,7 +840,7 @@ async def get_top_objects_by_tag(
         "tag_value": tag_value,
     }
 
-    results = execute_query(TOP_OBJECTS_BY_TAG, params)
+    results = await asyncio.to_thread(execute_query, TOP_OBJECTS_BY_TAG, params)
 
     objects = []
     for row in results:
@@ -875,7 +876,7 @@ async def get_cost_by_tag_key(
         "end_date": end_date or get_default_end_date(),
     }
 
-    results = execute_query(COST_BY_TAG_KEY, params)
+    results = await asyncio.to_thread(execute_query, COST_BY_TAG_KEY, params)
 
     tag_keys = []
     total_spend = 0
@@ -911,7 +912,7 @@ async def get_available_tags() -> dict[str, Any]:
     Returns tag keys with their associated values for use in tagging resources.
     """
     try:
-        results = execute_query(AVAILABLE_TAGS, {})
+        results = await asyncio.to_thread(execute_query, AVAILABLE_TAGS, {})
 
         tags = {}
         for row in results:
@@ -940,7 +941,7 @@ async def get_tag_coverage_timeseries(
         "end_date": end_date or get_default_end_date(),
     }
 
-    results = execute_query(TAG_COVERAGE_TIMESERIES, params)
+    results = await asyncio.to_thread(execute_query, TAG_COVERAGE_TIMESERIES, params)
 
     timeseries = []
     for row in results:
@@ -1000,7 +1001,7 @@ async def get_tagging_dashboard_bundle(
         ("timeseries", lambda: execute_query(_ws(TAG_COVERAGE_TIMESERIES), params)),
     ]
 
-    results = execute_queries_parallel(queries)
+    results = await asyncio.to_thread(execute_queries_parallel, queries)
 
     # Format summary
     summary_data = results.get("summary", [])

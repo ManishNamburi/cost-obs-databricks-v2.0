@@ -26,6 +26,7 @@ import type {
   InfraCostsTimeseriesResponse,
   InfraBundleResponse,
   KPIsBundleResponse,
+  BudgetDashboardBundle,
 } from "@/types/billing";
 
 function formatLocalDate(date: Date): string {
@@ -490,6 +491,19 @@ export function useKPIsBundle(dateRange?: DateRange, workspaceIds?: string[], en
   return useQuery<KPIsBundleResponse>({
     queryKey: ["billing", "kpis-bundle", dateRange, workspaceIds?.join(",") ?? null],
     queryFn: () => fetchJson(buildUrlWithWs("/api/billing/kpis-bundle", dateRange, workspaceIds)),
+    staleTime: 5 * 60 * 1000,
+    enabled,
+  });
+}
+
+/**
+ * Budget & Usage Policy dashboard — account-level data, no date range needed.
+ * Data is refreshed every 5 minutes. Enabled only when the budget tab is active.
+ */
+export function useBudgetDashboard(enabled: boolean = true) {
+  return useQuery<BudgetDashboardBundle>({
+    queryKey: ["budget", "dashboard"],
+    queryFn: () => fetchJson("/api/budget/dashboard"),
     staleTime: 5 * 60 * 1000,
     enabled,
   });

@@ -4,6 +4,7 @@ Classifies SQL warehouse queries by origin using query_tags, client_application,
 executed_by identity, and query_source metadata from system.query.history.
 """
 
+import asyncio
 import logging
 from datetime import date, timedelta
 from typing import Any
@@ -446,7 +447,7 @@ async def get_origin_bundle(
             logger.warning(f"Bundle by-warehouse failed: {e}")
             return []
 
-    raw = execute_queries_parallel([
+    raw = await asyncio.to_thread(execute_queries_parallel, [
         ("summary", _run_summary),
         ("timeseries", _run_timeseries),
         ("by_warehouse", _run_by_warehouse),

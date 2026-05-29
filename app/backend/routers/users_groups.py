@@ -1,5 +1,6 @@
 """Users & Groups — spend attribution by user and weekly report management."""
 
+import asyncio
 import json
 import logging
 import os
@@ -468,7 +469,7 @@ async def get_users_groups_bundle(
         ("spend_growth", lambda: execute_query(_ws(USERS_SPEND_GROWTH), growth_params)),
         ("user_growth", lambda: execute_query(_ws(USERS_GROWTH), growth_date_params)),
     ]
-    results = execute_queries_parallel(queries)
+    results = await asyncio.to_thread(execute_queries_parallel, queries)
 
     # Summary
     summary_rows = results.get("summary") or []
@@ -582,7 +583,7 @@ async def get_user_growth() -> dict[str, Any]:
     start_date = (date.today() - timedelta(days=182)).isoformat()
 
     params = {"start_date": start_date, "end_date": end_date}
-    rows = execute_query(USERS_GROWTH, params)
+    rows = await asyncio.to_thread(execute_query, USERS_GROWTH, params)
     return {
         "data": [
             {
@@ -667,17 +668,22 @@ async def get_groups_bundle(
     params = {"start_date": start_date, "end_date": end_date}
     user_token = request.headers.get("X-Forwarded-Access-Token")
 
-    # Fetch group membership and billing data in parallel
-    import concurrent.futures
-    with concurrent.futures.ThreadPoolExecutor(max_workers=2) as pool:
-        billing_future = pool.submit(execute_query, USERS_BY_WORKSPACE_DETAIL, params)
-        groups_future = pool.submit(_fetch_workspace_groups, user_token)
-        billing_rows = billing_future.result()
-        try:
-            user_groups = groups_future.result(timeout=30)
-        except Exception as e:
-            logger.warning(f"Group mapping timed out or failed: {e}")
-            user_groups = {}
+    # Fetch group membership and billing data in parallel without blocking the event loop
+    import asyncio as _asyncio
+    _loop = _asyncio.get_running_loop()
+    billing_fut = _loop.run_in_executor(None, execute_query, USERS_BY_WORKSPACE_DETAIL, params)
+    groups_fut = _loop.run_in_executor(None, _fetch_workspace_groups, user_token)
+    _done, _ = await _asyncio.wait([billing_fut, groups_fut], timeout=30.0)
+    try:
+        billing_rows = billing_fut.result() if billing_fut in _done else []
+    except Exception as e:
+        logger.warning(f"Billing query failed: {e}")
+        billing_rows = []
+    try:
+        user_groups = groups_fut.result() if groups_fut in _done else {}
+    except Exception as e:
+        logger.warning(f"Group mapping timed out or failed: {e}")
+        user_groups = {}
 
     # Build group → workspace → product spend
     group_workspace_spend: dict[str, dict[str, dict[str, float]]] = {}
@@ -892,7 +898,7 @@ async def send_test_report(
     params = {"start_date": start_date, "end_date": end_date}
 
     try:
-        top_users = execute_query(USERS_TOP_SPEND, params)
+        top_users = await asyncio.to_thread(execute_query, USERS_TOP_SPEND, params)
     except Exception as e:
         return {"success": False, "error": str(e)}
 

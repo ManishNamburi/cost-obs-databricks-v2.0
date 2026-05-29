@@ -183,7 +183,7 @@ def create_dbsql_router(table_name: str) -> APIRouter:
 
         try:
             query = sql["check_mv"].format(catalog=catalog, schema=schema)
-            results = execute_query(query)
+            results = await asyncio.to_thread(execute_query, query)
             available = len(results) > 0
         except Exception as e:
             logger.warning(f"DBSQL cost MV ({table_name}) not available: {e}")
@@ -193,7 +193,7 @@ def create_dbsql_router(table_name: str) -> APIRouter:
         if available:
             try:
                 range_query = sql["data_range"].format(catalog=catalog, schema=schema)
-                range_results = execute_query(range_query)
+                range_results = await asyncio.to_thread(execute_query, range_query)
                 if range_results:
                     row = range_results[0]
                     data_range = {
@@ -341,7 +341,7 @@ def create_dbsql_router(table_name: str) -> APIRouter:
         # Look up warehouse names and types from system.compute.warehouses
         warehouse_meta: dict[str, dict[str, str]] = {}
         try:
-            meta_results = execute_query("""
+            meta_results = await asyncio.to_thread(execute_query, """
                 SELECT w.warehouse_id, MAX(w.warehouse_name) as warehouse_name,
                        MAX(w.warehouse_type) as warehouse_type, MAX(w.warehouse_size) as warehouse_size,
                        MAX(w.workspace_id) as workspace_id,
@@ -457,7 +457,7 @@ def create_dbsql_router(table_name: str) -> APIRouter:
               url_helper as source_url,
               start_time,
               end_time
-            FROM {catalog}.{schema}.{table_name}
+            FROM `{catalog}`.`{schema}`.`{table_name}`
             WHERE start_time >= :start_date
               AND start_time < :end_date
               AND query_source_type = :source_type
@@ -465,7 +465,7 @@ def create_dbsql_router(table_name: str) -> APIRouter:
             LIMIT {safe_limit}
         """
         params = {"start_date": start_date, "end_date": end_date, "source_type": source_type}
-        results = execute_query(query, params)
+        results = await asyncio.to_thread(execute_query, query, params)
 
         host = get_host_url()
         queries = []
@@ -533,7 +533,7 @@ def create_dbsql_router(table_name: str) -> APIRouter:
 
         try:
             # Get warehouse type metadata
-            meta_results = execute_query("""
+            meta_results = await asyncio.to_thread(execute_query, """
                 SELECT warehouse_id, MAX(warehouse_type) as warehouse_type
                 FROM system.compute.warehouses
                 GROUP BY warehouse_id
@@ -543,7 +543,7 @@ def create_dbsql_router(table_name: str) -> APIRouter:
             wh_types = {}
 
         try:
-            results = execute_query("""
+            results = await asyncio.to_thread(execute_query, """
                 SELECT
                   u.usage_date as date,
                   u.usage_metadata.warehouse_id as warehouse_id,

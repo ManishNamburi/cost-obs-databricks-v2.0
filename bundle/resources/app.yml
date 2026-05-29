@@ -23,3 +23,5 @@ resources:
             value: ${var.genie_space_id}
           - name: AI_GATEWAY_USAGE_TABLE
             value: ${var.ai_gateway_usage_table}
+          - name: DATABRICKS_ACCOUNT_ID
+            value: ${var.databricks_account_id}

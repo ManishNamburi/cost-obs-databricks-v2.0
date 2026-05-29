@@ -1,5 +1,6 @@
 """Setup API endpoints for initializing materialized views."""
 
+import asyncio
 import json
 import logging
 import os
@@ -105,6 +106,9 @@ _CORE_REQUIRED_TABLES = frozenset({
 
 # Auto-fail bootstrap after this many seconds to prevent infinite spinner
 _BOOTSTRAP_TIMEOUT_SECONDS = 25 * 60  # 25 minutes
+
+# Once confirmed True in this process, skip all DBFS/UC checks on subsequent requests.
+_setup_confirmed_ready: bool = False
 
 
 SYSTEM_TABLE_GRANTS = [
@@ -260,7 +264,16 @@ async def get_setup_status() -> dict[str, Any]:
     is on the create-tables step and polling), return 'initializing' so it keeps
     polling instead of resetting back to the wizard start.
     """
+    global _setup_confirmed_ready
     import asyncio as _asyncio
+
+    if _setup_confirmed_ready and _create_task_state["status"] != "running":
+        catalog, schema = get_catalog_schema()
+        return {
+            "catalog": catalog, "schema": schema,
+            "tables": {}, "all_tables_exist": True, "missing_tables": [],
+            "status": "ready", "task": _create_task_state.copy(), "next_poll_ms": 30000,
+        }
 
     # While table creation is running (wizard polling mid-flow), keep returning
     # initializing regardless of setup_done state so the wizard doesn't reset.
@@ -306,11 +319,28 @@ async def get_setup_status() -> dict[str, Any]:
         }
 
     # Short-circuit: if the local flag is absent (e.g. container restart wiped
-    # .settings/) but DBFS records a previous completion, restore the local file
-    # and return "ready" without hitting the SQL warehouse (which may be cold).
+    # .settings/) but DBFS records a previous completion, check UC metadata to
+    # verify core tables still exist. check_materialized_views_exist uses the UC
+    # REST API (no SQL warehouse needed) so this is fast even on a cold start.
     if not os.path.exists(SETUP_DONE_FILE):
         from backend.db import read_setup_complete as read_dbfs_setup_complete
-        if read_dbfs_setup_complete():
+        loop = _asyncio.get_running_loop()
+        dbfs_complete = await loop.run_in_executor(None, read_dbfs_setup_complete)
+        if dbfs_complete:
+            # Verify tables still exist — they may have been dropped between deploys.
+            tables = await loop.run_in_executor(None, check_materialized_views_exist, catalog, schema)
+            core_exist = all(tables.get(t, False) for t in _CORE_REQUIRED_TABLES)
+            if not core_exist:
+                # DBFS flag is stale — tables are gone. Wizard must run again.
+                missing = [name for name, exists in tables.items() if not exists]
+                logger.info("DBFS flag set but core tables missing (%s) — returning setup_required", missing)
+                return {
+                    "catalog": catalog, "schema": schema,
+                    "tables": tables, "all_tables_exist": False, "missing_tables": missing,
+                    "status": "setup_required",
+                    "task": _create_task_state.copy(), "next_poll_ms": 30000,
+                }
+            # Tables exist — restore setup_done.json for future fast-paths.
             try:
                 import datetime as _dt
                 os.makedirs(SETTINGS_DIR, exist_ok=True)
@@ -320,10 +350,11 @@ async def get_setup_status() -> dict[str, Any]:
                 logger.info("setup_done.json restored from DBFS flag (container restart)")
             except Exception as _e:
                 logger.warning(f"Could not restore setup_done.json: {_e}")
+            _setup_confirmed_ready = True
             return {
                 "catalog": catalog, "schema": schema,
-                "tables": {}, "all_tables_exist": False, "missing_tables": [],
-                "status": "ready", "tables_building": True,
+                "tables": tables, "all_tables_exist": True, "missing_tables": [],
+                "status": "ready",
                 "task": _create_task_state.copy(),
                 "next_poll_ms": 30000,
             }
@@ -376,6 +407,7 @@ async def get_setup_status() -> dict[str, Any]:
         # in progress or tables were dropped after a completed setup. Return "ready"
         # so the dashboard shows (falls back to direct system-table queries). Don't
         # force the wizard again: the user already completed setup.
+        _setup_confirmed_ready = True
         return {
             "catalog": catalog,
             "schema": schema,
@@ -413,6 +445,7 @@ async def get_setup_status() -> dict[str, Any]:
     # pre-existing or just auto-healed). Non-core tables being absent just means
     # some SQL/job views are still building — the dashboard falls back gracefully.
     # Never return "setup_required" here: it would re-show the wizard incorrectly.
+    _setup_confirmed_ready = True
     return {
         "catalog": catalog,
         "schema": schema,
@@ -434,6 +467,7 @@ async def mark_setup_complete(background_tasks: BackgroundTasks) -> dict[str, An
     The background rebuild creates all materialized views so the dashboard has
     data immediately after setup — no manual Rebuild click required.
     """
+    global _setup_confirmed_ready
     try:
         os.makedirs(SETTINGS_DIR, exist_ok=True)
         with open(SETUP_DONE_FILE, "w") as f:
@@ -443,6 +477,8 @@ async def mark_setup_complete(background_tasks: BackgroundTasks) -> dict[str, An
     except Exception as e:
         logger.error(f"Failed to write setup_done.json: {e}")
         return {"ok": False, "error": str(e)}
+
+    _setup_confirmed_ready = True
 
     # Persist to DBFS so the flag survives container restarts (Databricks Apps
     # recreates the container from scratch on every stop/start, wiping .settings/).
@@ -512,10 +548,14 @@ async def get_bootstrap_state() -> dict[str, Any]:
     return _create_task_state.copy()
 
 
+_ACCOUNT_ADMIN_TABLES = {"system.access.audit"}
+
 def _build_system_grants_sql(sp_id: str) -> str:
     """Return the full set of system table GRANT statements as a copyable SQL block."""
     lines = []
     for privilege, obj_type, obj_name in SYSTEM_TABLE_GRANTS:
+        if obj_type == "TABLE" and obj_name in _ACCOUNT_ADMIN_TABLES:
+            lines.append(f"-- NOTE: {obj_name} requires account-admin (not just metastore admin)")
         parts = obj_name.split(".")
         q = ".".join(f"`{p}`" for p in parts)
         if obj_type == "CATALOG":
@@ -658,7 +698,9 @@ async def grant_sp_system_access(request: Request) -> dict[str, Any]:
 
     # Build copyable SQL for any failed system grants so the UI can surface it
     # with a "Run as metastore admin" label.
-    grants_sql = _build_system_grants_sql(sp_id) if sys_result["failed"] > 0 else None
+    # Always show copyable SQL when grants couldn't be applied (failed OR no token).
+    # system.access.audit requires account-admin; other tables need metastore admin.
+    grants_sql = _build_system_grants_sql(sp_id) if (sys_result["failed"] > 0 or sys_result.get("obo_scope_missing")) else None
 
     return {
         "ok": total_failed == 0,
@@ -2049,7 +2091,7 @@ async def list_workspaces() -> dict:
     from backend.db import execute_query, get_catalog_schema
     try:
         catalog, schema = get_catalog_schema()
-        rows = execute_query(f"""
+        rows = await asyncio.to_thread(execute_query, f"""
             SELECT
                 CAST(workspace_id AS STRING) AS workspace_id,
                 MAX(COALESCE(workspace_name, CAST(workspace_id AS STRING))) AS workspace_name
@@ -2134,7 +2176,7 @@ async def get_workspace_filter() -> dict:
     try:
         from backend.db import execute_query, get_catalog_schema
         catalog, schema = get_catalog_schema()
-        rows = execute_query(
+        rows = await asyncio.to_thread(execute_query, 
             f"SELECT workspace_ids FROM `{catalog}`.`{schema}`.app_workspace_filter LIMIT 1",
             no_cache=True,
         )
@@ -2206,7 +2248,7 @@ async def save_workspace_filter(request: Request) -> dict:
     try:
         from backend.db import execute_query, get_catalog_schema
         _catalog, _schema = get_catalog_schema()
-        _rows = execute_query(
+        _rows = await asyncio.to_thread(execute_query, 
             f"SELECT COUNT(*) as cnt FROM `{_catalog}`.`{_schema}`.app_workspace_filter",
             no_cache=True,
         )
@@ -2238,12 +2280,14 @@ async def save_workspace_filter(request: Request) -> dict:
         from backend.db import execute_query, get_catalog_schema
         catalog, schema = get_catalog_schema()
         ids_csv = ",".join(valid_ids)
-        execute_query(
+        await asyncio.to_thread(
+            execute_query,
             f"CREATE TABLE IF NOT EXISTS `{catalog}`.`{schema}`.app_workspace_filter "
             f"(workspace_ids STRING) USING DELTA",
             no_cache=True,
         )
-        execute_query(
+        await asyncio.to_thread(
+            execute_query,
             f"MERGE INTO `{catalog}`.`{schema}`.app_workspace_filter AS t "
             f"USING (SELECT '{ids_csv}' AS workspace_ids) AS s ON TRUE "
             f"WHEN MATCHED THEN UPDATE SET t.workspace_ids = s.workspace_ids "
@@ -2260,11 +2304,15 @@ async def save_workspace_filter(request: Request) -> dict:
 @router.delete("/drop-materialized-views")
 async def drop_mvs() -> dict:
     """Drop all app-managed materialized view tables. Irreversible — use with caution."""
-    from backend.db import get_catalog_schema
-    catalog, schema = get_catalog_schema()
-    results = drop_materialized_views(catalog, schema)
-    all_dropped = all(v == "dropped" for v in results.values())
-    return {"ok": all_dropped, "results": results, "catalog": catalog, "schema": schema}
+    try:
+        from backend.db import get_catalog_schema
+        catalog, schema = get_catalog_schema()
+        results = drop_materialized_views(catalog, schema)
+        all_dropped = all(v == "dropped" for v in results.values())
+        return {"ok": all_dropped, "results": results, "catalog": catalog, "schema": schema}
+    except Exception as e:
+        logger.exception("drop_mvs: unhandled exception")
+        return {"ok": False, "results": {}, "error": str(e)}
 
 
 @router.get("/mv-overrides")

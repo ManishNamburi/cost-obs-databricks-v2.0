@@ -754,7 +754,8 @@ export function SetupWizard({ onComplete, onClose, embedded }: SetupWizardProps)
             ) : (
               <button
                 onClick={goNext}
-                className="btn-brand rounded-lg px-6 py-2 text-sm font-bold text-white transition-colors"
+                disabled={loading}
+                className="btn-brand rounded-lg px-6 py-2 text-sm font-bold text-white transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 Next
               </button>

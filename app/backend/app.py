@@ -13,7 +13,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.base import BaseHTTPMiddleware
 
-from backend.routers import ai_gateway, aiml, alerts, apps, aws_actual, azure_actual, gcp_actual, billing, dbsql, dbsql_prpr, debug, health, permissions, query_origin, settings, setup, tagging, use_cases, user, users_groups, warehouse_health
+from backend.routers import ai_gateway, aiml, alerts, apps, aws_actual, azure_actual, gcp_actual, billing, budget, dbsql, dbsql_prpr, debug, health, permissions, query_origin, settings, setup, tagging, use_cases, user, users_groups, warehouse_health
 
 # Configure structured logging
 logging.basicConfig(
@@ -900,6 +900,7 @@ app.add_middleware(
 # Include routers
 app.include_router(health.router, prefix="/api", tags=["health"])
 app.include_router(ai_gateway.router, prefix="/api/ai-gateway", tags=["ai-gateway"])
+app.include_router(budget.router, prefix="/api/budget", tags=["budget"])
 app.include_router(user.router, prefix="/api/user", tags=["user"])
 app.include_router(billing.router, prefix="/api/billing", tags=["billing"])
 app.include_router(setup.router, prefix="/api/setup", tags=["setup"])

@@ -233,11 +233,11 @@ async def get_billing_summary(
     use_mv = _check_mv_available()
 
     if use_mv:
-        results = _exec_mv(MV_BILLING_SUMMARY, params, _mv_ws_clause(id_list))
+        results = await asyncio.to_thread(_exec_mv, MV_BILLING_SUMMARY, params, _mv_ws_clause(id_list))
         if not results:
-            results = execute_query(_inject_ws_filter(BILLING_SUMMARY, ws_clause), params)
+            results = await asyncio.to_thread(execute_query, _inject_ws_filter(BILLING_SUMMARY, ws_clause), params)
     else:
-        results = execute_query(_inject_ws_filter(BILLING_SUMMARY, ws_clause), params)
+        results = await asyncio.to_thread(execute_query, _inject_ws_filter(BILLING_SUMMARY, ws_clause), params)
 
     if not results:
         return {
@@ -282,9 +282,9 @@ async def get_billing_by_product(
     if workspace_id:
         # Add workspace filter to the query
         params["workspace_id"] = workspace_id
-        results = execute_query(BILLING_BY_PRODUCT_WORKSPACE, params)
+        results = await asyncio.to_thread(execute_query, BILLING_BY_PRODUCT_WORKSPACE, params)
     else:
-        results = execute_query(BILLING_BY_PRODUCT, params)
+        results = await asyncio.to_thread(execute_query, BILLING_BY_PRODUCT, params)
 
     products = []
     total_spend = 0
@@ -327,7 +327,7 @@ async def get_billing_by_workspace(
     }
 
     # Always use the live query here — the MV lacks top_products and top_users columns.
-    results = execute_query(BILLING_BY_WORKSPACE, params)
+    results = await asyncio.to_thread(execute_query, BILLING_BY_WORKSPACE, params)
     return _format_workspaces(results, params)
 
 
@@ -342,7 +342,7 @@ async def get_billing_timeseries(
         "end_date": end_date or get_default_end_date(),
     }
 
-    results = execute_query(BILLING_TIMESERIES, params)
+    results = await asyncio.to_thread(execute_query, BILLING_TIMESERIES, params)
 
     # Transform to chart-friendly format: [{date, SQL, ETL, Interactive, ...}, ...]
     date_data: dict[str, dict[str, float]] = {}
@@ -397,9 +397,9 @@ async def get_sql_breakdown(
         ws_clause = wf.build_ws_filter_clause(id_list=id_list)
         use_mv = _check_mv_available()
         if use_mv:
-            results = _exec_mv(MV_SQL_TOOL_ATTRIBUTION, params, _mv_ws_clause(id_list))
+            results = await asyncio.to_thread(_exec_mv, MV_SQL_TOOL_ATTRIBUTION, params, _mv_ws_clause(id_list))
         else:
-            results = execute_query(_inject_ws_filter(SQL_TOOL_ATTRIBUTION, ws_clause), params)
+            results = await asyncio.to_thread(execute_query, _inject_ws_filter(SQL_TOOL_ATTRIBUTION, ws_clause), params)
 
         products = []
         total_spend = 0
@@ -452,7 +452,7 @@ async def get_etl_breakdown(
         "end_date": end_date or get_default_end_date(),
     }
 
-    results = execute_query(ETL_BREAKDOWN, params)
+    results = await asyncio.to_thread(execute_query, ETL_BREAKDOWN, params)
 
     products = []
     total_spend = 0
@@ -501,7 +501,7 @@ async def get_pipeline_objects(
     ws_clause = wf.build_ws_filter_clause(id_list=id_list)
 
     try:
-        results = _enrich_pipeline_results(execute_query(_inject_ws_filter(PIPELINE_OBJECTS, ws_clause), params))
+        results = _enrich_pipeline_results(await asyncio.to_thread(execute_query, _inject_ws_filter(PIPELINE_OBJECTS, ws_clause), params))
 
         objects = []
         total_spend = 0
@@ -568,7 +568,7 @@ async def get_interactive_breakdown(
     ws_clause = wf.build_ws_filter_clause(id_list=id_list)
 
     try:
-        results = execute_query(_inject_ws_filter(INTERACTIVE_BREAKDOWN, ws_clause), params)
+        results = await asyncio.to_thread(execute_query, _inject_ws_filter(INTERACTIVE_BREAKDOWN, ws_clause), params)
 
         items = []
         total_spend = 0
@@ -631,7 +631,7 @@ async def get_infra_costs(
 
     try:
         # Single query — instance families are derived in Python from cluster results
-        cluster_results = execute_query(INFRA_COST_ESTIMATE, params)
+        cluster_results = await asyncio.to_thread(execute_query, INFRA_COST_ESTIMATE, params)
 
         # Detect cloud from results, fall back to host URL detection
         host = get_host_url()
@@ -734,7 +734,7 @@ async def get_infra_costs_timeseries(
     }
 
     try:
-        results = execute_query(INFRA_COST_TIMESERIES, params)
+        results = await asyncio.to_thread(execute_query, INFRA_COST_TIMESERIES, params)
 
         # Detect cloud from host URL, override with billing data if available
         host = get_host_url()
@@ -996,7 +996,7 @@ async def get_aws_costs(
 
     try:
         # Get detailed cluster costs
-        cluster_results = execute_query(AWS_COST_ESTIMATE, params)
+        cluster_results = await asyncio.to_thread(execute_query, AWS_COST_ESTIMATE, params)
 
         clusters = []
         total_estimated_cost = 0
@@ -1029,7 +1029,7 @@ async def get_aws_costs(
             )
 
         # Get instance family breakdown
-        family_results = execute_query(AWS_COST_BY_INSTANCE_TYPE, params)
+        family_results = await asyncio.to_thread(execute_query, AWS_COST_BY_INSTANCE_TYPE, params)
         instance_families = []
         for row in family_results:
             instance_families.append(
@@ -1073,7 +1073,7 @@ async def get_aws_costs_timeseries(
     }
 
     try:
-        results = execute_query(AWS_COST_TIMESERIES, params)
+        results = await asyncio.to_thread(execute_query, AWS_COST_TIMESERIES, params)
         return _format_aws_timeseries(results, params)
     except Exception as e:
         return {
@@ -1250,7 +1250,7 @@ async def get_workspace_list(
         ORDER BY workspace_name
     """
     try:
-        rows = execute_query(sql, params)
+        rows = await asyncio.to_thread(execute_query, sql, params)
         return {
             "workspaces": [{"id": r["workspace_id"], "name": r["workspace_name"]} for r in rows],
             "is_scoped": bool(configured_ids),
@@ -1736,7 +1736,7 @@ async def get_sku_breakdown(
     if (_dcached := delta_cache_get(_dkey)) is not None:
         return _dcached
     ws_clause = wf.build_ws_filter_clause(id_list=id_list)
-    results = execute_query(_inject_ws_filter(SKU_BREAKDOWN, ws_clause), params)
+    results = await asyncio.to_thread(execute_query, _inject_ws_filter(SKU_BREAKDOWN, ws_clause), params)
 
     skus = []
     total_spend = 0.0
@@ -1827,7 +1827,7 @@ async def get_spend_by_user_group(
             GROUP BY 1
             HAVING SUM(u.usage_quantity * COALESCE(p.pricing.default, 0)) > 0
             """
-            user_results = execute_query(user_query, params)
+            user_results = await asyncio.to_thread(execute_query, user_query, params)
 
             # Aggregate spend by group
             group_spend: dict[str, dict] = {}
@@ -1875,7 +1875,7 @@ async def get_spend_by_user_group(
         LIMIT 15
         """
         try:
-            results = execute_query(query, params)
+            results = await asyncio.to_thread(execute_query, query, params)
         except Exception as e:
             logger.warning(f"User spend query failed: {e}")
             return {"groups": [], "total_spend": 0, "error": str(e)}
@@ -1920,7 +1920,7 @@ async def get_spend_anomalies(
         "end_date": end_date or get_default_end_date(),
     }
 
-    results = execute_query(SPEND_ANOMALIES, params)
+    results = await asyncio.to_thread(execute_query, SPEND_ANOMALIES, params)
 
     anomalies = []
 
@@ -1985,7 +1985,7 @@ async def get_platform_kpis(
     if use_mv:
         # Try to get query stats from materialized view (fast!)
         try:
-            mv_results = _exec_mv(MV_PLATFORM_KPIS, params)
+            mv_results = await asyncio.to_thread(_exec_mv, MV_PLATFORM_KPIS, params)
             if mv_results and len(mv_results) > 0:
                 mv_row = mv_results[0]
                 response["total_queries"] = int(mv_row.get("total_queries") or 0)
@@ -1999,7 +1999,7 @@ async def get_platform_kpis(
 
     # Get billing-based stats (always use fast query for these)
     query = PLATFORM_KPIS_FAST if fast or use_mv else PLATFORM_KPIS
-    results = execute_query(query, params)
+    results = await asyncio.to_thread(execute_query, query, params)
 
     if results and len(results) > 0:
         row = results[0]
@@ -2053,7 +2053,7 @@ async def get_kpis_bundle(
     catalog, schema = get_catalog_schema()
     USER_COUNT_QUERY = f"""
     SELECT COUNT(DISTINCT executed_by) as unique_query_users
-    FROM {catalog}.{schema}.dbsql_cost_per_query
+    FROM `{catalog}`.`{schema}`.`dbsql_cost_per_query`
     WHERE start_time >= :start_date AND start_time < DATE_ADD(CAST(:end_date AS DATE), 1)
     """
 
@@ -2216,7 +2216,7 @@ async def get_kpi_trend(
     if kpi == "total_spend" or kpi == "avg_daily_spend":
         if use_mv:
             catalog, schema = get_catalog_schema()
-            query = f"SELECT usage_date as date, SUM(total_spend) as value FROM {catalog}.{schema}.daily_usage_summary WHERE usage_date BETWEEN :start_date AND :end_date GROUP BY usage_date ORDER BY usage_date"
+            query = f"SELECT usage_date as date, SUM(total_spend) as value FROM `{catalog}`.`{schema}`.`daily_usage_summary` WHERE usage_date BETWEEN :start_date AND :end_date GROUP BY usage_date ORDER BY usage_date"
             mv_fallback_query = """
         WITH usage_with_price AS (
           SELECT
@@ -2263,7 +2263,7 @@ async def get_kpi_trend(
     elif kpi == "total_dbus":
         if use_mv:
             catalog, schema = get_catalog_schema()
-            query = f"SELECT usage_date as date, SUM(total_dbus) as value FROM {catalog}.{schema}.daily_usage_summary WHERE usage_date BETWEEN :start_date AND :end_date GROUP BY usage_date ORDER BY usage_date"
+            query = f"SELECT usage_date as date, SUM(total_dbus) as value FROM `{catalog}`.`{schema}`.`daily_usage_summary` WHERE usage_date BETWEEN :start_date AND :end_date GROUP BY usage_date ORDER BY usage_date"
             mv_fallback_query = """
         SELECT
           usage_date as date,
@@ -2288,7 +2288,7 @@ async def get_kpi_trend(
     elif kpi == "workspace_count":
         if use_mv:
             catalog, schema = get_catalog_schema()
-            query = f"SELECT usage_date as date, COUNT(DISTINCT workspace_id) as value FROM {catalog}.{schema}.daily_usage_summary WHERE usage_date BETWEEN :start_date AND :end_date GROUP BY usage_date ORDER BY usage_date"
+            query = f"SELECT usage_date as date, COUNT(DISTINCT workspace_id) as value FROM `{catalog}`.`{schema}`.`daily_usage_summary` WHERE usage_date BETWEEN :start_date AND :end_date GROUP BY usage_date ORDER BY usage_date"
             mv_fallback_query = """
         SELECT
           usage_date as date,
@@ -2545,15 +2545,15 @@ async def get_kpi_trend(
         return {"error": f"Unknown KPI: {kpi}"}
 
     try:
-        results = execute_query(_inject_ws_filter(query, ws_clause), params)
+        results = await asyncio.to_thread(execute_query, _inject_ws_filter(query, ws_clause), params)
         if not results and mv_fallback_query:
             logger.info(f"KPI trend MV returned empty for {kpi}, falling back to live query")
-            results = execute_query(_inject_ws_filter(mv_fallback_query, ws_clause), params)
+            results = await asyncio.to_thread(execute_query, _inject_ws_filter(mv_fallback_query, ws_clause), params)
     except Exception as e:
         logger.error(f"KPI trend query failed for {kpi}: {e}")
         if mv_fallback_query:
             try:
-                results = execute_query(_inject_ws_filter(mv_fallback_query, ws_clause), params)
+                results = await asyncio.to_thread(execute_query, _inject_ws_filter(mv_fallback_query, ws_clause), params)
             except Exception as fallback_e:
                 logger.warning(f"KPI trend fallback query also failed for {kpi}: {fallback_e}")
                 results = []
@@ -2737,7 +2737,7 @@ async def get_platform_kpi_trend(
             GROUP BY DATE_TRUNC('{trunc}', DATE(start_time))
             ORDER BY date
             """
-            results = execute_query(_inject_qh_ws_filter(query, ws_clause), params)
+            results = await asyncio.to_thread(execute_query, _inject_qh_ws_filter(query, ws_clause), params)
             daily_points = [{"date": str(r["date"])[:10], "value": float(r["value"] or 0)} for r in results]
             return _resp(_build_platform_kpi_response(kpi, granularity, daily_points))
         elif kpi == "active_workspaces":
@@ -2750,7 +2750,7 @@ async def get_platform_kpi_trend(
             GROUP BY DATE_TRUNC('{trunc}', usage_date)
             ORDER BY date
             """
-            results = execute_query(_inject_ws_filter(query, ws_clause), params)
+            results = await asyncio.to_thread(execute_query, _inject_ws_filter(query, ws_clause), params)
             daily_points = [{"date": str(r["date"])[:10], "value": float(r["value"] or 0)} for r in results]
             return _resp(_build_platform_kpi_response(kpi, granularity, daily_points))
         elif kpi == "total_jobs":
@@ -2764,7 +2764,7 @@ async def get_platform_kpi_trend(
             GROUP BY DATE_TRUNC('{trunc}', usage_date)
             ORDER BY date
             """
-            results = execute_query(_inject_ws_filter(query, ws_clause), params)
+            results = await asyncio.to_thread(execute_query, _inject_ws_filter(query, ws_clause), params)
             daily_points = [{"date": str(r["date"])[:10], "value": float(r["value"] or 0)} for r in results]
             return _resp(_build_platform_kpi_response(kpi, granularity, daily_points))
         elif kpi == "models_served":
@@ -2778,7 +2778,7 @@ async def get_platform_kpi_trend(
             GROUP BY DATE_TRUNC('{trunc}', usage_date)
             ORDER BY date
             """
-            results = execute_query(_inject_ws_filter(query, ws_clause), params)
+            results = await asyncio.to_thread(execute_query, _inject_ws_filter(query, ws_clause), params)
             daily_points = [{"date": str(r["date"])[:10], "value": float(r["value"] or 0)} for r in results]
             return _resp(_build_platform_kpi_response(kpi, granularity, daily_points))
         elif kpi == "unique_warehouses":
@@ -2793,7 +2793,7 @@ async def get_platform_kpi_trend(
             GROUP BY DATE_TRUNC('{trunc}', DATE(start_time))
             ORDER BY date
             """
-            results = execute_query(_inject_qh_ws_filter(query, ws_clause), params)
+            results = await asyncio.to_thread(execute_query, _inject_qh_ws_filter(query, ws_clause), params)
             daily_points = [{"date": str(r["date"])[:10], "value": float(r["value"] or 0)} for r in results]
             return _resp(_build_platform_kpi_response(kpi, granularity, daily_points))
 
@@ -2958,7 +2958,7 @@ async def get_platform_kpi_trend(
 
     try:
         filtered_query = _inject_qh_ws_filter(query, ws_clause) if kpi in _QH_KPIS else _inject_ws_filter(query, ws_clause)
-        results = execute_query(filtered_query, params)
+        results = await asyncio.to_thread(execute_query, filtered_query, params)
     except Exception as e:
         logger.error(f"Platform KPI trend query failed for {kpi}: {e}")
         return {

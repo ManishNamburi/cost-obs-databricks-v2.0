@@ -61,7 +61,7 @@ def set_auth_mode_override(mode: str) -> None:
 
 from cachetools import TTLCache
 from databricks import sql
-from databricks.sdk import WorkspaceClient
+from databricks.sdk import AccountClient, WorkspaceClient
 from databricks.sdk.service.sql import (
     CreateWarehouseRequestWarehouseType,
     EndpointInfoWarehouseType,
@@ -621,6 +621,39 @@ def get_user_workspace_client() -> WorkspaceClient:
             # the PAT credential provider, ignoring the M2M OAuth env vars.
             return WorkspaceClient(host=host, token=user_token, auth_type="pat")
     return get_workspace_client()
+
+
+_account_client: AccountClient | None = None
+
+
+def get_account_client() -> AccountClient:
+    """Get or create a singleton AccountClient for account-level APIs (budgets, policies).
+
+    Requires DATABRICKS_ACCOUNT_ID to be set in the environment. The accounts host is
+    derived from the workspace host cloud unless DATABRICKS_ACCOUNT_HOST is set explicitly.
+    Raises ValueError if the account ID is absent — callers catch and return a graceful error.
+    """
+    global _account_client
+    if _account_client is not None:
+        return _account_client
+
+    account_id = os.getenv("DATABRICKS_ACCOUNT_ID", "").strip()
+    if not account_id:
+        raise ValueError("DATABRICKS_ACCOUNT_ID is not set — set it explicitly in the app env / bundle variable")
+
+    accounts_host = os.getenv("DATABRICKS_ACCOUNT_HOST", "").strip()
+    if not accounts_host:
+        workspace_host = os.getenv("DATABRICKS_HOST", "")
+        if "azuredatabricks.net" in workspace_host:
+            accounts_host = "https://accounts.azuredatabricks.net"
+        elif "gcp.databricks.com" in workspace_host:
+            accounts_host = "https://accounts.gcp.databricks.com"
+        else:
+            accounts_host = "https://accounts.cloud.databricks.com"
+
+    _account_client = AccountClient(host=accounts_host, account_id=account_id)
+    logger.info("Created AccountClient singleton (host=%s, account_id=%s)", accounts_host, account_id)
+    return _account_client
 
 
 def ensure_dedicated_warehouse() -> tuple[str, str]:

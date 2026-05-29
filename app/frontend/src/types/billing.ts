@@ -1065,3 +1065,62 @@ export interface DBSQLDashboardBundle {
   start_date: string;
   end_date: string;
 }
+
+// ── Budget & Usage Policy (Feature 3) ────────────────────────────────────────
+
+export interface BudgetPolicyTag {
+  key: string;
+  value: string;
+}
+
+export interface BudgetPolicy {
+  policy_id: string | null;
+  policy_name: string | null;
+  binding_workspace_ids: number[];
+  custom_tags: BudgetPolicyTag[];
+}
+
+export interface AlertConfiguration {
+  alert_configuration_id: string | null;
+  quantity_threshold: string | null;
+  quantity_type: string | null;
+  time_period: string | null;
+  trigger_type: string | null;
+}
+
+export interface BudgetFilterWorkspaceClause {
+  operator: string | null;
+  values: number[];
+}
+
+export interface BudgetFilterTagClause {
+  key: string;
+  value: { operator: string | null; values: string[] } | null;
+}
+
+export interface BudgetConfigurationFilter {
+  workspace_id?: BudgetFilterWorkspaceClause;
+  tags?: BudgetFilterTagClause[];
+}
+
+export interface BudgetConfiguration {
+  budget_configuration_id: string | null;
+  account_id: string | null;
+  display_name: string | null;
+  create_time: number | null;
+  update_time: number | null;
+  alert_configurations: AlertConfiguration[];
+  filter: BudgetConfigurationFilter | null;
+  estimated_spend_mtd: number | null;
+}
+
+export interface BudgetDashboardBundle {
+  available: boolean;
+  error?: string;
+  policies: BudgetPolicy[];
+  configurations: BudgetConfiguration[];
+  total_policies: number;
+  total_configurations: number;
+  errors: string[] | null;
+  as_of?: string;
+}

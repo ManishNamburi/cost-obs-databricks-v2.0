@@ -37,6 +37,7 @@ const ContractBurndown = lazy(() => lazyWithRetry(() => import("@/components/Con
 const Alerts = lazy(() => lazyWithRetry(() => import("@/pages/Alerts")));
 const UseCases = lazy(() => lazyWithRetry(() => import("@/pages/UseCases")));
 const UsersGroups = lazy(() => lazyWithRetry(() => import("@/pages/UsersGroups")));
+const BudgetView = lazy(() => lazyWithRetry(() => import("@/components/BudgetView").then(m => ({ default: m.BudgetView }))));
 
 // Preload all lazy chunks during browser idle time so tab switches are instant.
 // React.lazy caches the promise, so these import() calls prime the module cache
@@ -55,6 +56,7 @@ function preloadTabChunks() {
   import("@/pages/Alerts");
   import("@/pages/UseCases");
   import("@/pages/UsersGroups");
+  import("@/components/BudgetView");
 }
 
 if (typeof window !== "undefined") {
@@ -84,6 +86,7 @@ import {
   useInfraBundle,
   useKPIsBundle,
   useUsersGroupsBundle,
+  useBudgetDashboard,
 } from "@/hooks/useBillingData";
 import type { DateRange, WorkspaceBreakdown } from "@/types/billing";
 import { generateCostReport } from "@/utils/pdfExport";
@@ -104,7 +107,7 @@ function useKeepAlive() {
   }, []);
 }
 
-type ViewTab = "dbu" | "sql" | "infra" | "kpis" | "aiml" | "ai-gateway" | "apps" | "tagging" | "use-cases" | "alerts" | "forecasting" | "users-groups" | "contract";
+type ViewTab = "dbu" | "sql" | "infra" | "kpis" | "aiml" | "ai-gateway" | "apps" | "tagging" | "use-cases" | "alerts" | "forecasting" | "users-groups" | "contract" | "budget";
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -234,11 +237,14 @@ function Dashboard() {
   };
 
   // On every load, verify setup status with the server.
-  // 45s timeout — matches App cold-start window.
+  // 60s timeout — allows for cold App pod start.
   useEffect(() => {
     const controller = new AbortController();
     setupStatusAbortRef.current = controller;
-    const timeout = setTimeout(() => controller.abort(), 45_000);
+    const timeout = setTimeout(() => controller.abort(), 60_000);
+    const prevCompleted = () =>
+      localStorage.getItem("coc-setup-complete") === "true" ||
+      sessionStorage.getItem("coc-setup-complete") === "true";
 
     fetch("/api/setup/status", { signal: controller.signal })
       .then((r) => r.json())
@@ -246,17 +252,19 @@ function Dashboard() {
         clearTimeout(timeout);
         if (status?.status === "ready") {
           localStorage.setItem("coc-setup-complete", "true");
+          sessionStorage.setItem("coc-setup-complete", "true");
           setShowSetupWizard(false);
-        } else {
-          localStorage.removeItem("coc-setup-complete");
-          setShowSetupWizard(true);
+        } else if (status?.status === "setup_required") {
+          if (!prevCompleted()) {
+            localStorage.removeItem("coc-setup-complete");
+            sessionStorage.removeItem("coc-setup-complete");
+            setShowSetupWizard(true);
+          }
         }
       })
       .catch(() => {
         clearTimeout(timeout);
-        // If setup was previously completed, trust localStorage on timeout/error.
-        // Only force the wizard if there's no prior completion record.
-        if (localStorage.getItem("coc-setup-complete") !== "true") {
+        if (!prevCompleted()) {
           setShowSetupWizard(true);
         }
       });
@@ -266,6 +274,7 @@ function Dashboard() {
 
   const handleSetupComplete = () => {
     localStorage.setItem("coc-setup-complete", "true");
+    sessionStorage.setItem("coc-setup-complete", "true");
     // Mark setup complete server-side (survives page refresh, cleared on redeploy)
     fetch("/api/setup/complete", { method: "POST" }).catch(() => {});
     // Save the deploying user as admin (fire-and-forget)
@@ -357,7 +366,7 @@ function Dashboard() {
   const { data: warehouseStatus } = useQuery<{ status: "warm" | "warming_up" | "unavailable"; state?: string }>({
     queryKey: ["health", "sql-warehouse"],
     queryFn: () => fetch("/api/health/sql-warehouse").then(r => r.ok ? r.json() : { status: "warm" }),
-    refetchInterval: (query) => (!query.state.data || query.state.data.status === "warming_up") ? 5000 : 60000,
+    refetchInterval: (query) => (query.state.data?.status === "warming_up") ? 5000 : 60000,
     staleTime: 0,
   });
   const warehouseWarming = warehouseStatus?.status === "warming_up";
@@ -447,6 +456,7 @@ function Dashboard() {
 
   const { data: aimlData, isLoading: aimlLoading } = useAIMLDashboardBundle(dateRange, _wsIds, true);
   const { data: aiGatewayData, isLoading: aiGatewayLoading } = useAIGatewayDashboardBundle(dateRange, _wsIds, activeTab === "ai-gateway");
+  const { data: budgetData, isLoading: budgetLoading } = useBudgetDashboard(activeTab === "budget");
   const { data: appsData, isLoading: appsLoading } = useAppsDashboardBundle(dateRange, _wsIds, true);
   const { data: taggingData, isLoading: taggingLoading } = useTaggingDashboardBundle(dateRange, _wsIds, true);
 
@@ -624,6 +634,22 @@ function Dashboard() {
     );
   }
 
+  if (warehouseWarming) {
+    return (
+      <div className="flex min-h-screen flex-col items-center justify-center gap-6" style={{ backgroundColor: '#F9F7F4' }}>
+        <div className="flex flex-col items-center gap-4 text-center">
+          <div className="flex items-center gap-2">
+            <div className="h-3 w-3 animate-pulse rounded-full bg-blue-400" style={{ animationDelay: '0ms' }} />
+            <div className="h-3 w-3 animate-pulse rounded-full bg-blue-400" style={{ animationDelay: '200ms' }} />
+            <div className="h-3 w-3 animate-pulse rounded-full bg-blue-400" style={{ animationDelay: '400ms' }} />
+          </div>
+          <h2 className="text-xl font-semibold" style={{ color: '#1B3139' }}>SQL Warehouse is starting up</h2>
+          <p className="text-sm" style={{ color: '#6B7280' }}>Dashboard data will load automatically once the warehouse is ready.</p>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="min-h-screen" style={{ backgroundColor: appSettings.darkMode ? '#1B1F23' : '#F9F7F4' }}>
       {/* Setup incomplete banner — non-dismissable, shown when wizard was closed without finishing */}
@@ -648,16 +674,6 @@ function Dashboard() {
           >
             Resume Setup
           </button>
-        </div>
-      )}
-
-      {/* Warehouse warming banner */}
-      {warehouseWarming && (
-        <div className="flex items-center gap-2 px-4 py-2 border-b bg-blue-50 border-blue-200">
-          <div className="h-3 w-3 animate-pulse rounded-full bg-blue-400" />
-          <span className="text-xs font-medium text-blue-800">
-            SQL Warehouse is starting up — dashboard data will load shortly.
-          </span>
         </div>
       )}
 
@@ -984,6 +1000,21 @@ function Dashboard() {
                 Cloud Costs
               </button>
               )}
+              {tabVisibility.budget && (
+              <button
+                onClick={() => setActiveTab("budget")}
+                className={`whitespace-nowrap border-b-2 px-1 py-3 text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-gray-400 ${
+                  activeTab === "budget"
+                    ? "border-[#FF3621] text-[#FF3621]"
+                    : "border-transparent text-gray-500 hover:border-gray-300 hover:text-gray-700"
+                }`}
+              >
+                <svg className="mr-2 -mt-0.5 inline h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 7h6m0 10v-3m-3 3h.01M9 17h.01M9 14h.01M12 14h.01M15 11h.01M12 11h.01M9 11h.01M7 21h10a2 2 0 002-2V5a2 2 0 00-2-2H7a2 2 0 00-2 2v14a2 2 0 002 2z" />
+                </svg>
+                Budgets
+              </button>
+              )}
             </nav>
           </div>
         </div>
@@ -1116,6 +1147,13 @@ function Dashboard() {
           <AIGatewayView
             data={aiGatewayData}
             isLoading={aiGatewayLoading}
+          />
+          </TabErrorBoundary>
+        ) : activeTab === "budget" ? (
+          <TabErrorBoundary tabName="Budgets">
+          <BudgetView
+            data={budgetData}
+            isLoading={budgetLoading}
           />
           </TabErrorBoundary>
         ) : activeTab === "apps" ? (

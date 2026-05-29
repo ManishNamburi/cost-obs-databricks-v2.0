@@ -1,5 +1,6 @@
 """User endpoints."""
 
+import asyncio
 import json
 import logging
 import os
@@ -19,7 +20,7 @@ _perm_cache_at: float = 0.0
 _PERM_CACHE_TTL = 60.0  # seconds
 
 
-def _load_permissions() -> dict:
+async def _load_permissions() -> dict:
     """Load permissions from Delta table, then local file. Results cached for 60s.
 
     On Delta failure, returns the last known-good cached value so a transient
@@ -35,7 +36,7 @@ def _load_permissions() -> dict:
         from backend.db import execute_query, get_catalog_schema
         catalog, schema = get_catalog_schema()
         table = f"`{catalog}`.`{schema}`.`app_user_permissions`"
-        rows = execute_query(f"SELECT role, email FROM {table}", None, no_cache=True)
+        rows = await asyncio.to_thread(execute_query, f"SELECT role, email FROM {table}", None, no_cache=True)
         admins = [r["email"] for r in rows if r.get("role") == "admin"]
         consumers = [r["email"] for r in rows if r.get("role") == "consumer"]
         if admins or consumers:
@@ -63,9 +64,9 @@ def _load_permissions() -> dict:
     return {"admins": [], "consumers": []}
 
 
-def _get_user_role(email: str) -> str:
+async def _get_user_role(email: str) -> str:
     """Return 'admin' or 'consumer' for the given email based on stored permissions."""
-    perms = _load_permissions()
+    perms = await _load_permissions()
     if email in perms.get("admins", []):
         return "admin"
     if email in perms.get("consumers", []):
@@ -87,5 +88,5 @@ async def get_current_user(request: Request):
     return {
         "email": user_email,
         "name": user_name,
-        "role": _get_user_role(user_email),
+        "role": await _get_user_role(user_email),
     }

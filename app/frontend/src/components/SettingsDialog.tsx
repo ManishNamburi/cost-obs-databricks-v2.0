@@ -18,6 +18,7 @@ export interface TabVisibility {
   alerts: boolean;
   "users-groups": boolean;
   forecasting: boolean;
+  budget: boolean;
 }
 
 const DEFAULT_VISIBILITY: TabVisibility = {
@@ -33,6 +34,7 @@ const DEFAULT_VISIBILITY: TabVisibility = {
   alerts: false,
   "users-groups": true,
   forecasting: false,
+  budget: false,
 };
 
 const STORAGE_KEY = "coc-tab-visibility";

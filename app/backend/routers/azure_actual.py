@@ -49,7 +49,7 @@ SELECT
   COUNT(DISTINCT usage_metadata.cluster_id)   AS cluster_count,
   COUNT(DISTINCT usage_metadata.warehouse_id) AS warehouse_count,
   COUNT(DISTINCT DATE(usage_date))            AS days_in_range
-FROM {catalog}.{schema}.actuals_gold
+FROM `{catalog}`.`{schema}`.`actuals_gold`
 WHERE usage_date >= :start_date
   AND usage_date < :end_date
 """
@@ -62,7 +62,7 @@ SELECT
   SUM(CASE WHEN charge_type = 'Networking' THEN cost_in_billing_currency ELSE 0 END) AS network_cost,
   SUM(cost_in_billing_currency)                                                       AS total_cost,
   COUNT(DISTINCT DATE(usage_date))                                                    AS days_active
-FROM {catalog}.{schema}.actuals_gold
+FROM `{catalog}`.`{schema}`.`actuals_gold`
 WHERE usage_date >= :start_date
   AND usage_date < :end_date
   AND usage_metadata.cluster_id IS NOT NULL
@@ -76,7 +76,7 @@ SELECT
   usage_metadata.warehouse_id  AS warehouse_id,
   SUM(cost_in_billing_currency) AS total_cost,
   COUNT(DISTINCT DATE(usage_date)) AS days_active
-FROM {catalog}.{schema}.actuals_gold
+FROM `{catalog}`.`{schema}`.`actuals_gold`
 WHERE usage_date >= :start_date
   AND usage_date < :end_date
   AND usage_metadata.warehouse_id IS NOT NULL
@@ -90,7 +90,7 @@ SELECT
   charge_type,
   SUM(cost_in_billing_currency) AS total_cost,
   SUM(cost_in_usd)              AS total_cost_usd
-FROM {catalog}.{schema}.actuals_gold
+FROM `{catalog}`.`{schema}`.`actuals_gold`
 WHERE usage_date >= :start_date
   AND usage_date < :end_date
 GROUP BY charge_type
@@ -101,7 +101,7 @@ AZURE_COSTS_BY_PRICING_MODEL = """
 SELECT
   pricing_model,
   SUM(cost_in_billing_currency) AS total_cost
-FROM {catalog}.{schema}.actuals_gold
+FROM `{catalog}`.`{schema}`.`actuals_gold`
 WHERE usage_date >= :start_date
   AND usage_date < :end_date
 GROUP BY pricing_model
@@ -113,7 +113,7 @@ SELECT
   DATE(usage_date)              AS date,
   charge_type,
   SUM(cost_in_billing_currency) AS daily_cost
-FROM {catalog}.{schema}.actuals_gold
+FROM `{catalog}`.`{schema}`.`actuals_gold`
 WHERE usage_date >= :start_date
   AND usage_date < :end_date
 GROUP BY DATE(usage_date), charge_type
@@ -131,7 +131,7 @@ async def get_azure_status() -> dict[str, Any]:
     else:
         try:
             query = CHECK_AZURE_TABLES.format(catalog=catalog, schema=schema, table="actuals_gold")
-            results = execute_query(query)
+            results = await asyncio.to_thread(execute_query, query)
             available = len(results) > 0
         except Exception as e:
             logger.warning(f"Azure cost tables not available: {e}")
@@ -162,7 +162,7 @@ async def get_azure_actual_summary(
     if not status["azure_available"]:
         return {"available": False, "message": "Azure cost data not configured.", "start_date": start_date, "end_date": end_date}
 
-    results = execute_query(
+    results = await asyncio.to_thread(execute_query, 
         AZURE_ACTUAL_SUMMARY.format(catalog=catalog, schema=schema),
         {"start_date": start_date, "end_date": end_date},
     )
@@ -197,7 +197,7 @@ async def get_azure_costs_by_cluster(
     if not status["azure_available"]:
         return {"available": False, "clusters": [], "start_date": start_date, "end_date": end_date}
 
-    results = execute_query(
+    results = await asyncio.to_thread(execute_query, 
         AZURE_COSTS_BY_CLUSTER.format(catalog=catalog, schema=schema),
         {"start_date": start_date, "end_date": end_date},
     )
@@ -236,7 +236,7 @@ async def get_azure_costs_by_charge_type(
     if not status["azure_available"]:
         return {"available": False, "charge_types": [], "start_date": start_date, "end_date": end_date}
 
-    results = execute_query(
+    results = await asyncio.to_thread(execute_query, 
         AZURE_COSTS_BY_CHARGE_TYPE.format(catalog=catalog, schema=schema),
         {"start_date": start_date, "end_date": end_date},
     )
@@ -268,7 +268,7 @@ async def get_azure_costs_timeseries(
     if not status["azure_available"]:
         return {"available": False, "timeseries": [], "charge_types": [], "start_date": start_date, "end_date": end_date}
 
-    results = execute_query(
+    results = await asyncio.to_thread(execute_query, 
         AZURE_COSTS_TIMESERIES.format(catalog=catalog, schema=schema),
         {"start_date": start_date, "end_date": end_date},
     )
