@@ -106,7 +106,7 @@ function CalendarView({
                   return (
                     <div
                       key={dateStr}
-                      className="group relative flex aspect-square items-center justify-center rounded text-[11px] font-medium"
+                      className="group relative aspect-square rounded text-[11px] font-medium"
                       style={
                         inRange
                           ? styles
@@ -115,21 +115,26 @@ function CalendarView({
                           : { opacity: 0.2, background: "rgba(128,128,128,0.05)" }
                       }
                     >
-                      <span>{format(day, "d")}</span>
+                      {/* Day number — top right */}
+                      <span className="absolute right-1 top-0.5 text-[10px] leading-none">{format(day, "d")}</span>
+                      {/* Percent + arrow — centered */}
                       {anomaly && (
-                        <svg className="absolute right-1 top-1/2 h-4 w-2 -translate-y-1/2 flex-shrink-0" viewBox="0 0 6 14" fill="currentColor" aria-hidden="true">
-                          {anomaly.change_amount > 0 ? (
-                            <>
-                              <polygon points="3,0 6,5 0,5" />
-                              <rect x="2" y="5" width="2" height="9" />
-                            </>
-                          ) : (
-                            <>
-                              <rect x="2" y="0" width="2" height="9" />
-                              <polygon points="3,14 6,9 0,9" />
-                            </>
-                          )}
-                        </svg>
+                        <div className="flex h-full items-center justify-center gap-0.5">
+                          <span>{Math.abs(anomaly.change_percent).toFixed(0)}%</span>
+                          <svg className="h-3.5 w-1.5 flex-shrink-0" viewBox="0 0 6 14" fill="currentColor" aria-hidden="true">
+                            {anomaly.change_amount > 0 ? (
+                              <>
+                                <polygon points="3,0 6,5 0,5" />
+                                <rect x="2" y="5" width="2" height="9" />
+                              </>
+                            ) : (
+                              <>
+                                <rect x="2" y="0" width="2" height="9" />
+                                <polygon points="3,14 6,9 0,9" />
+                              </>
+                            )}
+                          </svg>
+                        </div>
                       )}
                       {anomaly && (
                         <div className="pointer-events-none absolute bottom-full left-1/2 z-[9999] mb-1 w-44 -translate-x-1/2 rounded-lg bg-gray-900 px-3 py-2 text-[11px] text-white opacity-0 shadow-xl transition-opacity group-hover:opacity-100">
