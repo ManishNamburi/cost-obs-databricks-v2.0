@@ -542,6 +542,15 @@ def _run_mv_refresh(user_token: str | None = None, lookback_days: int = 180, for
     ctx_tok = _db_user_token.set("")
     logger.info("MV refresh running as service principal (forced for DDL)")
 
+    catalog, schema = get_catalog_schema()
+    if not catalog or not schema:
+        logger.info(
+            "MV refresh SKIPPED — catalog/schema not configured yet. "
+            "Complete the setup wizard to enable scheduled rebuilds."
+        )
+        _db_user_token.reset(ctx_tok)
+        return {}
+
     log_dir = os.path.join(os.path.dirname(__file__), "..", ".settings")
     log_path = os.path.join(log_dir, "mv_refresh_log.json")
     log_tmp = log_path + ".tmp"
@@ -554,7 +563,6 @@ def _run_mv_refresh(user_token: str | None = None, lookback_days: int = 180, for
     results: dict = {}
     log_data: dict = {"last_refresh_utc": start_utc, "duration_seconds": 0, "mv_timings": {}, "status": "error", "error": "unknown"}
     try:
-        catalog, schema = get_catalog_schema()
         # If lookback_days differs from the last run, force a full rebuild so the
         # incremental MERGE path doesn't silently ignore the extended window.
         # force_full=True when the caller explicitly requests it (e.g. UI Rebuild button).
@@ -579,11 +587,13 @@ def _run_mv_refresh(user_token: str | None = None, lookback_days: int = 180, for
         mv_timings = results.pop("__mv_timings__", {})
         duration = round(time.monotonic() - refresh_start, 1)
         failed = {k: v for k, v in results.items() if isinstance(v, str) and v.startswith("error:")}
+        # "schema" or "error" in failed means a top-level failure (not per-table).
+        total_failure = "schema" in failed or "error" in failed or (failed and len(failed) == len(results))
         log_data = {
             "last_refresh_utc": start_utc,
             "duration_seconds": duration,
             "mv_timings": mv_timings,
-            "status": "partial_error" if failed else "success",
+            "status": "error" if total_failure else ("partial_error" if failed else "success"),
             "lookback_days": lookback_days,
         }
         if failed:

@@ -295,7 +295,7 @@ export function AIGatewayView({ data, isLoading }: AIGatewayViewProps) {
   if (isLoading) {
     return (
       <div className="rounded-lg bg-white p-8 border flex items-center justify-center gap-3" style={{ borderColor: "#E5E5E5" }}>
-        <div className="h-10 w-10 animate-spin rounded-full border-4 border-gray-300" style={{ borderTopColor: "#FF3621" }} />
+        <div className="h-10 w-10 animate-spin rounded-full border-4 border-gray-200" style={{ borderTopColor: "#FF3621" }} />
         <p className="text-sm text-gray-500">Loading AI Gateway data…</p>
       </div>
     );
