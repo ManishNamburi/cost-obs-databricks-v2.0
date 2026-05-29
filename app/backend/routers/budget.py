@@ -197,7 +197,7 @@ async def get_budget_dashboard(request: Request):
         "as_of": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
     }
 
-    delta_cache_put(cache_key, result, ttl=_BUNDLE_TTL)
+    delta_cache_put(cache_key, "budget:dashboard", result, ttl_seconds=_BUNDLE_TTL)
     return result
 
 

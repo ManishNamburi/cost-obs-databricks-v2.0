@@ -216,6 +216,10 @@ function Dashboard() {
   const [showSettings, setShowSettings] = useState(false);
   const [selectedWorkspaceIds, setSelectedWorkspaceIds] = useState<string[]>([]);
   const [tabVisibility, setTabVisibility] = useState<TabVisibility>(loadTabVisibility);
+  const [setupCheckPending, setSetupCheckPending] = useState<boolean>(
+    () => localStorage.getItem("coc-setup-complete") !== "true" &&
+          sessionStorage.getItem("coc-setup-complete") !== "true"
+  );
   // true = show wizard, false = show dashboard.
   // Default to false — the status check flips it to true only if setup is genuinely
   // needed. Starting false prevents the wizard from flashing on container restart
@@ -250,6 +254,7 @@ function Dashboard() {
       .then((r) => r.json())
       .then((status) => {
         clearTimeout(timeout);
+        setSetupCheckPending(false);
         if (status?.status === "ready") {
           localStorage.setItem("coc-setup-complete", "true");
           sessionStorage.setItem("coc-setup-complete", "true");
@@ -264,6 +269,7 @@ function Dashboard() {
       })
       .catch(() => {
         clearTimeout(timeout);
+        setSetupCheckPending(false);
         if (!prevCompleted()) {
           setShowSetupWizard(true);
         }
@@ -622,6 +628,14 @@ function Dashboard() {
       sections
     );
   };
+
+  if (setupCheckPending) {
+    return (
+      <div className="flex min-h-screen items-center justify-center" style={{ backgroundColor: '#F9F7F4' }}>
+        <div className="h-8 w-8 animate-spin rounded-full border-2 border-gray-200 border-t-[#FF3621]" />
+      </div>
+    );
+  }
 
   if (showSetupWizard) {
     return (
