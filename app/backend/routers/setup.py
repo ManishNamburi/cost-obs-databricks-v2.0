@@ -40,8 +40,11 @@ def _persist_task_state() -> None:
     payload["saved_at"] = __import__("datetime").datetime.utcnow().isoformat()
     try:
         os.makedirs(SETTINGS_DIR, exist_ok=True)
-        with open(_TASK_STATE_FILE, "w") as fh:
+        # Atomic write via temp file + rename so concurrent readers never see partial JSON.
+        _tmp = _TASK_STATE_FILE + ".tmp"
+        with open(_tmp, "w") as fh:
             json.dump(payload, fh)
+        os.replace(_tmp, _TASK_STATE_FILE)
     except Exception as exc:
         logger.debug("Could not persist task state to file: %s", exc)
     try:
@@ -302,6 +305,25 @@ async def get_setup_status() -> dict[str, Any]:
                 "task": _create_task_state.copy(),
                 "next_poll_ms": 5000,
             }
+
+    # With multiple uvicorn workers each worker has its own _create_task_state.
+    # If another worker is running the task, the shared file will show "running"
+    # even though this worker's in-process state shows "idle".
+    if _create_task_state["status"] == "idle":
+        try:
+            with open(_TASK_STATE_FILE) as _fh:
+                _file_task = json.load(_fh)
+            if _file_task.get("status") == "running":
+                _cat, _sch = get_catalog_schema()
+                return {
+                    "catalog": _cat, "schema": _sch,
+                    "tables": {}, "all_tables_exist": False, "missing_tables": [],
+                    "status": "initializing",
+                    "task": _file_task,
+                    "next_poll_ms": 5000,
+                }
+        except (FileNotFoundError, json.JSONDecodeError, OSError):
+            pass
 
     catalog, schema = get_catalog_schema()
 

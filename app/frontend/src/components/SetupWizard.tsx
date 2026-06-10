@@ -159,6 +159,7 @@ export function SetupWizard({ onComplete, onClose, embedded }: SetupWizardProps)
   const [grantVerifyElapsed, setGrantVerifyElapsed] = useState(0);
   const grantVerifyRef = useRef<ReturnType<typeof setInterval> | undefined>(undefined);
   const autoGrantAttempted = useRef(false);
+  const preflightFiredRef = useRef(false);
 
   // Storage location step state
   const [catalogInput, setCatalogInput] = useState("");
@@ -217,6 +218,7 @@ export function SetupWizard({ onComplete, onClose, embedded }: SetupWizardProps)
   }, [step]);
 
 
+
   const loadReadiness = useCallback(async (forceRefresh = false) => {
     setLoading(true);
     setReadinessError(null);
@@ -245,6 +247,16 @@ export function SetupWizard({ onComplete, onClose, embedded }: SetupWizardProps)
       setPreflightLoading(false);
     }
   }, []);
+
+  // Auto-fire preflight when arriving at create-tables with no result — covers
+  // pod-restart recovery where the wizard remounts mid-flow and goNext is never called.
+  // Ref guard ensures we fire at most once per mount even if loadPreflight is redefined.
+  useEffect(() => {
+    if (step !== "create-tables") { preflightFiredRef.current = false; return; }
+    if (preflightResult || preflightLoading || preflightFiredRef.current) return;
+    preflightFiredRef.current = true;
+    loadPreflight();
+  }, [step, preflightResult, preflightLoading, loadPreflight]);
 
   const handleAutoGrant = useCallback(async () => {
     setGrantRunning(true);
