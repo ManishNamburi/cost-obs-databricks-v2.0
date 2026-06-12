@@ -39,7 +39,7 @@ from backend import cache_ttls
 router = APIRouter()
 logger = logging.getLogger(__name__)
 
-_BUNDLE_TTL = cache_ttls.BILLING_BUNDLE  # 5 min TTL — account-level data changes rarely
+_BUNDLE_TTL = cache_ttls.BUNDLE
 
 # ── spend correlation query (current calendar month) ─────────────────────────
 _MTD_SPEND_SQL = """
