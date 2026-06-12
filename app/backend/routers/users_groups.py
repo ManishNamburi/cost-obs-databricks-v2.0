@@ -469,7 +469,21 @@ async def get_users_groups_bundle(
         ("spend_growth", lambda: execute_query(_ws(USERS_SPEND_GROWTH), growth_params)),
         ("user_growth", lambda: execute_query(_ws(USERS_GROWTH), growth_date_params)),
     ]
-    results = await asyncio.to_thread(execute_queries_parallel, queries)
+    try:
+        results = await asyncio.to_thread(execute_queries_parallel, queries, timeout=45.0)
+    except Exception as e:
+        logger.error("users dashboard-bundle failed: %s", e)
+        return {
+            "summary": {},
+            "top_users": [],
+            "timeseries": [],
+            "timeseries_users": [],
+            "by_workspace": [],
+            "user_growth": [],
+            "start_date": start_date,
+            "end_date": end_date,
+            "error": str(e),
+        }
 
     # Summary
     summary_rows = results.get("summary") or []
