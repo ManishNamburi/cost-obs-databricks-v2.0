@@ -43,7 +43,7 @@ def _build_queries(table_name: str) -> dict[str, str]:
     return {
         "check_mv": f"""
             SELECT 1
-            FROM {{catalog}}.information_schema.tables
+            FROM `{{catalog}}`.information_schema.tables
             WHERE table_schema = '{{schema}}'
               AND table_name = '{table_name}'
             LIMIT 1
@@ -53,7 +53,7 @@ def _build_queries(table_name: str) -> dict[str, str]:
               CAST(MIN(start_time) AS DATE) as earliest_date,
               CAST(MAX(start_time) AS DATE) as latest_date,
               1 as total_rows
-            FROM {{catalog}}.{{schema}}.{table_name}
+            FROM `{{catalog}}`.`{{schema}}`.`{table_name}`
         """,
         "by_source": f"""
             SELECT
@@ -62,7 +62,7 @@ def _build_queries(table_name: str) -> dict[str, str]:
               SUM(query_attributed_dollars_estimation) as total_spend,
               SUM(query_attributed_dbus_estimation) as total_dbus,
               AVG(query_attributed_dollars_estimation) as avg_cost_per_query
-            FROM {{catalog}}.{{schema}}.{table_name}
+            FROM `{{catalog}}`.`{{schema}}`.`{table_name}`
             WHERE start_time >= :start_date
               AND start_time < :end_date
             GROUP BY query_source_type
@@ -75,7 +75,7 @@ def _build_queries(table_name: str) -> dict[str, str]:
               COUNT(*) as query_count,
               SUM(query_attributed_dollars_estimation) as total_spend,
               SUM(query_attributed_dbus_estimation) as total_dbus
-            FROM {{catalog}}.{{schema}}.{table_name}
+            FROM `{{catalog}}`.`{{schema}}`.`{table_name}`
             WHERE start_time >= :start_date
               AND start_time < :end_date
             GROUP BY executed_by, query_source_type
@@ -98,7 +98,7 @@ def _build_queries(table_name: str) -> dict[str, str]:
               url_helper as source_url,
               start_time,
               end_time
-            FROM {{catalog}}.{{schema}}.{table_name}
+            FROM `{{catalog}}`.`{{schema}}`.`{table_name}`
             WHERE start_time >= :start_date
               AND start_time < :end_date
             ORDER BY query_attributed_dollars_estimation DESC
@@ -113,7 +113,7 @@ def _build_queries(table_name: str) -> dict[str, str]:
               SUM(query_attributed_dbus_estimation) as total_dbus,
               AVG(query_attributed_dollars_estimation) as avg_cost_per_query,
               AVG(duration_seconds) as avg_duration_seconds
-            FROM {{catalog}}.{{schema}}.{table_name}
+            FROM `{{catalog}}`.`{{schema}}`.`{table_name}`
             WHERE start_time >= :start_date
               AND start_time < :end_date
         """,
@@ -124,7 +124,7 @@ def _build_queries(table_name: str) -> dict[str, str]:
               COUNT(DISTINCT executed_by) as unique_users,
               SUM(query_attributed_dollars_estimation) as total_spend,
               SUM(query_attributed_dbus_estimation) as total_dbus
-            FROM {{catalog}}.{{schema}}.{table_name}
+            FROM `{{catalog}}`.`{{schema}}`.`{table_name}`
             WHERE start_time >= :start_date
               AND start_time < :end_date
             GROUP BY warehouse_id
@@ -138,7 +138,7 @@ def _build_queries(table_name: str) -> dict[str, str]:
               COUNT(*) as query_count,
               SUM(query_attributed_dollars_estimation) as daily_spend,
               SUM(query_attributed_dbus_estimation) as daily_dbus
-            FROM {{catalog}}.{{schema}}.{table_name}
+            FROM `{{catalog}}`.`{{schema}}`.`{table_name}`
             WHERE start_time >= :start_date
               AND start_time < :end_date
             GROUP BY DATE(start_time), query_source_type
