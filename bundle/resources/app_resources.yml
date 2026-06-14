@@ -2,7 +2,8 @@
 # After bundle deploy, confirm each resource is visible in the App UI before running setup job.
 #
 # sql-warehouse  → DATABRICKS_WAREHOUSE_ID
-# lakebase       → PGHOST, PGPORT, PGDATABASE, PGUSER, PGSSLMODE, ENDPOINT_NAME
+# lakebase       → PGHOST, PGPORT, PGDATABASE, PGUSER, PGSSLMODE (via postgres resource binding)
+# ENDPOINT_NAME  → set explicitly in app.yml (not auto-injected by postgres binding)
 #
 # Custom env vars injected via the app config below:
 # AI_GATEWAY_USAGE_TABLE → admin-managed derived table path (optional)
@@ -27,7 +28,8 @@ resources:
             permission: CAN_USE
 
         - name: lakebase
-          description: Lakebase Autoscaling endpoint for durable app state
-          serving_endpoint:
-            name: ${var.lakebase_endpoint_name}
-            permission: CAN_CONNECT
+          description: Lakebase Autoscaling project — injects PGHOST/PGUSER/PGDATABASE/PGPORT/PGSSLMODE
+          postgres:
+            branch: projects/${var.lakebase_project_name}/branches/main
+            database: projects/${var.lakebase_project_name}/branches/main/databases/databricks-postgres
+            permission: CAN_CONNECT_AND_CREATE

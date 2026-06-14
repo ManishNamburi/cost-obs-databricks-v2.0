@@ -39,7 +39,11 @@ def _get_pg_conn_str() -> str:
     database = os.environ["PGDATABASE"]
     user = os.environ["PGUSER"]
     sslmode = os.environ.get("PGSSLMODE", "require")
-    return f"host={host} port={port} dbname={database} user={user} sslmode={sslmode}"
+    schema = os.environ.get("COST_OBS_SCHEMA", "cost_obs")
+    return (
+        f"host={host} port={port} dbname={database} user={user} sslmode={sslmode} "
+        f"options='-c search_path={schema}'"
+    )
 
 
 def _make_oauth_connection(conn_str: str) -> psycopg.Connection:
@@ -163,14 +167,15 @@ def bootstrap_lakebase() -> None:
     catalog = os.environ["COST_OBS_CATALOG"]
 
     with pg_conn() as conn:
-        if _is_step_done(conn, "bootstrap_lakebase"):
-            print("[bootstrap_lakebase] Already complete — skipping.")
-            return
-
-        # 1. Create working schema
+        # 1. Create working schema FIRST — the connection string sets search_path
+        #    to this schema, so this must succeed before any table DDL runs.
         with conn.cursor() as cur:
             cur.execute(f"CREATE SCHEMA IF NOT EXISTS {schema}")
         print(f"[bootstrap_lakebase] Schema '{schema}' ready.")
+
+        if _is_step_done(conn, "bootstrap_lakebase"):
+            print("[bootstrap_lakebase] Already complete — skipping.")
+            return
 
         # 2. Create OAuth role mapped to the app SP's UUID
         sp_uuid = _get_app_sp_uuid()

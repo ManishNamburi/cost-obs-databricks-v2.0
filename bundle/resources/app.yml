@@ -25,3 +25,5 @@ resources:
             value: ${var.ai_gateway_usage_table}
           - name: DATABRICKS_ACCOUNT_ID
             value: ${var.databricks_account_id}
+          - name: ENDPOINT_NAME
+            value: ${var.lakebase_endpoint_name}

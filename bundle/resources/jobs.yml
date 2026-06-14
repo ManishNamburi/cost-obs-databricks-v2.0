@@ -25,7 +25,7 @@ resources:
           depends_on:
             - task_key: bootstrap_lakebase
           notebook_task:
-            notebook_path: ../setup/notebooks/02_lakebase_bootstrap
+            notebook_path: ../setup/notebooks/02b_migrate_delta
           environment_key: default
 
         - task_key: seed_genie

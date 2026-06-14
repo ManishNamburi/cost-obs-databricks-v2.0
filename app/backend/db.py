@@ -1104,7 +1104,11 @@ def _lakebase_conninfo() -> str:
     database = os.environ.get("PGDATABASE", "")
     user = os.environ.get("PGUSER", "")
     sslmode = os.environ.get("PGSSLMODE", "require")
-    return f"host={host} port={port} dbname={database} user={user} sslmode={sslmode}"
+    schema = os.environ.get("COST_OBS_SCHEMA", "cost_obs")
+    return (
+        f"host={host} port={port} dbname={database} user={user} sslmode={sslmode} "
+        f"options='-c search_path={schema}'"
+    )
 
 
 def _make_lakebase_connection(conninfo: str) -> "psycopg.Connection":
