@@ -1,0 +1,14 @@
+targets:
+  e2-dogfood:
+    mode: development
+    workspace:
+      host: https://e2-dogfood.staging.cloud.databricks.com
+      profile: e2-dogfood
+      root_path: /Workspace/Users/sam.mathews@databricks.com/.bundle/${bundle.name}/${bundle.target}
+    variables:
+      app_name: cost-observability-dogfood
+      catalog: sam_mathews
+      schema: cost_obs
+      warehouse_id: dd43ee29fedd958d
+      lakebase_project_name: cost-obs-dogfood
+      lakebase_endpoint_name: projects/cost-obs-dogfood/branches/production/endpoints/primary

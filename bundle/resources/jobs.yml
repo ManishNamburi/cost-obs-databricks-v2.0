@@ -9,7 +9,13 @@ resources:
         - task_key: validate
           description: Check environment variables, UC permissions, and warehouse connectivity
           notebook_task:
-            notebook_path: ../setup/notebooks/01_validate_prereqs
+            notebook_path: ${workspace.root_path}/files/setup/notebooks/01_validate_prereqs
+            source: WORKSPACE
+            base_parameters:
+              ENDPOINT_NAME: ${var.lakebase_endpoint_name}
+              DATABRICKS_WAREHOUSE_ID: ${var.warehouse_id}
+              COST_OBS_CATALOG: ${var.catalog}
+              COST_OBS_SCHEMA: ${var.schema}
           environment_key: default
 
         - task_key: bootstrap_lakebase
@@ -17,7 +23,14 @@ resources:
           depends_on:
             - task_key: validate
           notebook_task:
-            notebook_path: ../setup/notebooks/02_lakebase_bootstrap
+            notebook_path: ${workspace.root_path}/files/setup/notebooks/02_lakebase_bootstrap
+            source: WORKSPACE
+            base_parameters:
+              ENDPOINT_NAME: ${var.lakebase_endpoint_name}
+              DATABRICKS_WAREHOUSE_ID: ${var.warehouse_id}
+              COST_OBS_CATALOG: ${var.catalog}
+              COST_OBS_SCHEMA: ${var.schema}
+              APP_NAME: ${var.app_name}
           environment_key: default
 
         - task_key: migrate_delta
@@ -25,7 +38,13 @@ resources:
           depends_on:
             - task_key: bootstrap_lakebase
           notebook_task:
-            notebook_path: ../setup/notebooks/02b_migrate_delta
+            notebook_path: ${workspace.root_path}/files/setup/notebooks/02b_migrate_delta
+            source: WORKSPACE
+            base_parameters:
+              ENDPOINT_NAME: ${var.lakebase_endpoint_name}
+              DATABRICKS_WAREHOUSE_ID: ${var.warehouse_id}
+              COST_OBS_CATALOG: ${var.catalog}
+              COST_OBS_SCHEMA: ${var.schema}
           environment_key: default
 
         - task_key: seed_genie
@@ -33,15 +52,27 @@ resources:
           depends_on:
             - task_key: bootstrap_lakebase
           notebook_task:
-            notebook_path: ../setup/notebooks/03_seed_genie
+            notebook_path: ${workspace.root_path}/files/setup/notebooks/03_seed_genie
+            source: WORKSPACE
+            base_parameters:
+              ENDPOINT_NAME: ${var.lakebase_endpoint_name}
+              DATABRICKS_WAREHOUSE_ID: ${var.warehouse_id}
+              COST_OBS_CATALOG: ${var.catalog}
+              COST_OBS_SCHEMA: ${var.schema}
           environment_key: default
 
         - task_key: setup_usage_policy
           description: Create or validate serverless usage policy for cost attribution
           depends_on:
-            - task_key: validate
+            - task_key: bootstrap_lakebase
           notebook_task:
-            notebook_path: ../setup/notebooks/04_usage_policy_setup
+            notebook_path: ${workspace.root_path}/files/setup/notebooks/04_usage_policy_setup
+            source: WORKSPACE
+            base_parameters:
+              ENDPOINT_NAME: ${var.lakebase_endpoint_name}
+              DATABRICKS_WAREHOUSE_ID: ${var.warehouse_id}
+              COST_OBS_CATALOG: ${var.catalog}
+              COST_OBS_SCHEMA: ${var.schema}
           environment_key: default
 
         - task_key: verify
@@ -50,10 +81,19 @@ resources:
             - task_key: seed_genie
             - task_key: setup_usage_policy
           notebook_task:
-            notebook_path: ../setup/notebooks/05_post_setup_verify
+            notebook_path: ${workspace.root_path}/files/setup/notebooks/05_post_setup_verify
+            source: WORKSPACE
+            base_parameters:
+              ENDPOINT_NAME: ${var.lakebase_endpoint_name}
+              DATABRICKS_WAREHOUSE_ID: ${var.warehouse_id}
+              COST_OBS_CATALOG: ${var.catalog}
+              COST_OBS_SCHEMA: ${var.schema}
           environment_key: default
 
       environments:
         - environment_key: default
           spec:
             client: "1"
+            dependencies:
+              - psycopg[binary]
+              - psycopg_pool

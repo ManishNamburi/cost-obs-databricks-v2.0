@@ -70,7 +70,8 @@ def migrate() -> None:
     try:
         spark  # noqa: F821 — available in Databricks notebook context
     except NameError:
-        raise RuntimeError("migrate() must be called from a Databricks notebook (spark not available)")
+        print("[migrate] Spark not available (serverless Python environment) — skipping Delta migration.")
+        return
 
     catalog = os.environ["COST_OBS_CATALOG"]
     schema = os.environ["COST_OBS_SCHEMA"]

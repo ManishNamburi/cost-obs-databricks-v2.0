@@ -47,6 +47,25 @@ const SOURCE_TYPE_COLORS: Record<string, string> = {
 
 const COLORS = ["#1B5162", "#06B6D4", "#10B981", "#14B8A6", "#F59E0B", "#3B82F6", "#EC4899", "#EF4444", "#6B7280"];
 
+const COST_TOOLTIP_TEXT = "Costs are estimates: the warehouse's billed DBU-hours are divided across all queries in the period, weighted by task duration. A fast query running during a low-activity window can inherit a large share of the hour's cost.";
+
+function InfoTooltip({ text, stopClick }: { text: string; stopClick?: boolean }) {
+  return (
+    <span
+      className="group relative ml-1 inline-flex cursor-help"
+      onClick={stopClick ? e => e.stopPropagation() : undefined}
+    >
+      <span className="flex h-4 w-4 items-center justify-center rounded-full bg-gray-200 text-[10px] font-semibold normal-case text-gray-500">i</span>
+      <div className="pointer-events-none absolute bottom-full left-1/2 z-50 mb-2 -translate-x-1/2 whitespace-normal opacity-0 transition-opacity group-hover:opacity-100">
+        <div className="w-64 rounded-lg bg-gray-900 px-3 py-2 text-xs font-normal normal-case leading-relaxed text-white shadow-lg">
+          {text}
+          <div className="absolute left-1/2 top-full -translate-x-1/2 border-4 border-transparent border-t-gray-900" />
+        </div>
+      </div>
+    </span>
+  );
+}
+
 const formatCurrency = (value: number) =>
   new Intl.NumberFormat("en-US", {
     style: "currency",
@@ -78,7 +97,7 @@ const formatDate = (dateStr: string) => {
 type SortField = "cost" | "dbus" | "duration_seconds" | "executed_by";
 type SortDirection = "asc" | "desc";
 
-// InfoTooltip component removed - not currently used in this view
+
 
 interface SourceQuery {
   statement_id: string;
@@ -235,12 +254,59 @@ export function SQLWarehousing360({ sqlBreakdownData: _sqlBreakdownData, queryDa
   };
 
 
+  const [selectedUser, setSelectedUser] = useState<{ raw: string; display: string } | null>(null);
+
+  const { data: userQueriesData, isLoading: userQueriesLoading } = useQuery<{
+    available: boolean;
+    queries: Array<{
+      statement_id: string | null;
+      query_source_type: string;
+      executed_by: string;
+      warehouse_id: string | null;
+      workspace_id: string | null;
+      statement_preview: string;
+      duration_seconds: number;
+      cost: number;
+      dbus: number;
+      query_profile_url: string | null;
+      source_url: string | null;
+      start_time: string | null;
+    }>;
+    total_spend: number;
+    query_count: number;
+  }>({
+    queryKey: ["dbsql", "queries-by-user", selectedUser?.raw, startDate, endDate, workspaceIds],
+    queryFn: () => {
+      const params = new URLSearchParams({ user: selectedUser!.raw });
+      if (startDate) params.set("start_date", startDate);
+      if (endDate) params.set("end_date", endDate);
+      if (workspaceIds?.length) params.set("workspace_ids", workspaceIds.join(","));
+      return fetch(`/api/dbsql/queries-by-user?${params}`).then(r => r.json());
+    },
+    enabled: !!selectedUser,
+    staleTime: 5 * 60 * 1000,
+  });
+
+  const _STALE_MS = 25 * 24 * 60 * 60 * 1000;
+  const freshUserQueries = useMemo(() => {
+    if (!userQueriesData?.queries) return [];
+    return userQueriesData.queries
+      .filter(q => !q.start_time || Date.now() - new Date(q.start_time).getTime() <= _STALE_MS)
+      .sort((a, b) => b.cost - a.cost);
+  }, [userQueriesData]);
+  const staleUserQueries = useMemo(() => {
+    if (!userQueriesData?.queries) return [];
+    return userQueriesData.queries
+      .filter(q => q.start_time && Date.now() - new Date(q.start_time).getTime() > _STALE_MS)
+      .sort((a, b) => b.cost - a.cost);
+  }, [userQueriesData]);
+
   const userBarData = useMemo(() => {
     if (!queryData?.by_user?.users) return [];
-    const byUser: Record<string, { user: string; total_spend: number; query_count: number }> = {};
+    const byUser: Record<string, { user: string; rawUser: string; total_spend: number; query_count: number }> = {};
     for (const u of queryData.by_user.users) {
       if (!byUser[u.executed_by]) {
-        byUser[u.executed_by] = { user: u.executed_by, total_spend: 0, query_count: 0 };
+        byUser[u.executed_by] = { user: u.executed_by, rawUser: u.executed_by, total_spend: 0, query_count: 0 };
       }
       byUser[u.executed_by].total_spend += u.total_spend;
       byUser[u.executed_by].query_count += u.query_count;
@@ -602,10 +668,18 @@ export function SQLWarehousing360({ sqlBreakdownData: _sqlBreakdownData, queryDa
 
             {/* Top Users Bar Chart */}
             <div className="rounded-lg bg-white p-6 border " style={{ borderColor: '#E5E5E5' }}>
-              <h3 className="mb-4 text-lg font-semibold text-gray-900">Top Users by Query Spend</h3>
+              <div className="mb-4 flex items-center justify-between">
+                <h3 className="text-lg font-semibold text-gray-900">Top Users by Query Spend</h3>
+                <span className="text-xs text-gray-500">Click a bar to drill down</span>
+              </div>
               {userBarData.length > 0 ? (
                 <ResponsiveContainer width="100%" height={300}>
-                  <BarChart data={userBarData} layout="vertical" margin={{ left: 0, right: 70 }}>
+                  <BarChart
+                    data={userBarData}
+                    layout="vertical"
+                    margin={{ left: 0, right: 70 }}
+                    style={{ cursor: "pointer" }}
+                  >
                     <XAxis type="number" tickFormatter={(v) => formatCurrency(v)} stroke="#9ca3af" fontSize={12} tickMargin={8} />
                     <YAxis
                       type="category"
@@ -619,7 +693,13 @@ export function SQLWarehousing360({ sqlBreakdownData: _sqlBreakdownData, queryDa
                       formatter={(value) => formatCurrency(value as number)}
                       labelFormatter={(label) => `User: ${label}`}
                     />
-                    <Bar dataKey="total_spend" radius={[0, 4, 4, 0]}>
+                    <Bar
+                      dataKey="total_spend"
+                      radius={[0, 4, 4, 0]}
+                      onClick={(entry: any) => {
+                        setSelectedUser({ raw: entry.rawUser, display: entry.user });
+                      }}
+                    >
                       {userBarData.map((_entry, idx) => (
                         <Cell key={idx} fill={COLORS[idx % COLORS.length]} />
                       ))}
@@ -975,6 +1055,11 @@ export function SQLWarehousing360({ sqlBreakdownData: _sqlBreakdownData, queryDa
                         onClick={() => handleSort("cost")}
                       >
                         Cost {sortField === "cost" && (sortDirection === "asc" ? "↑" : "↓")}
+                        <span
+                          title="Costs are estimates: the warehouse's billed DBU-hours are divided across all queries in the period, weighted by task duration. A fast query running during a low-activity window can inherit a large share of the hour's cost."
+                          className="ml-1 cursor-help font-normal normal-case text-gray-400"
+                          onClick={e => e.stopPropagation()}
+                        >ⓘ</span>
                       </th>
                     </tr>
                   </thead>
@@ -1203,7 +1288,9 @@ export function SQLWarehousing360({ sqlBreakdownData: _sqlBreakdownData, queryDa
                       <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500">User</th>
                       <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500">Query Preview</th>
                       <th className="px-4 py-3 text-right text-xs font-medium uppercase tracking-wider text-gray-500">Duration</th>
-                      <th className="px-4 py-3 text-right text-xs font-medium uppercase tracking-wider text-gray-500">Cost</th>
+                      <th className="px-4 py-3 text-right text-xs font-medium uppercase tracking-wider text-gray-500">
+                        Cost <InfoTooltip text={COST_TOOLTIP_TEXT} />
+                      </th>
                       <th className="px-4 py-3 text-right text-xs font-medium uppercase tracking-wider text-gray-500">Links</th>
                     </tr>
                   </thead>
@@ -1249,6 +1336,125 @@ export function SQLWarehousing360({ sqlBreakdownData: _sqlBreakdownData, queryDa
             ) : (
               <div className="flex h-40 items-center justify-center text-gray-500">
                 No queries found for this source type
+              </div>
+            )}
+          </div>
+        </div>,
+        document.body
+      )}
+
+      {/* User Query Drilldown Modal */}
+      {selectedUser && createPortal(
+        <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/50" onClick={() => setSelectedUser(null)}>
+          <div className="mx-4 w-full max-w-4xl rounded-lg bg-white p-6 shadow-xl" onClick={(e) => e.stopPropagation()}>
+            <div className="mb-4 flex items-center justify-between">
+              <div>
+                <h3 className="text-lg font-semibold text-gray-900">Queries — {selectedUser.display}</h3>
+                {userQueriesData?.total_spend != null && (
+                  <p className="text-sm text-gray-500 mt-0.5">
+                    {userQueriesData.query_count} queries · {formatCurrency(userQueriesData.total_spend)} total
+                  </p>
+                )}
+              </div>
+              <button onClick={() => setSelectedUser(null)} className="rounded-full p-1 text-gray-500 hover:bg-gray-100 hover:text-gray-600">
+                <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+
+            {userQueriesLoading ? (
+              <div className="flex h-48 items-center justify-center">
+                <div className="h-8 w-8 animate-spin rounded-full border-4 border-gray-200" style={{ borderTopColor: '#FF3621' }} />
+              </div>
+            ) : (userQueriesData?.queries?.length ?? 0) > 0 ? (
+              <div className="overflow-x-auto max-h-[60vh] overflow-y-auto">
+                <table className="min-w-full divide-y divide-gray-200">
+                  <thead className="bg-gray-50 sticky top-0">
+                    <tr>
+                      <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500">Time</th>
+                      <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500">Source</th>
+                      <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500">Query</th>
+                      <th className="px-4 py-3 text-right text-xs font-medium uppercase tracking-wider text-gray-500">Duration</th>
+                      <th className="px-4 py-3 text-right text-xs font-medium uppercase tracking-wider text-gray-500">
+                        Cost <InfoTooltip text={COST_TOOLTIP_TEXT} />
+                      </th>
+                      <th className="px-4 py-3 text-right text-xs font-medium uppercase tracking-wider text-gray-500">History</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-200">
+                    {freshUserQueries.map((q, idx) => {
+                      let histUrl: string | null = null;
+                      try { if (q.query_profile_url) histUrl = new URL(q.query_profile_url).origin + "/sql/history"; } catch { /* ignore */ }
+                      try { if (!histUrl && q.source_url) histUrl = new URL(q.source_url).origin + "/sql/history"; } catch { /* ignore */ }
+                      return (
+                        <tr key={q.statement_id || idx} className="hover:bg-gray-50">
+                          <td className="whitespace-nowrap px-4 py-3 text-xs text-gray-500">
+                            {q.start_time ? (() => { try { return format(new Date(q.start_time), "MMM d, HH:mm"); } catch { return q.start_time; } })() : "—"}
+                          </td>
+                          <td className="whitespace-nowrap px-4 py-3">
+                            <span className="inline-flex rounded-full bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-700">{q.query_source_type}</span>
+                          </td>
+                          <td className="max-w-xs px-4 py-3">
+                            <div className="truncate font-mono text-xs text-gray-500" title={q.statement_preview}>{q.statement_preview || "—"}</div>
+                          </td>
+                          <td className="whitespace-nowrap px-4 py-3 text-right text-sm text-gray-500">{formatDuration(q.duration_seconds)}</td>
+                          <td className="whitespace-nowrap px-4 py-3 text-right text-sm font-medium text-gray-900">{formatCurrency(q.cost)}</td>
+                          <td className="whitespace-nowrap px-4 py-3 text-right">
+                            {histUrl
+                              ? <a href={histUrl} target="_blank" rel="noopener noreferrer" className="text-xs text-[#FF3621] hover:underline">History ↗</a>
+                              : <span className="text-xs text-gray-400">—</span>}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                    {staleUserQueries.length > 0 && (
+                      <>
+                        <tr>
+                          <td colSpan={6} className="bg-gray-50 px-4 py-2 text-xs font-medium uppercase tracking-wider text-gray-400">
+                            Historical — profile links may be expired (25+ days ago)
+                          </td>
+                        </tr>
+                        {staleUserQueries.map((q, idx) => {
+                          let historyUrl: string | null = null;
+                          try { if (q.query_profile_url) historyUrl = new URL(q.query_profile_url).origin + "/sql/history"; } catch { /* ignore */ }
+                          return (
+                            <tr key={q.statement_id || idx} className="opacity-60 hover:bg-gray-50">
+                              <td className="whitespace-nowrap px-4 py-3 text-xs text-gray-500">
+                                {q.start_time ? (() => { try { return format(new Date(q.start_time), "MMM d, HH:mm"); } catch { return q.start_time; } })() : "—"}
+                              </td>
+                              <td className="whitespace-nowrap px-4 py-3">
+                                <span className="inline-flex rounded-full bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-700">{q.query_source_type}</span>
+                              </td>
+                              <td className="max-w-xs px-4 py-3">
+                                <div className="truncate font-mono text-xs text-gray-500" title={q.statement_preview}>{q.statement_preview || "—"}</div>
+                              </td>
+                              <td className="whitespace-nowrap px-4 py-3 text-right text-sm text-gray-500">{formatDuration(q.duration_seconds)}</td>
+                              <td className="whitespace-nowrap px-4 py-3 text-right text-sm font-medium text-gray-900">{formatCurrency(q.cost)}</td>
+                              <td className="whitespace-nowrap px-4 py-3 text-right">
+                                <div className="flex flex-col items-end gap-1">
+                                  <span className="text-xs text-gray-400" title="Databricks query history retention is ~30 days. Profile links for queries older than ~25 days may no longer be accessible.">Expired</span>
+                                  {q.statement_id && (
+                                    <button onClick={() => navigator.clipboard.writeText(q.statement_id!)} className="font-mono text-xs text-gray-400 hover:text-gray-600" title={`Copy statement ID: ${q.statement_id}`}>
+                                      {q.statement_id.slice(0, 8)}… ⎘
+                                    </button>
+                                  )}
+                                  {historyUrl && (
+                                    <a href={historyUrl} target="_blank" rel="noopener noreferrer" className="text-xs text-blue-500 hover:underline">History ↗</a>
+                                  )}
+                                </div>
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            ) : (
+              <div className="flex h-48 items-center justify-center text-gray-500">
+                No queries found for this user in the selected date range
               </div>
             )}
           </div>

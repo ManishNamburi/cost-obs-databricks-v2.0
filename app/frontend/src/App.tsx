@@ -649,6 +649,20 @@ function Dashboard() {
     );
   }
 
+  if (warehouseStatus?.status === "unavailable") {
+    return (
+      <div className="flex min-h-screen flex-col items-center justify-center gap-6" style={{ backgroundColor: '#F9F7F4' }}>
+        <div className="flex flex-col items-center gap-4 text-center">
+          <svg className="h-10 w-10 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M12 9v2m0 4h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z" />
+          </svg>
+          <h2 className="text-xl font-semibold" style={{ color: '#1B3139' }}>SQL Warehouse unavailable</h2>
+          <p className="text-sm" style={{ color: '#6B7280' }}>The warehouse could not be reached. Check that your warehouse is running in the Databricks console.</p>
+        </div>
+      </div>
+    );
+  }
+
   if (warehouseWarming) {
     return (
       <div className="flex min-h-screen flex-col items-center justify-center gap-6" style={{ backgroundColor: '#F9F7F4' }}>
@@ -1052,7 +1066,7 @@ function Dashboard() {
           </div>
         }>
         {activeTab === "dbu" ? (
-          bundleLoading ? (
+          (!warehouseStatus || bundleLoading) ? (
             <div className="flex h-64 flex-col items-center justify-center gap-3">
               <div className="h-12 w-12 animate-spin rounded-full border-4 border-gray-200" style={{ borderTopColor: '#FF3621' }} />
               <p className="text-sm text-gray-500">Loading DBU spend data...</p>

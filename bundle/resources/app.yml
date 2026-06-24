@@ -3,7 +3,7 @@ resources:
     cost_obs_app:
       name: ${var.app_name}
       description: Cost Observability App — V2
-      source_code_path: ../app
+      source_code_path: ../../app
       config:
         command:
           - uvicorn
@@ -27,3 +27,20 @@ resources:
             value: ${var.databricks_account_id}
           - name: ENDPOINT_NAME
             value: ${var.lakebase_endpoint_name}
+      # Resource bindings — Databricks injects env vars automatically:
+      # sql-warehouse → DATABRICKS_WAREHOUSE_ID
+      # lakebase      → PGHOST, PGPORT, PGDATABASE, PGUSER, PGSSLMODE
+      # ENDPOINT_NAME is set explicitly above (not auto-injected by postgres binding)
+      resources:
+        - name: sql-warehouse
+          description: Serverless or Pro SQL warehouse for system table queries
+          sql_warehouse:
+            id: ${var.warehouse_id}
+            permission: CAN_USE
+
+        - name: lakebase
+          description: Lakebase Autoscaling project — injects PGHOST/PGUSER/PGDATABASE/PGPORT/PGSSLMODE
+          postgres:
+            branch: projects/${var.lakebase_project_name}/branches/production
+            database: projects/${var.lakebase_project_name}/branches/production/databases/databricks-postgres
+            permission: CAN_CONNECT_AND_CREATE

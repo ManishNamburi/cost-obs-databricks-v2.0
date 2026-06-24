@@ -33,11 +33,48 @@ def _get_workspace_client() -> WorkspaceClient:
     return WorkspaceClient()
 
 
+def _resolve_lakebase_env() -> None:
+    """Derive Lakebase connection env vars from the SDK when the App resource
+    binding hasn't injected them (e.g. when running as a setup job task).
+
+    Requires ENDPOINT_NAME to be set to the full endpoint path, e.g.
+    ``projects/<name>/branches/production/endpoints/primary``.
+    Populates PGHOST, PGDATABASE, PGUSER if they are absent.
+    """
+    if os.environ.get("PGHOST"):
+        return  # already injected by App runtime binding — nothing to do
+    endpoint_name = os.environ.get("ENDPOINT_NAME", "")
+    if not endpoint_name:
+        return
+    w = _get_workspace_client()
+    try:
+        # Use raw API to avoid SDK version dependency — w.postgres may not exist
+        # on older SDK versions bundled with the workspace runtime.
+        ep = w.api_client.do("GET", f"/api/2.0/postgres/{endpoint_name}")
+        host = (ep.get("status") or {}).get("hosts", {}).get("host", "")
+        if host:
+            os.environ["PGHOST"] = host
+    except Exception as e:
+        print(f"[_resolve_lakebase_env] WARNING: could not resolve PGHOST: {e}")
+    os.environ.setdefault("PGDATABASE", "databricks_postgres")
+    if not os.environ.get("PGUSER"):
+        try:
+            me = w.current_user.me()
+            # Lakebase maps the JWT sub claim to a PG role. For human users the
+            # sub is the email address; for service principals it is their client UUID.
+            pguser = me.user_name or ""
+            if pguser:
+                os.environ["PGUSER"] = pguser
+        except Exception as e:
+            print(f"[_resolve_lakebase_env] WARNING: could not determine PGUSER: {e}")
+
+
 def _get_pg_conn_str() -> str:
+    _resolve_lakebase_env()
     host = os.environ["PGHOST"]
     port = os.environ.get("PGPORT", "5432")
     database = os.environ["PGDATABASE"]
-    user = os.environ["PGUSER"]
+    user = os.environ.get("PGUSER", "token")
     sslmode = os.environ.get("PGSSLMODE", "require")
     schema = os.environ.get("COST_OBS_SCHEMA", "cost_obs")
     return (
@@ -50,8 +87,12 @@ def _make_oauth_connection(conn_str: str) -> psycopg.Connection:
     """Open a psycopg connection using a fresh OAuth token."""
     w = _get_workspace_client()
     endpoint_name = os.environ["ENDPOINT_NAME"]
-    cred = w.postgres.generate_database_credential(endpoint_name=endpoint_name)
-    return psycopg.connect(conn_str, password=cred.token)
+    # POST /api/2.0/postgres/credentials with {"endpoint": "<full_path>"}
+    resp = w.api_client.do(
+        "POST", "/api/2.0/postgres/credentials", body={"endpoint": endpoint_name}
+    )
+    token = resp.get("token", "")
+    return psycopg.connect(conn_str, password=token)
 
 
 @contextmanager
@@ -73,7 +114,7 @@ def pg_conn() -> Generator[psycopg.Connection, None, None]:
 # ---------------------------------------------------------------------------
 
 _SETUP_STATE_DDL = """
-CREATE TABLE IF NOT EXISTS setup_state (
+CREATE TABLE IF NOT EXISTS public.setup_state (
     step        TEXT PRIMARY KEY,
     completed_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     metadata    JSONB
@@ -89,7 +130,7 @@ def _ensure_setup_state(conn: psycopg.Connection) -> None:
 def _is_step_done(conn: psycopg.Connection, step: str) -> bool:
     _ensure_setup_state(conn)
     with conn.cursor() as cur:
-        cur.execute("SELECT 1 FROM setup_state WHERE step = %s", (step,))
+        cur.execute("SELECT 1 FROM public.setup_state WHERE step = %s", (step,))
         return cur.fetchone() is not None
 
 
@@ -97,7 +138,7 @@ def _mark_step_done(conn: psycopg.Connection, step: str, metadata: dict | None =
     with conn.cursor() as cur:
         cur.execute(
             """
-            INSERT INTO setup_state (step, completed_at, metadata)
+            INSERT INTO public.setup_state (step, completed_at, metadata)
             VALUES (%s, %s, %s)
             ON CONFLICT (step) DO UPDATE
               SET completed_at = EXCLUDED.completed_at,
@@ -113,8 +154,9 @@ def _mark_step_done(conn: psycopg.Connection, step: str, metadata: dict | None =
 
 def validate() -> None:
     """Check env vars, UC permissions, and warehouse connectivity."""
-    required = ["PGHOST", "PGDATABASE", "PGUSER", "ENDPOINT_NAME",
-                "DATABRICKS_WAREHOUSE_ID", "COST_OBS_CATALOG", "COST_OBS_SCHEMA"]
+    # PGHOST/PGDATABASE/PGUSER are derived from the SDK if missing (job task path)
+    _resolve_lakebase_env()
+    required = ["ENDPOINT_NAME", "DATABRICKS_WAREHOUSE_ID", "COST_OBS_CATALOG", "COST_OBS_SCHEMA"]
     missing = [v for v in required if not os.environ.get(v)]
     if missing:
         raise EnvironmentError(f"Missing required environment variables: {missing}")
@@ -136,14 +178,24 @@ def validate() -> None:
 
 
 def _get_app_sp_uuid() -> str:
-    """Return the UUID of the app service principal (not the client_id string).
+    """Return the SCIM numeric ID of the app service principal.
 
-    Lakebase OAuth roles are mapped by UUID, not by the display name or client_id.
+    Lakebase OAuth roles are mapped by SCIM ID, not by the display name or client_id UUID.
+    Falls back to looking up by APP_NAME → w.apps.get() when DATABRICKS_CLIENT_ID is absent
+    (as happens when running as a setup job task rather than inside the App runtime).
     """
     w = _get_workspace_client()
     client_id = os.environ.get("DATABRICKS_CLIENT_ID", "").strip()
     if not client_id:
-        raise EnvironmentError("DATABRICKS_CLIENT_ID not set — cannot derive SP UUID")
+        app_name = os.environ.get("APP_NAME", "").strip()
+        if not app_name:
+            raise EnvironmentError(
+                "DATABRICKS_CLIENT_ID not set and APP_NAME not set — cannot derive SP UUID"
+            )
+        app = w.api_client.do("GET", f"/api/2.0/apps/{app_name}")
+        client_id = (app.get("service_principal_client_id") or "")
+        if not client_id:
+            raise RuntimeError(f"App '{app_name}' has no service_principal_client_id")
     sps = list(w.service_principals.list(filter=f"applicationId eq {client_id}"))
     if not sps:
         raise RuntimeError(f"Service principal with client_id={client_id} not found in workspace")
@@ -205,16 +257,16 @@ def bootstrap_lakebase() -> None:
         # 4. ALTER DEFAULT PRIVILEGES — future tables inherit access automatically
         current_role_row = None
         with conn.cursor() as cur:
-            cur.execute("SELECT current_role()")
+            cur.execute("SELECT current_role")
             current_role_row = cur.fetchone()
         current_role = current_role_row[0] if current_role_row else "current_user"
         with conn.cursor() as cur:
             cur.execute(
-                f'ALTER DEFAULT PRIVILEGES FOR ROLE {current_role} IN SCHEMA {schema} '
+                f'ALTER DEFAULT PRIVILEGES FOR ROLE "{current_role}" IN SCHEMA {schema} '
                 f'GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO "{sp_uuid}"'
             )
             cur.execute(
-                f'ALTER DEFAULT PRIVILEGES FOR ROLE {current_role} IN SCHEMA {schema} '
+                f'ALTER DEFAULT PRIVILEGES FOR ROLE "{current_role}" IN SCHEMA {schema} '
                 f'GRANT USAGE, SELECT ON SEQUENCES TO "{sp_uuid}"'
             )
         print(f"[bootstrap_lakebase] ALTER DEFAULT PRIVILEGES set for role {current_role}")
@@ -304,7 +356,7 @@ def verify() -> None:
     # Smoke check: Lakebase setup_state is populated
     with pg_conn() as conn:
         with conn.cursor() as cur:
-            cur.execute("SELECT step, completed_at FROM setup_state ORDER BY completed_at")
+            cur.execute("SELECT step, completed_at FROM public.setup_state ORDER BY completed_at")
             rows = cur.fetchall()
             print(f"[verify] setup_state entries: {[r[0] for r in rows]}")
 

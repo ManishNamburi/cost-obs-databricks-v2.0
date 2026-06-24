@@ -1114,8 +1114,8 @@ def _lakebase_conninfo() -> str:
 def _make_lakebase_connection(conninfo: str) -> "psycopg.Connection":
     """Open a psycopg3 connection using a fresh OAuth token from the SDK."""
     w = get_workspace_client()
-    endpoint_name = os.environ.get("ENDPOINT_NAME", "")
-    cred = w.postgres.generate_database_credential(endpoint_name=endpoint_name)
+    endpoint = os.environ.get("ENDPOINT_NAME", "")
+    cred = w.postgres.generate_database_credential(endpoint=endpoint)
     return psycopg.connect(conninfo, password=cred.token, autocommit=False)
 
 

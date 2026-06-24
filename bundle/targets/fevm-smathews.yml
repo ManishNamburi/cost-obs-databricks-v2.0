@@ -1,0 +1,13 @@
+targets:
+  fevm-smathews:
+    mode: development
+    workspace:
+      host: https://fevm-serverless-stable-smathews.cloud.databricks.com
+      profile: fevm-smathews
+    variables:
+      app_name: cost-observability-dev
+      catalog: serverless_stable_smathews_catalog
+      schema: cost_obs_dev
+      warehouse_id: 6f225d8cc2b83dbc
+      lakebase_project_name: cost-obs-db-dev
+      lakebase_endpoint_name: projects/cost-obs-db-dev/branches/production/endpoints/primary

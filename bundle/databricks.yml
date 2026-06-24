@@ -8,6 +8,7 @@ include:
 variables:
   workspace_host:
     description: Databricks workspace URL (e.g. https://my-workspace.azuredatabricks.net)
+    default: ""
   app_name:
     description: Databricks App name
     default: cost-observability
@@ -46,5 +47,8 @@ variables:
       Find it in the Databricks account console under your user menu.
     default: ""
 
-workspace:
-  auth_type: pat
+sync:
+  paths:
+    - .
+    - ../setup
+
