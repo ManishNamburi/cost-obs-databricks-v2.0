@@ -876,7 +876,7 @@ async def lifespan(app: FastAPI):
         while True:
             try:
                 from backend.routers.settings import load_schedule_settings
-                sched = load_schedule_settings()
+                sched = await asyncio.to_thread(load_schedule_settings)
                 # Clear first_iteration unconditionally so re-enabling later doesn't re-trigger catch-up
                 is_first = first_iteration
                 if first_iteration:
@@ -927,7 +927,7 @@ async def lifespan(app: FastAPI):
                 await asyncio.sleep(max(wait, 0))
 
                 # Re-read settings in case they changed while sleeping
-                sched = load_schedule_settings()
+                sched = await asyncio.to_thread(load_schedule_settings)
                 if not sched.get("enabled", True):
                     continue
                 frequency = sched.get("frequency", "nightly")
