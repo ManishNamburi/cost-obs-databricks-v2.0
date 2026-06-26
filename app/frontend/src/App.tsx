@@ -59,13 +59,6 @@ function preloadTabChunks() {
   import("@/components/BudgetView");
 }
 
-if (typeof window !== "undefined") {
-  if ("requestIdleCallback" in window) {
-    requestIdleCallback(preloadTabChunks, { timeout: 5000 });
-  } else {
-    setTimeout(preloadTabChunks, 2000);
-  }
-}
 import {
   useAccountInfo,
   useAWSActualCosts,
@@ -376,6 +369,18 @@ function Dashboard() {
     staleTime: 0,
   });
   const warehouseWarming = warehouseStatus?.status === "warming_up";
+  const warehouseReady = warehouseStatus?.status === "warm";
+
+  // Preload lazy chunks only after warehouse is confirmed warm — prevents the
+  // browser ES module registry from caching rejected promises during startup.
+  useEffect(() => {
+    if (!warehouseReady) return;
+    if ("requestIdleCallback" in window) {
+      requestIdleCallback(preloadTabChunks, { timeout: 5000 });
+    } else {
+      setTimeout(preloadTabChunks, 2000);
+    }
+  }, [warehouseReady]);
 
   // Fast bundle for quick initial load (uses materialized views)
   const { data: bundle, isLoading: bundleLoading } = useDashboardBundleFast(dateRange, selectedWorkspaceIds.length ? selectedWorkspaceIds : undefined);
