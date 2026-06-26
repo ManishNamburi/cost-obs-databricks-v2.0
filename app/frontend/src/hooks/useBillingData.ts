@@ -541,12 +541,3 @@ export function useBudgetDashboard(enabled: boolean = true) {
   });
 }
 
-export function useSpNames() {
-  return useQuery<Record<string, string>>({
-    queryKey: ["user", "sp-names"],
-    queryFn: () => fetchJson("/api/user/sp-names"),
-    staleTime: 60 * 60 * 1000,
-    gcTime: 2 * 60 * 60 * 1000,
-    retry: 1,
-  });
-}
