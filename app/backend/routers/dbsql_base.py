@@ -69,8 +69,8 @@ def _build_queries(table_name: str) -> dict[str, str]:
               SUM(query_attributed_dbus_estimation) as total_dbus,
               AVG(query_attributed_dollars_estimation) as avg_cost_per_query
             FROM `{{catalog}}`.`{{schema}}`.`{table_name}`
-            WHERE start_time >= :start_date
-              AND start_time < :end_date
+            WHERE DATE(start_time) >= :start_date
+              AND DATE(start_time) <= :end_date
             GROUP BY query_source_type
             ORDER BY total_spend DESC
         """,
@@ -82,8 +82,8 @@ def _build_queries(table_name: str) -> dict[str, str]:
               SUM(query_attributed_dollars_estimation) as total_spend,
               SUM(query_attributed_dbus_estimation) as total_dbus
             FROM `{{catalog}}`.`{{schema}}`.`{table_name}`
-            WHERE start_time >= :start_date
-              AND start_time < :end_date
+            WHERE DATE(start_time) >= :start_date
+              AND DATE(start_time) <= :end_date
             GROUP BY executed_by, query_source_type
             ORDER BY total_spend DESC
             LIMIT 100
@@ -105,8 +105,8 @@ def _build_queries(table_name: str) -> dict[str, str]:
               start_time,
               end_time
             FROM `{{catalog}}`.`{{schema}}`.`{table_name}`
-            WHERE start_time >= :start_date
-              AND start_time < :end_date
+            WHERE DATE(start_time) >= :start_date
+              AND DATE(start_time) <= :end_date
             ORDER BY query_attributed_dollars_estimation DESC
             LIMIT :limit
         """,
@@ -120,8 +120,8 @@ def _build_queries(table_name: str) -> dict[str, str]:
               AVG(query_attributed_dollars_estimation) as avg_cost_per_query,
               AVG(duration_seconds) as avg_duration_seconds
             FROM `{{catalog}}`.`{{schema}}`.`{table_name}`
-            WHERE start_time >= :start_date
-              AND start_time < :end_date
+            WHERE DATE(start_time) >= :start_date
+              AND DATE(start_time) <= :end_date
         """,
         "by_warehouse": f"""
             SELECT
@@ -131,8 +131,8 @@ def _build_queries(table_name: str) -> dict[str, str]:
               SUM(query_attributed_dollars_estimation) as total_spend,
               SUM(query_attributed_dbus_estimation) as total_dbus
             FROM `{{catalog}}`.`{{schema}}`.`{table_name}`
-            WHERE start_time >= :start_date
-              AND start_time < :end_date
+            WHERE DATE(start_time) >= :start_date
+              AND DATE(start_time) <= :end_date
             GROUP BY warehouse_id
             ORDER BY total_spend DESC
             LIMIT 50
@@ -145,8 +145,8 @@ def _build_queries(table_name: str) -> dict[str, str]:
               SUM(query_attributed_dollars_estimation) as daily_spend,
               SUM(query_attributed_dbus_estimation) as daily_dbus
             FROM `{{catalog}}`.`{{schema}}`.`{table_name}`
-            WHERE start_time >= :start_date
-              AND start_time < :end_date
+            WHERE DATE(start_time) >= :start_date
+              AND DATE(start_time) <= :end_date
             GROUP BY DATE(start_time), query_source_type
             ORDER BY date
         """,
@@ -167,8 +167,8 @@ def _build_queries(table_name: str) -> dict[str, str]:
               start_time,
               end_time
             FROM `{{catalog}}`.`{{schema}}`.`{table_name}`
-            WHERE start_time >= :start_date
-              AND start_time < :end_date
+            WHERE DATE(start_time) >= :start_date
+              AND DATE(start_time) <= :end_date
               AND executed_by = :user
             ORDER BY query_attributed_dollars_estimation DESC
             LIMIT :limit
@@ -197,8 +197,8 @@ def create_dbsql_router(table_name: str) -> APIRouter:
         query = template.format(catalog=catalog, schema=schema)
         if ws_clause:
             query = query.replace(
-                "AND start_time < :end_date",
-                f"AND start_time < :end_date\n              {ws_clause}",
+                "AND DATE(start_time) <= :end_date",
+                f"AND DATE(start_time) <= :end_date\n              {ws_clause}",
                 1,
             )
         return execute_query(query, params)
@@ -661,8 +661,8 @@ def create_dbsql_router(table_name: str) -> APIRouter:
               start_time,
               end_time
             FROM `{catalog}`.`{schema}`.`{table_name}`
-            WHERE start_time >= :start_date
-              AND start_time < :end_date
+            WHERE DATE(start_time) >= :start_date
+              AND DATE(start_time) <= :end_date
               AND query_source_type = :source_type
             ORDER BY query_attributed_dollars_estimation DESC
             LIMIT {safe_limit}

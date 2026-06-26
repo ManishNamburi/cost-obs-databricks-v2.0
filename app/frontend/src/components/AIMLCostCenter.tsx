@@ -286,7 +286,7 @@ export function AIMLCostCenter({ data, isLoading, startDate, endDate, host, work
             <div className="ml-4">
               <p className="text-sm font-medium text-gray-500">Total AI/ML Spend</p>
               <p className="text-2xl font-semibold text-gray-900">{formatCurrency(summary.total_spend)}</p>
-              <p className="mt-1 text-xs text-gray-500">{summary.days_in_range} days</p>
+              <p className="mt-1 text-xs text-gray-500">over {summary.days_in_range} days</p>
               <p className="mt-0.5 text-xs font-medium" style={{ color: '#FF3621' }}>Click to see trend →</p>
             </div>
           </div>
@@ -306,7 +306,7 @@ export function AIMLCostCenter({ data, isLoading, startDate, endDate, host, work
             <div className="ml-4">
               <p className="text-sm font-medium text-gray-500">Total DBUs</p>
               <p className="text-2xl font-semibold text-gray-900">{formatNumber(summary.total_dbus)}</p>
-              <p className="mt-1 text-xs text-gray-500">{summary.days_in_range} days</p>
+              <p className="mt-1 text-xs text-gray-500">over {summary.days_in_range} days</p>
               <p className="mt-0.5 text-xs font-medium" style={{ color: '#FF3621' }}>Click to see trend →</p>
             </div>
           </div>
@@ -326,7 +326,7 @@ export function AIMLCostCenter({ data, isLoading, startDate, endDate, host, work
             <div className="ml-4">
               <p className="text-sm font-medium text-gray-500">Active Endpoints</p>
               <p className="text-2xl font-semibold text-gray-900">{formatNumber(summary.endpoint_count || 0)}</p>
-              <p className="mt-1 text-xs text-gray-500">daily average across {summary.workspace_count || 0} workspaces</p>
+              <p className="mt-1 text-xs text-gray-500">across {summary.workspace_count || 0} workspaces</p>
               <p className="mt-0.5 text-xs font-medium" style={{ color: '#FF3621' }}>Click to see trend →</p>
             </div>
           </div>
@@ -346,7 +346,7 @@ export function AIMLCostCenter({ data, isLoading, startDate, endDate, host, work
             <div className="ml-4">
               <p className="text-sm font-medium text-gray-500">Endpoint Cost</p>
               <p className="text-2xl font-semibold text-gray-900">{formatCurrency(summary.avg_cost_per_endpoint || 0)}</p>
-              <p className="mt-1 text-xs text-gray-500">daily average</p>
+              <p className="mt-1 text-xs text-gray-500">daily per endpoint</p>
               <p className="mt-0.5 text-xs font-medium" style={{ color: '#FF3621' }}>Click to see trend →</p>
             </div>
           </div>

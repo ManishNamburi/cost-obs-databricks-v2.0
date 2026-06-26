@@ -342,7 +342,7 @@ export function AppsCostCenter({ data: initialData, isLoading: initialLoading, h
   const queryClient = useQueryClient();
   useEffect(() => {
     if (!startDate || !endDate) return;
-    for (const kpi of ["apps_spend", "apps_dbus", "apps_count"]) {
+    for (const kpi of ["apps_spend", "apps_dbus", "apps_count", "apps_avg_cost_per_app"]) {
       queryClient.prefetchQuery({
         queryKey: ["apps-kpi-trend", kpi, startDate, endDate, "daily"],
         queryFn: async () => {
@@ -603,6 +603,7 @@ export function AppsCostCenter({ data: initialData, isLoading: initialLoading, h
               <p className="text-sm font-medium text-gray-500">Total Apps Spend</p>
               <p className="text-2xl font-semibold text-gray-900">{formatCurrency(summary.total_spend)}</p>
               <p className="mt-1 text-xs text-gray-500">over {summary.days_in_range} days</p>
+              {startDate && endDate && <p className="mt-1 text-xs font-medium" style={{ color: '#FF3621' }}>Click to see trend &rarr;</p>}
             </div>
           </div>
         </div>
@@ -622,6 +623,7 @@ export function AppsCostCenter({ data: initialData, isLoading: initialLoading, h
               <p className="text-sm font-medium text-gray-500">Total DBUs</p>
               <p className="text-2xl font-semibold text-gray-900">{formatNumber(summary.total_dbus)}</p>
               <p className="mt-1 text-xs text-gray-500">over {summary.days_in_range} days</p>
+              {startDate && endDate && <p className="mt-1 text-xs font-medium" style={{ color: '#FF3621' }}>Click to see trend &rarr;</p>}
             </div>
           </div>
         </div>
@@ -640,7 +642,8 @@ export function AppsCostCenter({ data: initialData, isLoading: initialLoading, h
             <div className="ml-4">
               <p className="text-sm font-medium text-gray-500">Active Apps</p>
               <p className="text-2xl font-semibold text-gray-900">{formatNumber(summary.avg_daily_apps ?? summary.app_count)}</p>
-              <p className="mt-1 text-xs text-gray-500">daily avg across {summary.workspace_count} workspaces</p>
+              <p className="mt-1 text-xs text-gray-500">across {summary.workspace_count} workspaces</p>
+              {startDate && endDate && <p className="mt-1 text-xs font-medium" style={{ color: '#FF3621' }}>Click to see trend &rarr;</p>}
             </div>
           </div>
         </div>
@@ -658,8 +661,9 @@ export function AppsCostCenter({ data: initialData, isLoading: initialLoading, h
             </div>
             <div className="ml-4">
               <p className="text-sm font-medium text-gray-500">App Spend</p>
-              <p className="text-2xl font-semibold text-gray-900">{formatCurrency(summary.avg_daily_spend)}</p>
-              <p className="mt-1 text-xs text-gray-500">daily avg per app</p>
+              <p className="text-2xl font-semibold text-gray-900">{formatCurrency(summary.avg_cost_per_app ?? 0)}</p>
+              <p className="mt-1 text-xs text-gray-500">daily average</p>
+              {startDate && endDate && <p className="mt-1 text-xs font-medium" style={{ color: '#FF3621' }}>Click to see trend &rarr;</p>}
             </div>
           </div>
         </div>

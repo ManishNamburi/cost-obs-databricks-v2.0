@@ -364,7 +364,7 @@ function Dashboard() {
   // Polls every 5s while warming_up, backs off to 60s once warm.
   const { data: warehouseStatus } = useQuery<{ status: "warm" | "warming_up" | "unavailable"; state?: string }>({
     queryKey: ["health", "sql-warehouse"],
-    queryFn: () => fetch("/api/health/sql-warehouse").then(r => r.json().catch(() => ({ status: "warm" }))).catch(() => ({ status: "warm" })),
+    queryFn: () => fetch("/api/health/sql-warehouse").then(r => r.ok ? r.json().catch(() => ({ status: "warm" })) : { status: "warm" }).catch(() => ({ status: "warm" })),
     refetchInterval: (query) => (query.state.data?.status === "warming_up") ? 5000 : 60000,
     staleTime: 0,
   });
@@ -464,7 +464,7 @@ function Dashboard() {
   const anomaliesLoading = kpisBundleLoading;
   const kpisLoading = kpisBundleLoading;
 
-  const { data: aimlData, isLoading: aimlLoading } = useAIMLDashboardBundle(dateRange, _wsIds, activeTab === "aiml");
+  const { data: aimlData, isLoading: aimlLoading } = useAIMLDashboardBundle(dateRange, _wsIds, warehouseReady && activeTab === "aiml");
   const { data: aiGatewayData, isLoading: aiGatewayLoading } = useAIGatewayDashboardBundle(dateRange, _wsIds, activeTab === "ai-gateway");
   const { data: budgetData, isLoading: budgetLoading } = useBudgetDashboard(activeTab === "budget");
   const { data: appsData, isLoading: appsLoading } = useAppsDashboardBundle(dateRange, _wsIds, warehouseReady);
