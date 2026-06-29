@@ -293,6 +293,81 @@ GROUP BY usage_date, category
 ORDER BY usage_date, category
 """
 
+AIML_TOP_MODELS_ENRICHED = """
+WITH cluster_names AS (
+  SELECT cluster_id, MAX(cluster_name) as cluster_name
+  FROM system.compute.clusters
+  GROUP BY cluster_id
+),
+model_usage AS (
+  SELECT
+    u.usage_date,
+    u.workspace_id,
+    u.sku_name,
+    u.usage_quantity,
+    COALESCE(p.pricing.default, 0) as price_per_dbu,
+    CASE
+      WHEN u.sku_name LIKE '%FEATURE%' THEN 'Feature Store'
+      WHEN u.sku_name LIKE '%TRAINING%' THEN 'Model Training'
+      WHEN u.sku_name LIKE '%ANTHROPIC%' OR u.sku_name LIKE '%OPENAI%'
+           OR u.sku_name LIKE '%GEMINI%' OR u.sku_name LIKE '%META%'
+           OR u.sku_name LIKE '%COHERE%' OR u.sku_name LIKE '%MISTRAL%'
+           OR u.sku_name LIKE '%AI21%' OR u.sku_name LIKE '%MOSAIC%'
+           OR u.sku_name LIKE '%DBRX%' OR u.sku_name LIKE '%LLAMA%'
+           OR u.billing_origin_product = 'FOUNDATION_MODEL_SERVING' THEN 'Foundation Model API'
+      ELSE NULL
+    END as model_type,
+    COALESCE(
+      u.usage_metadata.endpoint_name,
+      cn.cluster_name,
+      CASE WHEN u.usage_metadata.job_id IS NOT NULL
+        THEN CONCAT('Job #', CAST(u.usage_metadata.job_id AS STRING))
+        ELSE NULL END,
+      CAST(u.usage_metadata.cluster_id AS STRING),
+      CASE WHEN u.sku_name LIKE '%FEATURE%' THEN 'Feature Store Run'
+           WHEN u.sku_name LIKE '%TRAINING%' THEN 'Serverless Fine-tuning'
+           ELSE NULL END,
+      'Unknown'
+    ) as model_name
+  FROM system.billing.usage u
+  LEFT JOIN system.billing.list_prices p
+    ON u.sku_name = p.sku_name
+    AND u.cloud = p.cloud
+    AND p.price_end_time IS NULL
+  LEFT JOIN cluster_names cn
+    ON u.usage_metadata.cluster_id = cn.cluster_id
+  WHERE u.usage_date BETWEEN :start_date AND :end_date
+    AND u.usage_quantity > 0
+    AND (
+      u.sku_name LIKE '%FEATURE%'
+      OR u.sku_name LIKE '%TRAINING%'
+      OR u.sku_name LIKE '%ANTHROPIC%'
+      OR u.sku_name LIKE '%OPENAI%'
+      OR u.sku_name LIKE '%GEMINI%'
+      OR u.sku_name LIKE '%META%'
+      OR u.sku_name LIKE '%COHERE%'
+      OR u.sku_name LIKE '%MISTRAL%'
+      OR u.sku_name LIKE '%AI21%'
+      OR u.sku_name LIKE '%MOSAIC%'
+      OR u.sku_name LIKE '%DBRX%'
+      OR u.sku_name LIKE '%LLAMA%'
+      OR u.billing_origin_product = 'FOUNDATION_MODEL_SERVING'
+    )
+)
+SELECT
+  model_name,
+  model_type,
+  SUM(usage_quantity) as total_dbus,
+  SUM(usage_quantity * price_per_dbu) as total_spend,
+  COUNT(DISTINCT usage_date) as days_active,
+  COUNT(DISTINCT workspace_id) as workspace_count
+FROM model_usage
+WHERE model_type IS NOT NULL
+GROUP BY model_name, model_type
+ORDER BY total_spend DESC
+LIMIT 50
+"""
+
 AIML_TOP_MODELS_AND_FEATURE_STORES = """
 WITH model_usage AS (
   SELECT
@@ -301,7 +376,17 @@ WITH model_usage AS (
     u.sku_name,
     u.usage_quantity,
     COALESCE(p.pricing.default, 0) as price_per_dbu,
-    COALESCE(u.usage_metadata.endpoint_name, 'Unknown') as model_name,
+    COALESCE(
+      u.usage_metadata.endpoint_name,
+      CASE WHEN u.usage_metadata.job_id IS NOT NULL
+        THEN CONCAT('Job #', CAST(u.usage_metadata.job_id AS STRING))
+        ELSE NULL END,
+      CAST(u.usage_metadata.cluster_id AS STRING),
+      CASE WHEN u.sku_name LIKE '%FEATURE%' THEN 'Feature Store Run'
+           WHEN u.sku_name LIKE '%TRAINING%' THEN 'Serverless Fine-tuning'
+           ELSE NULL END,
+      'Unknown'
+    ) as model_name,
     CASE
       WHEN u.sku_name LIKE '%FEATURE%' THEN 'Feature Store'
       WHEN u.sku_name LIKE '%TRAINING%' THEN 'Model Training'
@@ -347,7 +432,7 @@ FROM model_usage
 WHERE model_type IS NOT NULL
 GROUP BY model_name, model_type
 ORDER BY total_spend DESC
-LIMIT 20
+LIMIT 50
 """
 
 ## ML Runtime Clusters
@@ -423,7 +508,8 @@ AIML_AGENT_BRICKS_ENRICHED = """
 WITH serving_endpoints AS (
   SELECT
     endpoint_id as serving_endpoint_id,
-    MAX(endpoint_name) as endpoint_name
+    MAX(endpoint_name) as endpoint_name,
+    MAX(served_entity_name) as served_entity_name
   FROM system.serving.served_entities
   WHERE endpoint_id IS NOT NULL
   GROUP BY endpoint_id
@@ -437,17 +523,29 @@ SELECT
   ) as agent_name,
   MAX(u.usage_metadata.endpoint_id) as endpoint_id,
   MAX(u.workspace_id) as workspace_id,
+  MAX(u.billing_origin_product) as billing_origin_product,
+  MAX(se.served_entity_name) as served_entity_name,
   MAX(CASE
-    WHEN COALESCE(se.endpoint_name, u.usage_metadata.endpoint_name, '') LIKE 'ka-%'
-      OR COALESCE(se.endpoint_name, u.usage_metadata.endpoint_name, '') LIKE 'kie-%'
-      OR LOWER(COALESCE(se.endpoint_name, u.usage_metadata.endpoint_name, '')) LIKE '%knowledge%assistant%'
-      THEN 'Knowledge Assistant'
-    WHEN LOWER(COALESCE(se.endpoint_name, u.usage_metadata.endpoint_name, '')) LIKE '%genie%'
-      THEN 'Genie Space'
-    WHEN LOWER(COALESCE(se.endpoint_name, u.usage_metadata.endpoint_name, '')) LIKE '%supervisor%'
+    WHEN u.billing_origin_product = 'SUPERVISOR_AGENT'
+      OR LOWER(COALESCE(se.endpoint_name, u.usage_metadata.endpoint_name, '')) LIKE '%supervisor%'
       OR LOWER(COALESCE(se.endpoint_name, u.usage_metadata.endpoint_name, '')) LIKE '%multi-agent%'
       OR LOWER(COALESCE(se.endpoint_name, u.usage_metadata.endpoint_name, '')) LIKE '%orchestrator%'
       THEN 'Supervisor Agent'
+    WHEN u.billing_origin_product = 'KNOWLEDGE_AGENT'
+      OR (u.billing_origin_product = 'AGENT_BRICKS'
+          AND u.product_features.agent_bricks.problem_type = 'AGENT_BRICKS_KNOWLEDGE_ASSISTANT')
+      OR COALESCE(se.endpoint_name, u.usage_metadata.endpoint_name, '') LIKE 'ka-%'
+      OR COALESCE(se.endpoint_name, u.usage_metadata.endpoint_name, '') LIKE 'kie-%'
+      OR LOWER(COALESCE(se.endpoint_name, u.usage_metadata.endpoint_name, '')) LIKE '%knowledge%assistant%'
+      THEN 'Knowledge Assistant'
+    WHEN u.billing_origin_product = 'AGENT_BRICKS'
+      AND u.product_features.agent_bricks.problem_type = 'AGENT_BRICKS_AI_CLASSIFY'
+      THEN 'AI Classify'
+    WHEN u.billing_origin_product = 'AGENT_BRICKS'
+      AND u.product_features.agent_bricks.problem_type = 'AGENT_BRICKS_AI_EXTRACT'
+      THEN 'AI Extract'
+    WHEN LOWER(COALESCE(se.endpoint_name, u.usage_metadata.endpoint_name, '')) LIKE '%genie%'
+      THEN 'Genie Space'
     ELSE 'Agent'
   END) as agent_type,
   SUM(u.usage_quantity) as total_dbus,
@@ -466,10 +564,7 @@ LEFT JOIN serving_endpoints se
   ON u.usage_metadata.endpoint_id = se.serving_endpoint_id
 WHERE u.usage_date BETWEEN :start_date AND :end_date
   AND u.usage_quantity > 0
-  AND (
-    LOWER(u.sku_name) LIKE '%agent%'
-    OR u.billing_origin_product = 'AGENT_BRICKS'
-  )
+  AND u.billing_origin_product IN ('AGENT_BRICKS', 'SUPERVISOR_AGENT', 'KNOWLEDGE_AGENT')
 GROUP BY COALESCE(se.endpoint_name, u.usage_metadata.endpoint_name, u.usage_metadata.endpoint_id, 'Unknown')
 ORDER BY total_spend DESC
 """
@@ -479,17 +574,29 @@ SELECT
   COALESCE(u.usage_metadata.endpoint_name, u.usage_metadata.endpoint_id, 'Unknown') as agent_name,
   MAX(u.usage_metadata.endpoint_id) as endpoint_id,
   MAX(u.workspace_id) as workspace_id,
+  MAX(u.billing_origin_product) as billing_origin_product,
+  CAST(NULL AS STRING) as served_entity_name,
   MAX(CASE
-    WHEN COALESCE(u.usage_metadata.endpoint_name, '') LIKE 'ka-%'
-      OR COALESCE(u.usage_metadata.endpoint_name, '') LIKE 'kie-%'
-      OR LOWER(COALESCE(u.usage_metadata.endpoint_name, '')) LIKE '%knowledge%assistant%'
-      THEN 'Knowledge Assistant'
-    WHEN LOWER(COALESCE(u.usage_metadata.endpoint_name, '')) LIKE '%genie%'
-      THEN 'Genie Space'
-    WHEN LOWER(COALESCE(u.usage_metadata.endpoint_name, '')) LIKE '%supervisor%'
+    WHEN u.billing_origin_product = 'SUPERVISOR_AGENT'
+      OR LOWER(COALESCE(u.usage_metadata.endpoint_name, '')) LIKE '%supervisor%'
       OR LOWER(COALESCE(u.usage_metadata.endpoint_name, '')) LIKE '%multi-agent%'
       OR LOWER(COALESCE(u.usage_metadata.endpoint_name, '')) LIKE '%orchestrator%'
       THEN 'Supervisor Agent'
+    WHEN u.billing_origin_product = 'KNOWLEDGE_AGENT'
+      OR (u.billing_origin_product = 'AGENT_BRICKS'
+          AND u.product_features.agent_bricks.problem_type = 'AGENT_BRICKS_KNOWLEDGE_ASSISTANT')
+      OR COALESCE(u.usage_metadata.endpoint_name, '') LIKE 'ka-%'
+      OR COALESCE(u.usage_metadata.endpoint_name, '') LIKE 'kie-%'
+      OR LOWER(COALESCE(u.usage_metadata.endpoint_name, '')) LIKE '%knowledge%assistant%'
+      THEN 'Knowledge Assistant'
+    WHEN u.billing_origin_product = 'AGENT_BRICKS'
+      AND u.product_features.agent_bricks.problem_type = 'AGENT_BRICKS_AI_CLASSIFY'
+      THEN 'AI Classify'
+    WHEN u.billing_origin_product = 'AGENT_BRICKS'
+      AND u.product_features.agent_bricks.problem_type = 'AGENT_BRICKS_AI_EXTRACT'
+      THEN 'AI Extract'
+    WHEN LOWER(COALESCE(u.usage_metadata.endpoint_name, '')) LIKE '%genie%'
+      THEN 'Genie Space'
     ELSE 'Agent'
   END) as agent_type,
   SUM(u.usage_quantity) as total_dbus,
@@ -506,10 +613,7 @@ LEFT JOIN system.billing.list_prices p
   AND p.price_end_time IS NULL
 WHERE u.usage_date BETWEEN :start_date AND :end_date
   AND u.usage_quantity > 0
-  AND (
-    LOWER(u.sku_name) LIKE '%agent%'
-    OR u.billing_origin_product = 'AGENT_BRICKS'
-  )
+  AND u.billing_origin_product IN ('AGENT_BRICKS', 'SUPERVISOR_AGENT', 'KNOWLEDGE_AGENT')
 GROUP BY COALESCE(u.usage_metadata.endpoint_name, u.usage_metadata.endpoint_id, 'Unknown')
 ORDER BY total_spend DESC
 """
@@ -895,12 +999,12 @@ def _compute_aiml_bundle(params: dict, id_list: list | None, ws_clause: str, dke
             ("endpoints", lambda: execute_query(_ws(SERVERLESS_INFERENCE_BY_ENDPOINT), params)),
             ("categories", lambda: execute_query(_ws(AIML_BY_CATEGORY), params)),
             ("timeseries", lambda: execute_query(_ws(AIML_TIMESERIES), params)),
-            ("models", lambda: execute_query(_ws(AIML_TOP_MODELS_AND_FEATURE_STORES), params)),
+            ("models", lambda: query_with_fallback(_ws(AIML_TOP_MODELS_ENRICHED), _ws(AIML_TOP_MODELS_AND_FEATURE_STORES), params, label="models")),
             ("ml_clusters", lambda: query_with_fallback(_ws(AIML_ML_RUNTIME_CLUSTERS_ENRICHED), _ws(AIML_ML_RUNTIME_CLUSTERS_FALLBACK), params, label="ml_clusters")),
             ("agent_bricks", lambda: query_with_fallback(_ws(AIML_AGENT_BRICKS_ENRICHED), _ws(AIML_AGENT_BRICKS_FALLBACK), params, label="agent_bricks")),
         ]
 
-        results = execute_queries_parallel(queries, timeout=45.0)
+        results = execute_queries_parallel(queries, timeout=90.0)
 
         # Format summary
         summary_data = results.get("summary", [])
@@ -918,7 +1022,22 @@ def _compute_aiml_bundle(params: dict, id_list: list | None, ws_clause: str, dke
                 "avg_cost_per_endpoint": float(row.get("avg_cost_per_endpoint") or 0),
             }
         else:
-            summary = {"total_dbus": 0, "total_spend": 0, "workspace_count": 0, "endpoint_count": 0, "avg_cost_per_endpoint": 0}
+            ts_raw = results.get("timeseries") or []
+            ep_raw = results.get("endpoints") or []
+            ts_dates = {str(r.get("usage_date")) for r in ts_raw}
+            days = max(len(ts_dates), 1)
+            total_dbus = sum(float(r.get("total_dbus") or 0) for r in ts_raw)
+            total_spend = sum(float(r.get("total_spend") or 0) for r in ts_raw)
+            endpoint_count = len({r.get("endpoint_name") for r in ep_raw if r.get("endpoint_name") and r.get("endpoint_name") != "UNKNOWN"})
+            summary = {
+                "total_dbus": total_dbus,
+                "total_spend": total_spend,
+                "workspace_count": 0,
+                "endpoint_count": endpoint_count,
+                "days_in_range": days,
+                "avg_daily_spend": total_spend / days if days > 0 else 0,
+                "avg_cost_per_endpoint": total_spend / endpoint_count if endpoint_count > 0 else 0,
+            }
 
         # Format providers
         providers_data = results.get("providers", []) or []
@@ -1020,6 +1139,8 @@ def _compute_aiml_bundle(params: dict, id_list: list | None, ws_clause: str, dke
             {
                 "agent_name": r.get("agent_name") or "Unknown",
                 "agent_type": r.get("agent_type") or "Agent",
+                "billing_origin_product": r.get("billing_origin_product"),
+                "served_entity_name": r.get("served_entity_name"),
                 "endpoint_id": r.get("endpoint_id"),
                 "workspace_id": str(r.get("workspace_id")) if r.get("workspace_id") else None,
                 "total_dbus": float(r.get("total_dbus") or 0),

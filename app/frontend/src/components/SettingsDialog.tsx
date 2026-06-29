@@ -9,6 +9,7 @@ import { READINESS_QUERY_KEY } from "@/hooks/useFeatureAvailability";
 export interface TabVisibility {
   dbu: boolean;
   infra: boolean;
+  optimizer: boolean;
   kpis: boolean;
   aiml: boolean;
   "ai-gateway": boolean;
@@ -25,6 +26,7 @@ export interface TabVisibility {
 const DEFAULT_VISIBILITY: TabVisibility = {
   dbu: true,
   infra: true,
+  optimizer: true,
   kpis: true,
   aiml: true,
   "ai-gateway": true,

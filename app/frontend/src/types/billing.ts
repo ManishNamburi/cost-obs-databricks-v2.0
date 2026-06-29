@@ -712,6 +712,10 @@ export interface TaggingDashboardBundle {
   timeseries: TimeseriesResponse;
   start_date: string;
   end_date: string;
+  avg_cost_per_tag?: number | null;
+  total_tag_count?: number | null;
+  lakeflow_available?: boolean;
+  enrichment_note?: string | null;
 }
 
 // AWS Actual Costs Types (from CUR 2.0)

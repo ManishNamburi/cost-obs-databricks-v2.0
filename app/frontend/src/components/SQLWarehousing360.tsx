@@ -141,34 +141,6 @@ export function SQLWarehousing360({ sqlBreakdownData: _sqlBreakdownData, queryDa
 
   
 
-  // Warehouse Health — React Query with long stale time (recommendations don't change rapidly)
-  const { data: warehouseHealth, isLoading: healthLoading } = useQuery<{
-    available: boolean;
-    recommendations: Array<{
-      warehouse_id: string;
-      warehouse_name: string | null;
-      warehouse_size: string | null;
-      workspace_id: string;
-      recommendation_type: string;
-      recommendation_text: string;
-      max_clusters_observed?: number;
-      max_concurrent?: number;
-      avg_queue_ms?: number;
-      median_duration_seconds?: number;
-      last_event_time?: string;
-      query_count?: number;
-    }>;
-    warehouses_analyzed: number;
-  }>({
-    queryKey: ["warehouse-health"],
-    queryFn: () => fetch("/api/sql/warehouse-health").then(r => r.json()),
-    staleTime: 30 * 60 * 1000,
-    retry: false,
-  });
-  const [healthIssueFilter, setHealthIssueFilter] = useState<string>("");
-  const [healthPage, setHealthPage] = useState(1);
-  const HEALTH_PAGE_SIZE = 10;
-
   // Close warehouse size dropdown on outside click
   useEffect(() => {
     const handleClick = (e: MouseEvent) => {
@@ -602,7 +574,7 @@ export function SQLWarehousing360({ sqlBreakdownData: _sqlBreakdownData, queryDa
                     {summary != null ? formatNumber(summary.unique_users ?? 0) : "—"}
                   </div>
                   <div className="mt-1 text-xs text-gray-500">
-                    {summary != null ? `Across ${formatNumber(summary.unique_warehouses ?? 0)} warehouses` : "—"}
+                    {summary != null ? `across ${formatNumber(summary.unique_warehouses ?? 0)} SQL warehouses` : "—"}
                   </div>
                   <p className="mt-1 text-xs font-medium" style={{ color: '#FF3621' }}>Click to see trend &rarr;</p>
                 </div>
@@ -683,7 +655,7 @@ export function SQLWarehousing360({ sqlBreakdownData: _sqlBreakdownData, queryDa
             <div className="rounded-lg bg-white p-6 border " style={{ borderColor: '#E5E5E5' }}>
               <div className="mb-4 flex items-center justify-between">
                 <h3 className="text-lg font-semibold text-gray-900">Top Users by Query Spend</h3>
-                <span className="text-xs text-gray-500">Click a bar to drill down</span>
+                <span className="text-xs font-medium" style={{ color: '#FF3621' }}>Click a bar to drill down ↓</span>
               </div>
               {userBarData.length > 0 ? (
                 <ResponsiveContainer width="100%" height={300}>
@@ -1142,128 +1114,6 @@ export function SQLWarehousing360({ sqlBreakdownData: _sqlBreakdownData, queryDa
         </>
       )}
 
-      {/* ── Warehouse Rightsizing Recommendations ───────────────────────────── */}
-      <div className="rounded-lg border border-gray-200 bg-white p-6">
-        <div className="mb-4 flex items-center justify-between">
-          <div>
-            <h3 className="text-base font-semibold text-gray-900">Warehouse Rightsizing</h3>
-            <p className="text-xs text-gray-500 mt-0.5">Idle, over-scaled, and oversized warehouse recommendations</p>
-          </div>
-          <div className="flex items-center gap-3">
-            {warehouseHealth && (
-              <span className="text-xs text-gray-500">{warehouseHealth.warehouses_analyzed} warehouse{warehouseHealth.warehouses_analyzed !== 1 ? "s" : ""} analyzed</span>
-            )}
-            {/* Issue type filter */}
-            {warehouseHealth?.recommendations?.length ? (
-              <select
-                value={healthIssueFilter}
-                onChange={(e) => { setHealthIssueFilter(e.target.value); setHealthPage(1); }}
-                className="rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-sm text-gray-700 focus:border-[#FF3621] focus:outline-none focus:ring-1 focus:ring-[#FF3621]"
-              >
-                <option value="">All Issues</option>
-                <option value="IDLE_RUNNING">Idle Running</option>
-                <option value="OVER_SCALED">Over-Scaled</option>
-                <option value="OVERSIZED">Oversized</option>
-              </select>
-            ) : null}
-          </div>
-        </div>
-
-        {healthLoading ? (
-          <div className="flex h-24 items-center justify-center">
-            <div className="h-6 w-6 animate-spin rounded-full border-2 border-gray-200" style={{ borderTopColor: "#FF3621" }} />
-          </div>
-        ) : !warehouseHealth?.available || !warehouseHealth.recommendations.length ? (
-          <div className="rounded-lg border border-gray-100 bg-gray-50 p-4 text-sm text-gray-500">
-            {warehouseHealth?.available === false
-              ? "Warehouse health data unavailable. Requires system.compute.warehouse_events access."
-              : "No rightsizing recommendations — all warehouses appear appropriately sized."}
-          </div>
-        ) : (() => {
-          const badgeColor: Record<string, string> = {
-            IDLE_RUNNING: "bg-red-100 text-red-700",
-            OVER_SCALED: "bg-amber-100 text-amber-700",
-            OVERSIZED: "bg-orange-100 text-orange-700",
-          };
-          const badgeLabel: Record<string, string> = {
-            IDLE_RUNNING: "Idle Running",
-            OVER_SCALED: "Over-Scaled",
-            OVERSIZED: "Oversized",
-          };
-          const filtered = healthIssueFilter
-            ? warehouseHealth.recommendations.filter((r) => r.recommendation_type === healthIssueFilter)
-            : warehouseHealth.recommendations;
-          const totalPages = Math.max(1, Math.ceil(filtered.length / HEALTH_PAGE_SIZE));
-          const safePage = Math.min(healthPage, totalPages);
-          const pageRecs = filtered.slice((safePage - 1) * HEALTH_PAGE_SIZE, safePage * HEALTH_PAGE_SIZE);
-          return (
-            <>
-              <div className="overflow-x-auto rounded-lg border border-gray-200">
-                <table className="min-w-full divide-y divide-gray-200 text-sm">
-                  <thead className="bg-gray-50">
-                    <tr>
-                      <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500">Warehouse</th>
-                      <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500">Size</th>
-                      <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500">Issue</th>
-                      <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500">Recommendation</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-gray-200 bg-white">
-                    {pageRecs.map((rec, i) => (
-                      <tr key={`${rec.warehouse_id}-${rec.recommendation_type}-${i}`} className="hover:bg-gray-50">
-                        <td className="px-4 py-3 font-medium text-gray-900">
-                          {host ? (
-                            <a
-                              href={`${host}/sql/warehouses/${rec.warehouse_id}/edit`}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              className="text-blue-600 hover:underline"
-                            >
-                              {rec.warehouse_name || rec.warehouse_id}
-                            </a>
-                          ) : (
-                            rec.warehouse_name || rec.warehouse_id
-                          )}
-                        </td>
-                        <td className="px-4 py-3 text-gray-500">{rec.warehouse_size || "—"}</td>
-                        <td className="px-4 py-3">
-                          <span className={`inline-flex rounded-full px-2 py-0.5 text-xs font-medium ${badgeColor[rec.recommendation_type] || "bg-gray-100 text-gray-700"}`}>
-                            {badgeLabel[rec.recommendation_type] || rec.recommendation_type}
-                          </span>
-                        </td>
-                        <td className="px-4 py-3 text-gray-600 text-xs max-w-sm">{rec.recommendation_text}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-              {totalPages > 1 && (
-                <div className="mt-3 flex items-center justify-between text-xs text-gray-500">
-                  <span>{filtered.length} recommendation{filtered.length !== 1 ? "s" : ""}{healthIssueFilter ? ` (filtered)` : ""}</span>
-                  <div className="flex items-center gap-1">
-                    <button
-                      onClick={() => setHealthPage((p) => Math.max(1, p - 1))}
-                      disabled={safePage <= 1}
-                      className="rounded px-2 py-1 disabled:opacity-40 hover:bg-gray-100"
-                    >
-                      ‹ Prev
-                    </button>
-                    <span className="px-2">Page {safePage} of {totalPages}</span>
-                    <button
-                      onClick={() => setHealthPage((p) => Math.min(totalPages, p + 1))}
-                      disabled={safePage >= totalPages}
-                      className="rounded px-2 py-1 disabled:opacity-40 hover:bg-gray-100"
-                    >
-                      Next ›
-                    </button>
-                  </div>
-                </div>
-              )}
-            </>
-          );
-        })()}
-      </div>
-
       {/* Source Drilldown Modal — rendered via portal to avoid stacking context issues */}
       {selectedSource && createPortal(
         <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/50" onClick={() => setSelectedSource(null)}>
@@ -1458,6 +1308,271 @@ export function SQLWarehousing360({ sqlBreakdownData: _sqlBreakdownData, queryDa
           </div>
         </div>,
         document.body
+      )}
+    </div>
+  );
+}
+
+export function WarehouseRightsizingView({ host }: { host?: string | null }) {
+  const { data: warehouseHealth, isLoading: healthLoading } = useQuery<{
+    available: boolean;
+    recommendations: Array<{
+      warehouse_id: string;
+      warehouse_name: string | null;
+      warehouse_size: string | null;
+      workspace_id: string;
+      recommendation_type: string;
+      recommendation_text: string;
+    }>;
+    warehouses_analyzed: number;
+  }>({
+    queryKey: ["warehouse-health"],
+    queryFn: () => fetch("/api/sql/warehouse-health").then(r => r.json()),
+    staleTime: 30 * 60 * 1000,
+    retry: false,
+  });
+  const [healthIssueFilter, setHealthIssueFilter] = useState<string>("");
+  const [healthPage, setHealthPage] = useState(1);
+  const HEALTH_PAGE_SIZE = 10;
+
+  return (
+    <div className="rounded-lg border border-gray-200 bg-white p-6">
+      <div className="mb-4 flex items-center justify-between">
+        <div>
+          <h3 className="text-base font-semibold text-gray-900">Warehouse Rightsizing</h3>
+          <p className="text-xs text-gray-500 mt-0.5">Idle, over-scaled, and oversized warehouse recommendations</p>
+        </div>
+        <div className="flex items-center gap-3">
+          {warehouseHealth && (
+            <span className="text-xs text-gray-500">{warehouseHealth.warehouses_analyzed} warehouse{warehouseHealth.warehouses_analyzed !== 1 ? "s" : ""} analyzed</span>
+          )}
+          {warehouseHealth?.recommendations?.length ? (
+            <select
+              value={healthIssueFilter}
+              onChange={(e) => { setHealthIssueFilter(e.target.value); setHealthPage(1); }}
+              className="rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-sm text-gray-700 focus:border-[#FF3621] focus:outline-none focus:ring-1 focus:ring-[#FF3621]"
+            >
+              <option value="">All Issues</option>
+              <option value="IDLE_RUNNING">Idle Running</option>
+              <option value="OVER_SCALED">Over-Scaled</option>
+              <option value="OVERSIZED">Oversized</option>
+            </select>
+          ) : null}
+        </div>
+      </div>
+
+      {healthLoading ? (
+        <div className="flex h-24 items-center justify-center">
+          <div className="h-6 w-6 animate-spin rounded-full border-2 border-gray-200" style={{ borderTopColor: "#FF3621" }} />
+        </div>
+      ) : !warehouseHealth?.available || !warehouseHealth.recommendations.length ? (
+        <div className="rounded-lg border border-gray-100 bg-gray-50 p-4 text-sm text-gray-500">
+          {warehouseHealth?.available === false
+            ? "Warehouse health data unavailable. Requires system.compute.warehouse_events access."
+            : "No rightsizing recommendations — all warehouses appear appropriately sized."}
+        </div>
+      ) : (() => {
+        const badgeColor: Record<string, string> = {
+          IDLE_RUNNING: "bg-red-100 text-red-700",
+          OVER_SCALED: "bg-amber-100 text-amber-700",
+          OVERSIZED: "bg-orange-100 text-orange-700",
+        };
+        const badgeLabel: Record<string, string> = {
+          IDLE_RUNNING: "Idle Running",
+          OVER_SCALED: "Over-Scaled",
+          OVERSIZED: "Oversized",
+        };
+        const filtered = healthIssueFilter
+          ? warehouseHealth.recommendations.filter((r) => r.recommendation_type === healthIssueFilter)
+          : warehouseHealth.recommendations;
+        const totalPages = Math.max(1, Math.ceil(filtered.length / HEALTH_PAGE_SIZE));
+        const safePage = Math.min(healthPage, totalPages);
+        const pageRecs = filtered.slice((safePage - 1) * HEALTH_PAGE_SIZE, safePage * HEALTH_PAGE_SIZE);
+        return (
+          <>
+            <div className="overflow-x-auto rounded-lg border border-gray-200">
+              <table className="min-w-full divide-y divide-gray-200 text-sm">
+                <thead className="bg-gray-50">
+                  <tr>
+                    <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500">Warehouse</th>
+                    <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500">Size</th>
+                    <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500">Issue</th>
+                    <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500">Recommendation</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-200 bg-white">
+                  {pageRecs.map((rec, i) => (
+                    <tr key={`${rec.warehouse_id}-${rec.recommendation_type}-${i}`} className="hover:bg-gray-50">
+                      <td className="px-4 py-3 font-medium text-gray-900">
+                        {host ? (
+                          <a
+                            href={`${host}/sql/warehouses/${rec.warehouse_id}/edit`}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="text-blue-600 hover:underline"
+                          >
+                            {rec.warehouse_name || rec.warehouse_id}
+                          </a>
+                        ) : (
+                          rec.warehouse_name || rec.warehouse_id
+                        )}
+                      </td>
+                      <td className="px-4 py-3 text-gray-500">{rec.warehouse_size || "—"}</td>
+                      <td className="px-4 py-3">
+                        <span className={`inline-flex rounded-full px-2 py-0.5 text-xs font-medium ${badgeColor[rec.recommendation_type] || "bg-gray-100 text-gray-700"}`}>
+                          {badgeLabel[rec.recommendation_type] || rec.recommendation_type}
+                        </span>
+                      </td>
+                      <td className="px-4 py-3 text-gray-600 text-xs max-w-sm">{rec.recommendation_text}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            {totalPages > 1 && (
+              <div className="mt-3 flex items-center justify-between text-xs text-gray-500">
+                <span>{filtered.length} recommendation{filtered.length !== 1 ? "s" : ""}{healthIssueFilter ? ` (filtered)` : ""}</span>
+                <div className="flex items-center gap-1">
+                  <button
+                    onClick={() => setHealthPage((p) => Math.max(1, p - 1))}
+                    disabled={safePage <= 1}
+                    className="rounded px-2 py-1 disabled:opacity-40 hover:bg-gray-100"
+                  >
+                    ‹ Prev
+                  </button>
+                  <span className="px-2">Page {safePage} of {totalPages}</span>
+                  <button
+                    onClick={() => setHealthPage((p) => Math.min(totalPages, p + 1))}
+                    disabled={safePage >= totalPages}
+                    className="rounded px-2 py-1 disabled:opacity-40 hover:bg-gray-100"
+                  >
+                    Next ›
+                  </button>
+                </div>
+              </div>
+            )}
+          </>
+        );
+      })()}
+    </div>
+  );
+}
+
+const fmt$ = (v: number) =>
+  v >= 1000 ? `$${(v / 1000).toFixed(1)}K` : `$${v.toFixed(0)}`;
+
+const fmtHours = (minutes: number) => {
+  const h = Math.floor(minutes / 60);
+  const m = Math.round(minutes % 60);
+  if (h === 0) return `${m}m`;
+  if (m === 0) return `${h}h`;
+  return `${h}h ${m}m`;
+};
+
+export function WarehouseIdleTimeView({
+  host,
+  startDate,
+  endDate,
+}: {
+  host?: string | null;
+  startDate?: string;
+  endDate?: string;
+}) {
+  const params = new URLSearchParams();
+  if (startDate) params.set("start_date", startDate);
+  if (endDate) params.set("end_date", endDate);
+
+  const { data, isLoading } = useQuery<{
+    available: boolean;
+    warehouses: Array<{
+      warehouse_id: string;
+      warehouse_name: string;
+      warehouse_size: string;
+      workspace_id: string;
+      total_running_minutes: number;
+      total_query_minutes: number;
+      idle_minutes: number;
+      idle_pct: number;
+      total_spend: number;
+      estimated_idle_spend: number;
+    }>;
+  }>({
+    queryKey: ["warehouse-idle-time", startDate, endDate],
+    queryFn: () =>
+      fetch(`/api/sql/warehouse-health/idle-time?${params}`).then(r => r.json()),
+    staleTime: 30 * 60 * 1000,
+    retry: false,
+  });
+
+  return (
+    <div className="rounded-lg border border-gray-200 bg-white p-6">
+      <div className="mb-4">
+        <h3 className="text-base font-semibold text-gray-900">Top Warehouses by Idle Time</h3>
+        <p className="text-xs text-gray-500 mt-0.5">
+          Idle time = warehouse uptime (from lifecycle events) minus active query time. Estimated idle spend is prorated from total billed spend.
+        </p>
+      </div>
+
+      {isLoading ? (
+        <div className="flex h-24 items-center justify-center">
+          <div className="h-6 w-6 animate-spin rounded-full border-2 border-gray-200" style={{ borderTopColor: "#FF3621" }} />
+        </div>
+      ) : !data?.available || !data.warehouses.length ? (
+        <div className="rounded-lg border border-gray-100 bg-gray-50 p-4 text-sm text-gray-500">
+          {data?.available === false
+            ? "Idle time data unavailable. Requires access to system.compute.warehouse_events and system.query.history."
+            : "No warehouse uptime data found for this date range."}
+        </div>
+      ) : (
+        <div className="overflow-x-auto rounded-lg border border-gray-200">
+          <table className="min-w-full divide-y divide-gray-200 text-sm">
+            <thead className="bg-gray-50">
+              <tr>
+                <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500">Warehouse</th>
+                <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500">Size</th>
+                <th className="px-4 py-3 text-right text-xs font-medium uppercase tracking-wider text-gray-500">Uptime</th>
+                <th className="px-4 py-3 text-right text-xs font-medium uppercase tracking-wider text-gray-500">Idle Time</th>
+                <th className="px-4 py-3 text-right text-xs font-medium uppercase tracking-wider text-gray-500">Idle %</th>
+                <th className="px-4 py-3 text-right text-xs font-medium uppercase tracking-wider text-gray-500">Total Spend</th>
+                <th className="px-4 py-3 text-right text-xs font-medium uppercase tracking-wider text-gray-500">Est. Idle Spend</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-gray-200 bg-white">
+              {data.warehouses.map((wh, i) => (
+                <tr key={`${wh.warehouse_id}-${i}`} className="hover:bg-gray-50">
+                  <td className="px-4 py-3 font-medium text-gray-900">
+                    {host ? (
+                      <a
+                        href={`${host}/sql/warehouses/${wh.warehouse_id}/edit`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-blue-600 hover:underline"
+                      >
+                        {wh.warehouse_name}
+                      </a>
+                    ) : (
+                      wh.warehouse_name
+                    )}
+                  </td>
+                  <td className="px-4 py-3 text-gray-500">{wh.warehouse_size}</td>
+                  <td className="px-4 py-3 text-right text-gray-700">{fmtHours(wh.total_running_minutes)}</td>
+                  <td className="px-4 py-3 text-right text-gray-700">{fmtHours(wh.idle_minutes)}</td>
+                  <td className="px-4 py-3 text-right">
+                    <span className={`inline-flex rounded-full px-2 py-0.5 text-xs font-medium ${
+                      wh.idle_pct >= 80 ? "bg-red-100 text-red-700"
+                      : wh.idle_pct >= 50 ? "bg-amber-100 text-amber-700"
+                      : "bg-gray-100 text-gray-700"
+                    }`}>
+                      {wh.idle_pct.toFixed(1)}%
+                    </span>
+                  </td>
+                  <td className="px-4 py-3 text-right text-gray-700">{fmt$(wh.total_spend)}</td>
+                  <td className="px-4 py-3 text-right font-medium text-red-600">{fmt$(wh.estimated_idle_spend)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       )}
     </div>
   );

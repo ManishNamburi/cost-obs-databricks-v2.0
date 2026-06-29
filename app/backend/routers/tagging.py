@@ -162,6 +162,7 @@ job_usage AS (
     u.usage_date,
     u.workspace_id,
     u.usage_metadata.job_id AS job_id,
+    u.usage_metadata.job_name AS usage_job_name,
     u.sku_name,
     u.usage_quantity,
     COALESCE(p.pricing.default, 0) as price_per_dbu
@@ -177,14 +178,14 @@ job_usage AS (
 )
 SELECT
   ju.job_id,
-  COALESCE(ji.job_name, MAX(ju.job_id)) as job_name,
+  COALESCE(MAX(ji.job_name), MAX(ju.usage_job_name), CAST(MAX(ju.job_id) AS STRING)) as job_name,
   MAX(ju.workspace_id) as workspace_id,
   SUM(ju.usage_quantity) as total_dbus,
   SUM(ju.usage_quantity * ju.price_per_dbu) as total_spend,
   COUNT(DISTINCT ju.usage_date) as days_active
 FROM job_usage ju
-INNER JOIN job_info ji ON CAST(ju.job_id AS STRING) = CAST(ji.job_id AS STRING)
-GROUP BY ju.job_id, ji.job_name
+LEFT JOIN job_info ji ON CAST(ju.job_id AS STRING) = CAST(ji.job_id AS STRING)
+GROUP BY ju.job_id
 ORDER BY total_spend DESC
 LIMIT 500
 """
@@ -241,14 +242,14 @@ pipeline_info AS (
 )
 SELECT
   pu.pipeline_id,
-  pi.pipeline_name,
+  COALESCE(MAX(pi.pipeline_name), CAST(pu.pipeline_id AS STRING)) as pipeline_name,
   MAX(pu.workspace_id) as workspace_id,
   SUM(pu.usage_quantity) as total_dbus,
   SUM(pu.usage_quantity * pu.price_per_dbu) as total_spend,
   COUNT(DISTINCT pu.usage_date) as days_active
 FROM pipeline_usage pu
-INNER JOIN pipeline_info pi ON pu.pipeline_id = pi.pipeline_id
-GROUP BY pu.pipeline_id, pi.pipeline_name
+LEFT JOIN pipeline_info pi ON pu.pipeline_id = pi.pipeline_id
+GROUP BY pu.pipeline_id
 ORDER BY total_spend DESC
 LIMIT 500
 """
@@ -379,6 +380,47 @@ FROM exploded_tags
 GROUP BY tag_key, tag_value
 ORDER BY total_spend DESC
 LIMIT 500
+"""
+
+TAG_STATS = """
+WITH tagged_usage AS (
+  SELECT
+    u.usage_date,
+    u.usage_quantity,
+    u.custom_tags,
+    COALESCE(p.pricing.default, 0) as price_per_dbu
+  FROM system.billing.usage u
+  LEFT JOIN system.billing.list_prices p
+    ON u.sku_name = p.sku_name
+    AND u.cloud = p.cloud
+    AND p.price_end_time IS NULL
+  WHERE u.usage_date BETWEEN :start_date AND :end_date
+    AND u.usage_quantity > 0
+    AND u.custom_tags IS NOT NULL
+    AND size(u.custom_tags) > 0
+),
+exploded_tags AS (
+  SELECT
+    usage_date,
+    usage_quantity,
+    price_per_dbu,
+    tag_key,
+    tag_value
+  FROM tagged_usage
+  LATERAL VIEW EXPLODE(custom_tags) t AS tag_key, tag_value
+),
+daily_agg AS (
+  SELECT
+    usage_date,
+    SUM(usage_quantity * price_per_dbu) AS daily_spend,
+    COUNT(DISTINCT CONCAT(tag_key, ':', tag_value)) AS daily_tag_count
+  FROM exploded_tags
+  GROUP BY usage_date
+)
+SELECT
+  (SELECT COUNT(DISTINCT CONCAT(tag_key, ':', tag_value)) FROM exploded_tags) AS total_tag_count,
+  AVG(CASE WHEN daily_tag_count > 0 THEN daily_spend / daily_tag_count ELSE NULL END) AS avg_cost_per_tag
+FROM daily_agg
 """
 
 COST_BY_TAG_KEY = """
@@ -982,6 +1024,9 @@ async def get_tagging_dashboard_bundle(
     def _ws(sql: str) -> str:
         return wf.inject_ws_filter(sql, ws_clause)
 
+    jobs_ok = [True]
+    pipelines_ok = [True]
+
     def query_with_fallback(enriched_sql: str, fallback_sql: str, query_params: dict) -> list[dict[str, Any]]:
         """Try enriched query (with system.compute tables), fall back to billing-only."""
         try:
@@ -990,20 +1035,32 @@ async def get_tagging_dashboard_bundle(
             logger.warning(f"Enriched query failed ({e}), falling back to billing-only")
             return execute_query(fallback_sql, query_params)
 
+    def lakeflow_query(enriched_sql: str, fallback_sql: str, query_params: dict, flag: list) -> list[dict[str, Any]]:
+        """Try lakeflow-enriched query with 30s timeout; fall back to billing-only on failure."""
+        try:
+            result = execute_queries_parallel([("q", lambda: execute_query(enriched_sql, query_params))], timeout=30.0)
+            if result.get("q") is not None:
+                return result["q"]
+        except Exception as e:
+            logger.warning(f"Lakeflow query failed/timed out ({type(e).__name__}); falling back to billing-only")
+        flag[0] = False
+        return execute_query(fallback_sql, query_params)
+
     queries = [
         ("summary", lambda: execute_query(_ws(TAGGING_SUMMARY), params)),
         ("clusters", lambda: query_with_fallback(_ws(UNTAGGED_CLUSTERS_ENRICHED), _ws(UNTAGGED_CLUSTERS), params)),
-        ("jobs", lambda: query_with_fallback(_ws(UNTAGGED_JOBS_ENRICHED), _ws(UNTAGGED_JOBS), params)),
-        ("pipelines", lambda: query_with_fallback(_ws(UNTAGGED_PIPELINES_ENRICHED), _ws(UNTAGGED_PIPELINES), params)),
+        ("jobs", lambda: lakeflow_query(_ws(UNTAGGED_JOBS_ENRICHED), _ws(UNTAGGED_JOBS), params, jobs_ok)),
+        ("pipelines", lambda: lakeflow_query(_ws(UNTAGGED_PIPELINES_ENRICHED), _ws(UNTAGGED_PIPELINES), params, pipelines_ok)),
         ("warehouses", lambda: query_with_fallback(_ws(UNTAGGED_WAREHOUSES_ENRICHED), _ws(UNTAGGED_WAREHOUSES), params)),
         ("endpoints", lambda: execute_query(_ws(UNTAGGED_ENDPOINTS), params)),
         ("cost_by_tag", lambda: execute_query(_ws(COST_BY_TAG), params)),
+        ("tag_stats", lambda: execute_query(_ws(TAG_STATS), params)),
         ("tag_keys", lambda: execute_query(_ws(COST_BY_TAG_KEY), params)),
         ("timeseries", lambda: execute_query(_ws(TAG_COVERAGE_TIMESERIES), params)),
     ]
 
     try:
-        results = await asyncio.to_thread(execute_queries_parallel, queries, timeout=45.0)
+        results = await asyncio.to_thread(execute_queries_parallel, queries, timeout=90.0)
     except Exception as e:
         logger.error("tagging dashboard-bundle failed: %s", e)
         empty_untagged = {"items": [], "total_spend": 0, "count": 0}
@@ -1088,6 +1145,15 @@ async def get_tagging_dashboard_bundle(
         "timeseries": {"timeseries": timeseries, "categories": ["Tagged", "Untagged"]},
         "start_date": params["start_date"],
         "end_date": params["end_date"],
+        "avg_cost_per_tag": (lambda v: float(v) if v is not None else None)((results.get("tag_stats") or [{}])[0].get("avg_cost_per_tag")),
+        "total_tag_count": (lambda v: int(v) if v is not None else None)((results.get("tag_stats") or [{}])[0].get("total_tag_count")),
+        "lakeflow_available": jobs_ok[0] and pipelines_ok[0],
+        "enrichment_note": (
+            None if (jobs_ok[0] and pipelines_ok[0]) else
+            "Job names may be incomplete — Lakeflow enrichment was unavailable." if (not jobs_ok[0] and pipelines_ok[0]) else
+            "Pipeline names may be incomplete — Lakeflow enrichment was unavailable." if (jobs_ok[0] and not pipelines_ok[0]) else
+            "Job and pipeline names may be incomplete — Lakeflow enrichment was unavailable."
+        ),
     }
     delta_cache_put(_dkey, "tagging:dashboard-bundle", _resp, ttl_seconds=600 if id_list else 1800)
     return _resp

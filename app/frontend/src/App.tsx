@@ -32,6 +32,8 @@ const AIGatewayView = lazy(() => lazyWithRetry(() => import("@/components/AIGate
 const AppsCostCenter = lazy(() => lazyWithRetry(() => import("@/components/AppsCostCenter").then(m => ({ default: m.AppsCostCenter }))));
 const TaggingHub = lazy(() => lazyWithRetry(() => import("@/components/TaggingHub").then(m => ({ default: m.TaggingHub }))));
 const SQLWarehousing360 = lazy(() => lazyWithRetry(() => import("@/components/SQLWarehousing360").then(m => ({ default: m.SQLWarehousing360 }))));
+const WarehouseRightsizingView = lazy(() => lazyWithRetry(() => import("@/components/SQLWarehousing360").then(m => ({ default: m.WarehouseRightsizingView }))));
+const WarehouseIdleTimeView = lazy(() => lazyWithRetry(() => import("@/components/SQLWarehousing360").then(m => ({ default: m.WarehouseIdleTimeView }))));
 const ForecastingView = lazy(() => lazyWithRetry(() => import("@/components/ForecastingView").then(m => ({ default: m.ForecastingView }))));
 const ContractBurndown = lazy(() => lazyWithRetry(() => import("@/components/ContractBurndown").then(m => ({ default: m.ContractBurndown }))));
 const Alerts = lazy(() => lazyWithRetry(() => import("@/pages/Alerts")));
@@ -100,7 +102,7 @@ function useKeepAlive() {
   }, []);
 }
 
-type ViewTab = "dbu" | "sql" | "infra" | "kpis" | "aiml" | "ai-gateway" | "apps" | "tagging" | "use-cases" | "alerts" | "forecasting" | "users-groups" | "contract" | "budget";
+type ViewTab = "dbu" | "sql" | "infra" | "optimizer" | "kpis" | "aiml" | "ai-gateway" | "apps" | "tagging" | "use-cases" | "alerts" | "forecasting" | "users-groups" | "contract" | "budget";
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -464,7 +466,7 @@ function Dashboard() {
   const anomaliesLoading = kpisBundleLoading;
   const kpisLoading = kpisBundleLoading;
 
-  const { data: aimlData, isLoading: aimlLoading } = useAIMLDashboardBundle(dateRange, _wsIds, warehouseReady && activeTab === "aiml");
+  const { data: aimlData, isLoading: aimlLoading } = useAIMLDashboardBundle(dateRange, _wsIds, warehouseReady);
   const { data: aiGatewayData, isLoading: aiGatewayLoading } = useAIGatewayDashboardBundle(dateRange, _wsIds, activeTab === "ai-gateway");
   const { data: budgetData, isLoading: budgetLoading } = useBudgetDashboard(activeTab === "budget");
   const { data: appsData, isLoading: appsLoading } = useAppsDashboardBundle(dateRange, _wsIds, warehouseReady);
@@ -1057,6 +1059,21 @@ function Dashboard() {
                 Cloud Costs
               </button>
               )}
+              {tabVisibility.optimizer && (
+              <button
+                onClick={() => setActiveTab("optimizer")}
+                className={`whitespace-nowrap border-b-2 px-1 py-3 text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-gray-400 ${
+                  activeTab === "optimizer"
+                    ? "border-[#FF3621] text-[#FF3621]"
+                    : "border-transparent text-gray-500 hover:border-gray-300 hover:text-gray-700"
+                }`}
+              >
+                <svg className="mr-2 -mt-0.5 inline h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6V4m0 2a2 2 0 100 4m0-4a2 2 0 110 4m-6 8a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4m6 6v10m6-2a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4" />
+                </svg>
+                Optimize
+              </button>
+              )}
               {tabVisibility.budget && (
               <button
                 onClick={() => setActiveTab("budget")}
@@ -1082,7 +1099,7 @@ function Dashboard() {
         <div key={activeTab} className="animate-fade-in relative">
           {/* Per-tab refresh button — top-right corner, across from each tab's title.
               Hidden on infra (cloud costs) tab. */}
-          {activeTab !== "infra" && (
+          {activeTab !== "infra" && activeTab !== "optimizer" && (
             <div className="absolute right-0 top-1 z-20">
               <TabRefreshButton onRefresh={handleTabRefresh} />
             </div>
@@ -1172,6 +1189,24 @@ function Dashboard() {
             workspaceNameMap={workspaceNameMap}
             workspaceIds={_wsIds}
           />
+          </TabErrorBoundary>
+        ) : activeTab === "optimizer" ? (
+          <TabErrorBoundary tabName="Optimize">
+          <div className="space-y-6">
+            <div className="flex items-center gap-3">
+              <div className="rounded-lg p-2" style={{ backgroundColor: '#FF3621' }}>
+                <svg className="h-6 w-6 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6V4m0 2a2 2 0 100 4m0-4a2 2 0 110 4m-6 8a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4m6 6v10m6-2a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4" />
+                </svg>
+              </div>
+              <div>
+                <h1 className="text-2xl font-bold text-gray-900">Optimize</h1>
+                <p className="text-sm text-gray-500">Rightsizing recommendations and cost optimization insights</p>
+              </div>
+            </div>
+            <WarehouseRightsizingView host={accountInfo?.host} />
+            <WarehouseIdleTimeView host={accountInfo?.host} startDate={dateRange.startDate} endDate={dateRange.endDate} />
+          </div>
           </TabErrorBoundary>
         ) : activeTab === "kpis" ? (
           <TabErrorBoundary tabName="KPIs & Trends">

@@ -526,7 +526,13 @@ async def get_pipeline_objects(
     ws_clause = wf.build_ws_filter_clause(id_list=id_list)
 
     try:
-        results = _enrich_pipeline_results(await asyncio.to_thread(execute_query, _inject_ws_filter(PIPELINE_OBJECTS, ws_clause), params))
+        raw = await asyncio.to_thread(execute_query, _inject_ws_filter(PIPELINE_OBJECTS, ws_clause), params)
+        raw_copy = [dict(r) for r in (raw or [])]
+        try:
+            results = await asyncio.wait_for(asyncio.to_thread(_enrich_pipeline_results, raw_copy), timeout=20.0)
+        except asyncio.TimeoutError:
+            logger.warning("Pipeline name enrichment timed out; serving raw results")
+            results = raw
 
         objects = []
         total_spend = 0
@@ -1419,7 +1425,7 @@ async def get_dashboard_bundle_fast(
         ]
 
     try:
-        results = await asyncio.to_thread(execute_queries_parallel, queries, timeout=45.0)
+        results = await asyncio.to_thread(execute_queries_parallel, queries, timeout=90.0)
 
         # Format responses
         response = {
@@ -2166,7 +2172,7 @@ async def get_kpis_bundle(
     parallel_queries.append(("user_count", lambda: execute_query(USER_COUNT_QUERY, params)))
 
     try:
-        query_results = await asyncio.to_thread(execute_queries_parallel, parallel_queries, timeout=45.0)
+        query_results = await asyncio.to_thread(execute_queries_parallel, parallel_queries, timeout=90.0)
     except Exception as e:
         logger.error("kpis-bundle query execution failed: %s", e)
         return {"kpis": {
@@ -2731,6 +2737,41 @@ async def get_kpi_trend(
           AND DATE(start_time) <= :end_date
         GROUP BY DATE(start_time)
         ORDER BY date
+        """
+    elif kpi == "user_spend":
+        if use_mv:
+            catalog, schema = get_catalog_schema()
+            query = f"SELECT usage_date as date, SUM(user_attributed_spend) as value FROM `{catalog}`.`{schema}`.`daily_usage_summary` WHERE usage_date BETWEEN :start_date AND :end_date GROUP BY usage_date ORDER BY usage_date"
+            mv_fallback_query = """
+        SELECT
+          u.usage_date as date,
+          SUM(u.usage_quantity * COALESCE(p.pricing.default, 0)) as value
+        FROM system.billing.usage u
+        LEFT JOIN system.billing.list_prices p
+          ON u.sku_name = p.sku_name
+          AND u.cloud = p.cloud
+          AND p.price_end_time IS NULL
+        WHERE u.usage_date BETWEEN :start_date AND :end_date
+          AND u.usage_quantity > 0
+          AND u.identity_metadata.run_as IS NOT NULL
+        GROUP BY u.usage_date
+        ORDER BY u.usage_date
+        """
+        else:
+            query = """
+        SELECT
+          u.usage_date as date,
+          SUM(u.usage_quantity * COALESCE(p.pricing.default, 0)) as value
+        FROM system.billing.usage u
+        LEFT JOIN system.billing.list_prices p
+          ON u.sku_name = p.sku_name
+          AND u.cloud = p.cloud
+          AND p.price_end_time IS NULL
+        WHERE u.usage_date BETWEEN :start_date AND :end_date
+          AND u.usage_quantity > 0
+          AND u.identity_metadata.run_as IS NOT NULL
+        GROUP BY u.usage_date
+        ORDER BY u.usage_date
         """
     elif kpi == "tag_coverage_pct":
         query = """

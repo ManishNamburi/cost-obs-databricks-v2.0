@@ -691,22 +691,23 @@ def _compute_apps_bundle(params: dict, id_list: list | None, active_only: bool, 
         # Build workspace lookup per app_id
         workspace_rows = results.get("workspaces", []) or []
         app_workspace_map: dict[str, list[str]] = {}
-        all_workspaces: dict[str, str] = {}
+        all_workspaces: dict[str, str] = {}  # ws_id -> ws_name
         for row in workspace_rows:
             app_id = row.get("app_id", "")
             ws_name = str(row.get("workspace_name", ""))
             ws_id = str(row.get("workspace_id", ""))
             if app_id not in app_workspace_map:
                 app_workspace_map[app_id] = []
-            if ws_name not in app_workspace_map[app_id]:
-                app_workspace_map[app_id].append(ws_name)
-            all_workspaces[ws_name] = ws_id
+            if ws_id not in app_workspace_map[app_id]:
+                app_workspace_map[app_id].append(ws_id)
+            all_workspaces[ws_id] = ws_name
 
         summary_data = results.get("summary", []) or []
-        days_in_range = 1
+        # Calendar days so the KPI subtitle matches the selected range regardless of billing table lag
+        _start_dt = datetime.strptime(params["start_date"], "%Y-%m-%d")
+        _end_dt = datetime.strptime(params["end_date"], "%Y-%m-%d")
+        days_in_range = (_end_dt - _start_dt).days + 1
         avg_daily_apps = 0
-        if summary_data:
-            days_in_range = summary_data[0].get("days_in_range") or 1
         filtered_avg_data = results.get("filtered_avg_apps", []) or []
         if filtered_avg_data:
             avg_daily_apps = round(float(filtered_avg_data[0].get("avg_daily_apps") or 0))
@@ -783,7 +784,7 @@ def _compute_apps_bundle(params: dict, id_list: list | None, active_only: bool, 
             "apps": apps_result,
             "timeseries": {"timeseries": timeseries, "categories": ["Total"]},
             "connected_artifacts": connected_artifacts,
-            "workspaces": [{"id": str(ws_id), "name": str(ws_name)} for ws_name, ws_id in sorted(all_workspaces.items(), key=lambda x: x[0])],
+            "workspaces": [{"id": ws_id, "name": ws_name} for ws_id, ws_name in sorted(all_workspaces.items(), key=lambda x: x[1])],
             "active_only": active_only,
             "start_date": params["start_date"],
             "end_date": params["end_date"],

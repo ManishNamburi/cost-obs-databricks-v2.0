@@ -70,7 +70,9 @@ export const WorkspaceTable = memo(function WorkspaceTable({ data, isLoading, ho
 
   const isHistoricalWs = (ws: typeof data.workspaces[0]) => !ws.workspace_name;
   const historicalCount = data.workspaces.filter((ws) => isHistoricalWs(ws)).length;
-  const activeWorkspaces = showHistorical ? data.workspaces : data.workspaces.filter((ws) => !isHistoricalWs(ws));
+  // When all workspaces lack names (workspace_name is unavailable), show everything rather than a blank table.
+  const allHistorical = historicalCount === data.workspaces.length;
+  const activeWorkspaces = (showHistorical || allHistorical) ? data.workspaces : data.workspaces.filter((ws) => !isHistoricalWs(ws));
   const searchLower = search.toLowerCase();
   const filteredWorkspaces = search
     ? activeWorkspaces.filter((ws) =>
@@ -93,7 +95,7 @@ export const WorkspaceTable = memo(function WorkspaceTable({ data, isLoading, ho
           Spend by Workspace
         </h3>
         <div className="flex items-center gap-3">
-          {historicalCount > 0 && (
+          {historicalCount > 0 && !allHistorical && (
             <label className="flex items-center gap-1.5 text-xs text-gray-500 cursor-pointer">
               <input
                 type="checkbox"
