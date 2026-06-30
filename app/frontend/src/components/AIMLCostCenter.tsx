@@ -243,14 +243,23 @@ export function AIMLCostCenter({ data, isLoading, startDate, endDate, host, work
     });
   }, [data?.endpoints, workspaceNameMap]);
 
-  const endpointsData = useMemo(() => {
+  const endpointsWorkspaceFiltered = useMemo(() => {
     if (!data?.endpoints?.endpoints) return [];
-    const rawRows = endpointsWorkspaceFilter
-      ? data.endpoints.endpoints.filter(e => e.workspace_id === endpointsWorkspaceFilter)
-      : data.endpoints.endpoints;
+    const rows = data.endpoints.endpoints.filter(e => e.endpoint_name && e.endpoint_name !== 'UNKNOWN');
+    if (!endpointsWorkspaceFilter) return rows;
+    return rows.filter(e => e.workspace_id === endpointsWorkspaceFilter);
+  }, [data?.endpoints, endpointsWorkspaceFilter]);
+
+  const endpointCostTypes = useMemo(() => {
+    return Array.from(new Set(endpointsWorkspaceFiltered.map(e => e.cost_type).filter(Boolean)));
+  }, [endpointsWorkspaceFiltered]);
+
+  const endpointsData = useMemo(() => {
+    const rows = endpointsCostTypeFilter
+      ? endpointsWorkspaceFiltered.filter(e => e.cost_type === endpointsCostTypeFilter)
+      : endpointsWorkspaceFiltered;
     const byEndpoint: Record<string, { endpoint_name: string; total_spend: number; total_dbus: number; days_active: number; cost_type: string }> = {};
-    for (const e of rawRows) {
-      if (!e.endpoint_name || e.endpoint_name === 'UNKNOWN') continue;
+    for (const e of rows) {
       if (!byEndpoint[e.endpoint_name]) {
         byEndpoint[e.endpoint_name] = { endpoint_name: e.endpoint_name, total_spend: 0, total_dbus: 0, days_active: e.days_active, cost_type: e.cost_type };
       }
@@ -258,13 +267,15 @@ export function AIMLCostCenter({ data, isLoading, startDate, endDate, host, work
       byEndpoint[e.endpoint_name].total_dbus += e.total_dbus;
     }
     return Object.values(byEndpoint).sort((a, b) => b.total_spend - a.total_spend);
-  }, [data?.endpoints, endpointsWorkspaceFilter]);
-
-  const endpointCostTypes = useMemo(() => {
-    return Array.from(new Set(endpointsData.map(e => e.cost_type).filter(Boolean)));
-  }, [endpointsData]);
+  }, [endpointsWorkspaceFiltered, endpointsCostTypeFilter]);
 
   useEffect(() => { setEndpointsPage(1); }, [endpointsData.length]);
+
+  useEffect(() => {
+    setEndpointsCostTypeFilter(null);
+    setEndpointsPage(1);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [endpointsWorkspaceFilter]);
 
   if (isLoading) {
     return (
@@ -611,9 +622,6 @@ export function AIMLCostCenter({ data, isLoading, startDate, endDate, host, work
             </div>
           </div>
           {endpointsData.length > 0 ? (() => {
-            const filteredEndpoints = endpointsCostTypeFilter
-              ? endpointsData.filter(e => e.cost_type === endpointsCostTypeFilter)
-              : endpointsData;
             const epUrl = getEndpointUrl(host, endpointsWorkspaceFilter ?? workspaceIds?.[0]);
             return (
               <>
@@ -633,7 +641,7 @@ export function AIMLCostCenter({ data, isLoading, startDate, endDate, host, work
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-gray-200 bg-white">
-                      {filteredEndpoints.slice((endpointsPage - 1) * PAGE_SIZE, endpointsPage * PAGE_SIZE).map((endpoint, idx) => (
+                      {endpointsData.slice((endpointsPage - 1) * PAGE_SIZE, endpointsPage * PAGE_SIZE).map((endpoint, idx) => (
                         <tr key={idx} className={idx % 2 === 0 ? "bg-white" : "bg-gray-50"}>
                           <td className="px-3 py-2 text-sm font-medium truncate max-w-[200px]" title={endpoint.endpoint_name}>
                             {epUrl ? (
@@ -653,14 +661,14 @@ export function AIMLCostCenter({ data, isLoading, startDate, endDate, host, work
                     </tbody>
                   </table>
                 </div>
-                {filteredEndpoints.length > PAGE_SIZE && (
+                {endpointsData.length > PAGE_SIZE && (
                   <div className="mt-3 flex items-center justify-between border-t border-gray-200 pt-3">
                     <p className="text-xs text-gray-500">
-                      {(endpointsPage - 1) * PAGE_SIZE + 1}–{Math.min(endpointsPage * PAGE_SIZE, filteredEndpoints.length)} of {filteredEndpoints.length}
+                      {(endpointsPage - 1) * PAGE_SIZE + 1}–{Math.min(endpointsPage * PAGE_SIZE, endpointsData.length)} of {endpointsData.length}
                     </p>
                     <div className="flex gap-1">
                       <button onClick={() => setEndpointsPage(p => Math.max(1, p - 1))} disabled={endpointsPage === 1} className="rounded border border-gray-300 px-2 py-1 text-xs text-gray-600 hover:bg-gray-50 disabled:opacity-40">Prev</button>
-                      <button onClick={() => setEndpointsPage(p => Math.min(Math.ceil(filteredEndpoints.length / PAGE_SIZE), p + 1))} disabled={endpointsPage >= Math.ceil(filteredEndpoints.length / PAGE_SIZE)} className="rounded border border-gray-300 px-2 py-1 text-xs text-gray-600 hover:bg-gray-50 disabled:opacity-40">Next</button>
+                      <button onClick={() => setEndpointsPage(p => Math.min(Math.ceil(endpointsData.length / PAGE_SIZE), p + 1))} disabled={endpointsPage >= Math.ceil(endpointsData.length / PAGE_SIZE)} className="rounded border border-gray-300 px-2 py-1 text-xs text-gray-600 hover:bg-gray-50 disabled:opacity-40">Next</button>
                     </div>
                   </div>
                 )}
