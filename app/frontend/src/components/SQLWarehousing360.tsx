@@ -378,6 +378,7 @@ export function SQLWarehousing360({ sqlBreakdownData: _sqlBreakdownData, queryDa
       setSortField(field);
       setSortDirection("desc");
     }
+    setQueriesPage(1);
   };
 
   if (isLoading) {
