@@ -17,7 +17,6 @@ export interface TabVisibility {
   apps: boolean;
   tagging: boolean;
   "use-cases": boolean;
-  alerts: boolean;
   "users-groups": boolean;
   forecasting: boolean;
   budget: boolean;
@@ -34,7 +33,6 @@ const DEFAULT_VISIBILITY: TabVisibility = {
   apps: true,
   tagging: true,
   "use-cases": false,
-  alerts: false,
   "users-groups": true,
   forecasting: false,
   budget: false,
@@ -74,9 +72,7 @@ export interface AppSettings {
   enableAppHostingComparison: boolean;
   enableUseCaseTracking: boolean;
   enableAccuracyChecks: boolean;
-  enableAlerts: boolean;
   enableForecasting: boolean;
-  enableContractTracking: boolean;
   darkMode: boolean;
   anonymizeUsers: boolean;
 }
@@ -96,9 +92,7 @@ const DEFAULT_APP_SETTINGS: AppSettings = {
   enableAppHostingComparison: false,
   enableUseCaseTracking: false,
   enableAccuracyChecks: false,
-  enableAlerts: false,
   enableForecasting: false,
-  enableContractTracking: false,
   darkMode: false,
   anonymizeUsers: false,
 };
@@ -237,10 +231,6 @@ export function SettingsDialog({ isOpen, onClose, onTabVisibilityChange, onSetti
       }).catch(() => {});
       setPendingSchedule(null);
     }
-    fetch(
-      `/api/alerts/setup-databricks-alerts?spike_threshold_percent=${localSettings.alertSpikePercent}&daily_threshold_amount=${localSettings.alertDailyBudget}&workspace_threshold_amount=${localSettings.alertWorkspaceBudget}`,
-      { method: "POST", signal: AbortSignal.timeout(10000) }
-    ).catch(() => {});
     fetch("/api/settings/alert-thresholds", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -397,7 +387,6 @@ export function SettingsDialog({ isOpen, onClose, onTabVisibilityChange, onSetti
                 toggleTab={toggleTab}
                 visibleCount={visibleCount}
                 enableUseCaseTracking={localSettings.enableUseCaseTracking}
-                enableAlerts={localSettings.enableAlerts}
                 enableForecasting={localSettings.enableForecasting}
               />
             )}
