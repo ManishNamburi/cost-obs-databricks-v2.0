@@ -34,6 +34,7 @@ const TaggingHub = lazy(() => lazyWithRetry(() => import("@/components/TaggingHu
 const SQLWarehousing360 = lazy(() => lazyWithRetry(() => import("@/components/SQLWarehousing360").then(m => ({ default: m.SQLWarehousing360 }))));
 const WarehouseRightsizingView = lazy(() => lazyWithRetry(() => import("@/components/SQLWarehousing360").then(m => ({ default: m.WarehouseRightsizingView }))));
 const WarehouseIdleTimeView = lazy(() => lazyWithRetry(() => import("@/components/SQLWarehousing360").then(m => ({ default: m.WarehouseIdleTimeView }))));
+const OptimizeMethodologyPanel = lazy(() => lazyWithRetry(() => import("@/components/SQLWarehousing360").then(m => ({ default: m.OptimizeMethodologyPanel }))));
 const ForecastingView = lazy(() => lazyWithRetry(() => import("@/components/ForecastingView").then(m => ({ default: m.ForecastingView }))));
 const ContractBurndown = lazy(() => lazyWithRetry(() => import("@/components/ContractBurndown").then(m => ({ default: m.ContractBurndown }))));
 const Alerts = lazy(() => lazyWithRetry(() => import("@/pages/Alerts")));
@@ -1204,8 +1205,9 @@ function Dashboard() {
                 <p className="text-sm text-gray-500">Rightsizing recommendations and cost optimization insights</p>
               </div>
             </div>
-            <WarehouseRightsizingView host={accountInfo?.host} />
+            <OptimizeMethodologyPanel />
             <WarehouseIdleTimeView host={accountInfo?.host} startDate={dateRange.startDate} endDate={dateRange.endDate} workspaceIds={_wsIds} />
+            <WarehouseRightsizingView host={accountInfo?.host} />
           </div>
           </TabErrorBoundary>
         ) : activeTab === "kpis" ? (
