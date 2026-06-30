@@ -118,6 +118,11 @@ def _config_table(name: str) -> str:
     return f"`{catalog}`.`{schema}`.`{name}`"
 
 
+def _table_missing(e: Exception) -> bool:
+    s = str(e)
+    return "TABLE_OR_VIEW_NOT_FOUND" in s or "42P01" in s
+
+
 _ensured_tables: set[str] = set()
 _ensure_lock = __import__("threading").Lock()
 
@@ -218,7 +223,10 @@ def restore_workspace_filter_from_delta() -> None:
             _json.dump({"workspace_ids": workspace_ids}, f)
         logger.info("Restored workspace filter pool from Delta: %d ids", len(workspace_ids))
     except Exception as e:
-        logger.warning(f"Could not restore workspace filter from Delta (non-fatal): {e}")
+        if _table_missing(e):
+            logger.debug("Could not restore workspace filter from Delta (not yet created): %s", e)
+        else:
+            logger.warning(f"Could not restore workspace filter from Delta (non-fatal): {e}")
 
 
 # ── Refresh log persistence (survives deploys via Delta) ──────────────────────
@@ -261,7 +269,10 @@ def restore_refresh_log_from_delta() -> None:
             _json.dump(log_data, f)
         logger.info("Restored refresh log from Delta (last_refresh=%s)", log_data.get("last_refresh_utc"))
     except Exception as e:
-        logger.warning(f"Could not restore refresh log from Delta (non-fatal): {e}")
+        if _table_missing(e):
+            logger.debug("Could not restore refresh log from Delta (not yet created): %s", e)
+        else:
+            logger.warning(f"Could not restore refresh log from Delta (non-fatal): {e}")
 
 
 class CloudConnectionCreate(BaseModel):
@@ -365,7 +376,10 @@ def _load_connections() -> list[dict]:
             return conns
         # Table empty — check file for migration data
     except Exception as e:
-        logger.warning(f"Could not load connections from Delta table: {e}")
+        if _table_missing(e):
+            logger.debug("Could not load connections from Delta table (not yet created): %s", e)
+        else:
+            logger.warning(f"Could not load connections from Delta table: {e}")
 
     # Fallback: local file
     file_conns = _load_connections_from_file()
@@ -812,7 +826,10 @@ def _load_contract_settings() -> dict:
                 "notes": r.get("notes") or "",
             }
     except Exception as e:
-        logger.warning(f"Could not load contract from Delta table: {e}")
+        if _table_missing(e):
+            logger.debug("Could not load contract from Delta table (not yet created): %s", e)
+        else:
+            logger.warning(f"Could not load contract from Delta table: {e}")
 
     # Fallback: local file — migrate to Delta if data present
     try:
@@ -1261,7 +1278,10 @@ def _load_webhook_settings() -> dict:
         if rows:
             return {"slack_webhook_url": rows[0].get("slack_webhook_url") or ""}
     except Exception as e:
-        logger.warning(f"Could not load webhook settings from Delta table: {e}")
+        if _table_missing(e):
+            logger.debug("Could not load webhook settings from Delta table (not yet created): %s", e)
+        else:
+            logger.warning(f"Could not load webhook settings from Delta table: {e}")
 
     # Fallback: file
     if os.path.exists(WEBHOOK_SETTINGS_FILE):
@@ -1422,7 +1442,10 @@ def _load_user_permissions() -> dict:
             logger.info(f"Loaded permissions from Delta table ({len(admins)} admins, {len(consumers)} consumers)")
             return {"admins": admins, "consumers": consumers}
     except Exception as e:
-        logger.warning(f"Could not load permissions from Delta table: {e}")
+        if _table_missing(e):
+            logger.debug("Could not load permissions from Delta table (not yet created): %s", e)
+        else:
+            logger.warning(f"Could not load permissions from Delta table: {e}")
 
     # Fallback: local file (ephemeral — only useful in dev)
     try:
@@ -1523,7 +1546,10 @@ def load_schedule_settings() -> dict:
         if rows and rows[0].get("settings_json"):
             return {**_SCHEDULE_DEFAULTS, **json.loads(rows[0]["settings_json"])}
     except Exception as e:
-        logger.warning("Could not load schedule settings from Delta (storage may not be configured yet): %s", e)
+        if _table_missing(e):
+            logger.debug("Could not load schedule settings from Delta (not yet created): %s", e)
+        else:
+            logger.warning("Could not load schedule settings from Delta (storage may not be configured yet): %s", e)
 
     # Fallback: local file (dev / first run before table exists)
     try:
@@ -1597,7 +1623,10 @@ def _load_alert_thresholds() -> dict:
         if rows and rows[0].get("settings_json"):
             return {**_ALERT_THRESHOLD_DEFAULTS, **json.loads(rows[0]["settings_json"])}
     except Exception as e:
-        logger.warning("Could not load alert thresholds from Delta: %s", e)
+        if _table_missing(e):
+            logger.debug("Could not load alert thresholds from Delta (not yet created): %s", e)
+        else:
+            logger.warning("Could not load alert thresholds from Delta: %s", e)
 
     try:
         if os.path.exists(ALERT_THRESHOLDS_FILE):
@@ -1754,7 +1783,10 @@ def _load_pricing_settings() -> dict:
         if rows and rows[0].get("settings_json"):
             return json.loads(rows[0]["settings_json"])
     except Exception as e:
-        logger.warning("Could not load pricing settings from Delta (storage may not be configured yet): %s", e)
+        if _table_missing(e):
+            logger.debug("Could not load pricing settings from Delta (not yet created): %s", e)
+        else:
+            logger.warning("Could not load pricing settings from Delta (storage may not be configured yet): %s", e)
 
     try:
         with open(PRICING_SETTINGS_FILE) as f:
