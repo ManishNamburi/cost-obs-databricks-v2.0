@@ -168,8 +168,11 @@ function ProductDrilldown({ topUsers }: { topUsers: UserSpend[] }) {
 
   return (
     <div className="rounded-lg bg-white p-6 border " style={{ borderColor: '#E5E5E5' }}>
-      <h3 className="text-lg font-medium text-gray-900 mb-4">User Spend by Product</h3>
-      <div className="space-y-2.5 mt-2">
+      <div className="mb-4 flex items-center justify-between">
+        <h3 className="text-lg font-medium text-gray-900">User Spend by Product</h3>
+        <span className="text-xs font-medium" style={{ color: '#FF3621' }}>Click a row to drill down ↓</span>
+      </div>
+      <div className="space-y-2.5">
         {sorted.map(([product, spend]) => {
           const pct = total > 0 ? (spend / total) * 100 : 0;
           const isSelected = selectedProduct === product;
@@ -399,7 +402,7 @@ export default function UsersGroups({ startDate, endDate, dateRange, anonymizeUs
       {/* Summary Cards */}
       <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
         {/* Active users */}
-        <div className="rounded-xl border border-gray-200 bg-white p-6 shadow-sm cursor-pointer hover:shadow-md hover:scale-[1.01] transition-all" onClick={() => startDate && endDate && setSelectedKPI({kpi: "total_users", label: "Daily Active Users", variant: "platform"})}>
+        <div className="rounded-xl border border-gray-200 bg-white p-6 shadow-sm cursor-pointer hover:shadow-md hover:scale-[1.01] transition-all" onClick={() => startDate && endDate && setSelectedKPI({kpi: "total_users", label: "Daily Unique Active Users", variant: "platform"})}>
           <div className="flex items-center gap-3">
             <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-lg bg-orange-100 text-[#FF3621]">
               <svg className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" /></svg>
@@ -416,7 +419,7 @@ export default function UsersGroups({ startDate, endDate, dateRange, anonymizeUs
           </div>
         </div>
         {/* User Spend */}
-        <div className="rounded-xl border border-gray-200 bg-white p-6 shadow-sm cursor-pointer hover:shadow-md hover:scale-[1.01] transition-all" onClick={() => startDate && endDate && setSelectedKPI({kpi: "user_spend", label: "Daily User Spend"})}>
+        <div className="rounded-xl border border-gray-200 bg-white p-6 shadow-sm cursor-pointer hover:shadow-md hover:scale-[1.01] transition-all" onClick={() => startDate && endDate && setSelectedKPI({kpi: "avg_spend_per_user", label: "Daily Per-User Spend"})}>
           <div className="flex items-center gap-3">
             <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-lg bg-orange-100 text-[#FF3621]">
               <svg className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" /></svg>
@@ -433,13 +436,13 @@ export default function UsersGroups({ startDate, endDate, dateRange, anonymizeUs
           </div>
         </div>
         {/* Power Users */}
-        <div className="rounded-xl border border-gray-200 bg-white p-6 shadow-sm cursor-pointer hover:shadow-md hover:scale-[1.01] transition-all" onClick={() => startDate && endDate && setSelectedKPI({kpi: "user_spend", label: "Power User Daily Spend"})}>
+        <div className="rounded-xl border border-gray-200 bg-white p-6 shadow-sm cursor-pointer hover:shadow-md hover:scale-[1.01] transition-all" onClick={() => startDate && endDate && setSelectedKPI({kpi: "power_user_spend", label: "Power User Daily Spend"})}>
           <div className="flex items-center gap-3">
             <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-lg bg-orange-100 text-[#FF3621]">
               <svg className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 3v4M3 5h4M6 17v4m-2-2h4m5-16l2.286 6.857L21 12l-5.714 2.143L13 21l-2.286-6.857L5 12l5.714-2.143L13 3z" /></svg>
             </div>
             <div className="min-w-0">
-              <p className="text-sm text-gray-500">Power Users</p>
+              <p className="text-sm text-gray-500 flex items-center">Power Users<InfoTooltip text="Users whose spend accounts for ≥10% of total spend in the selected period. These high-impact users drive the majority of platform costs." /></p>
               <p className="text-2xl font-semibold text-gray-900">{powerUsers.length}</p>
               <p className="text-xs text-gray-500">{fmt(powerUsersSpend)} spend over {daysDiff} days</p>
               <p className="mt-1 text-xs font-medium" style={{ color: '#FF3621' }}>Click to see trend →</p>
@@ -488,7 +491,10 @@ export default function UsersGroups({ startDate, endDate, dateRange, anonymizeUs
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
         {/* Top users bar chart */}
         <div className="rounded-lg bg-white p-6 border " style={{ borderColor: '#E5E5E5' }}>
-          <h3 className="text-lg font-medium text-gray-900 mb-4">Top Users by Spend</h3>
+          <div className="mb-4 flex items-center justify-between">
+            <h3 className="text-lg font-medium text-gray-900">Top Users by Spend</h3>
+            <span className="text-xs font-medium" style={{ color: '#FF3621' }}>Click a bar to drill down ↓</span>
+          </div>
           <ResponsiveContainer width="100%" height={320}>
             <BarChart data={barData} layout="vertical" margin={{ left: 8, right: 24, top: 0, bottom: 0 }}>
               <XAxis type="number" tickFormatter={v => fmt(v)} stroke="#9ca3af" fontSize={12} tickMargin={8} />
@@ -532,7 +538,10 @@ export default function UsersGroups({ startDate, endDate, dateRange, anonymizeUs
             </ResponsiveContainer>
           </div>
           <div className="rounded-lg bg-white p-6 border " style={{ borderColor: '#E5E5E5' }}>
-            <h3 className="text-lg font-medium text-gray-900 mb-1">Monthly User Growth</h3>
+            <h3 className="text-lg font-medium text-gray-900 mb-1 flex items-center">
+              Monthly User Growth
+              <InfoTooltip text="Counts distinct users whose earliest recorded DBU spend falls within each calendar month — i.e., users appearing for the first time that month. Always shows the last 6 months regardless of the date filter above." />
+            </h3>
             <p className="text-xs text-gray-500 mb-4">New users appearing for the first time each month — last 6 months</p>
             <ResponsiveContainer width="100%" height={300}>
               <BarChart data={data!.user_growth} margin={{ left: 0, right: 16, top: 20, bottom: 0 }}>

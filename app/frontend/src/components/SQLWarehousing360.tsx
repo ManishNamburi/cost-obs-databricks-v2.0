@@ -1027,7 +1027,10 @@ export function SQLWarehousing360({ sqlBreakdownData: _sqlBreakdownData, queryDa
                         User {sortField === "executed_by" && (sortDirection === "asc" ? "↑" : "↓")}
                       </th>
                       <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500">
-                        Query Preview
+                        <span className="flex items-center gap-1">
+                          Query Preview
+                          <InfoTooltip text="If queries show as <Redacted>, this app does not have access to system.query.history. Grant SELECT on this table to the app's service principal." />
+                        </span>
                       </th>
                       <th
                         className="cursor-pointer px-4 py-3 text-right text-xs font-medium uppercase tracking-wider text-gray-500 hover:text-gray-700"
@@ -1145,7 +1148,12 @@ export function SQLWarehousing360({ sqlBreakdownData: _sqlBreakdownData, queryDa
                   <thead className="bg-gray-50">
                     <tr>
                       <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500">User</th>
-                      <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500">Query Preview</th>
+                      <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500">
+                        <span className="flex items-center gap-1">
+                          Query Preview
+                          <InfoTooltip text="If queries show as <Redacted>, this app does not have access to system.query.history. Grant SELECT on this table to the app's service principal." />
+                        </span>
+                      </th>
                       <th className="px-4 py-3 text-right text-xs font-medium uppercase tracking-wider text-gray-500">Duration</th>
                       <th className="px-4 py-3 text-right text-xs font-medium uppercase tracking-wider text-gray-500">
                         Cost <InfoTooltip text={COST_TOOLTIP_TEXT} />
@@ -1473,21 +1481,27 @@ export function WarehouseIdleTimeView({
   host,
   startDate,
   endDate,
+  workspaceIds,
 }: {
   host?: string | null;
   startDate?: string;
   endDate?: string;
+  workspaceIds?: string[];
 }) {
   const params = new URLSearchParams();
   if (startDate) params.set("start_date", startDate);
   if (endDate) params.set("end_date", endDate);
+  if (workspaceIds && workspaceIds.length > 0) params.set("workspace_ids", workspaceIds.join(","));
 
   const { data, isLoading } = useQuery<{
     available: boolean;
+    serverless_detected: boolean;
+    error?: string;
     warehouses: Array<{
       warehouse_id: string;
       warehouse_name: string;
       warehouse_size: string;
+      warehouse_type: string;
       workspace_id: string;
       total_running_minutes: number;
       total_query_minutes: number;
@@ -1497,7 +1511,7 @@ export function WarehouseIdleTimeView({
       estimated_idle_spend: number;
     }>;
   }>({
-    queryKey: ["warehouse-idle-time", startDate, endDate],
+    queryKey: ["warehouse-idle-time", startDate, endDate, workspaceIds?.join(",")],
     queryFn: () =>
       fetch(`/api/sql/warehouse-health/idle-time?${params}`).then(r => r.json()),
     staleTime: 30 * 60 * 1000,
@@ -1520,7 +1534,11 @@ export function WarehouseIdleTimeView({
       ) : !data?.available || !data.warehouses.length ? (
         <div className="rounded-lg border border-gray-100 bg-gray-50 p-4 text-sm text-gray-500">
           {data?.available === false
-            ? "Idle time data unavailable. Requires access to system.compute.warehouse_events and system.query.history."
+            ? (data as any).error
+              ? `Idle time query failed: ${(data as any).error}`
+              : "Idle time data unavailable. Requires access to system.compute.warehouse_events and system.query.history."
+            : data?.serverless_detected
+            ? "Idle time via lifecycle events is not available for Serverless SQL Warehouses. Serverless warehouses scale per-query and do not emit start/stop events."
             : "No warehouse uptime data found for this date range."}
         </div>
       ) : (
@@ -1530,6 +1548,7 @@ export function WarehouseIdleTimeView({
               <tr>
                 <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500">Warehouse</th>
                 <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500">Size</th>
+                <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500">Type</th>
                 <th className="px-4 py-3 text-right text-xs font-medium uppercase tracking-wider text-gray-500">Uptime</th>
                 <th className="px-4 py-3 text-right text-xs font-medium uppercase tracking-wider text-gray-500">Idle Time</th>
                 <th className="px-4 py-3 text-right text-xs font-medium uppercase tracking-wider text-gray-500">Idle %</th>
@@ -1554,7 +1573,12 @@ export function WarehouseIdleTimeView({
                       wh.warehouse_name
                     )}
                   </td>
-                  <td className="px-4 py-3 text-gray-500">{wh.warehouse_size}</td>
+                  <td className="px-4 py-3 text-left text-sm text-gray-500">{wh.warehouse_size}</td>
+                  <td className="px-4 py-3 text-left">
+                    <span className={`inline-flex rounded-full px-2 py-0.5 text-xs font-medium ${wh.warehouse_type === 'SERVERLESS' ? 'bg-cyan-100 text-cyan-700' : 'bg-gray-100 text-gray-600'}`}>
+                      {wh.warehouse_type === 'SERVERLESS' ? 'Serverless' : 'Classic'}
+                    </span>
+                  </td>
                   <td className="px-4 py-3 text-right text-gray-700">{fmtHours(wh.total_running_minutes)}</td>
                   <td className="px-4 py-3 text-right text-gray-700">{fmtHours(wh.idle_minutes)}</td>
                   <td className="px-4 py-3 text-right">

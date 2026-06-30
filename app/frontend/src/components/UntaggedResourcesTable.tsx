@@ -138,6 +138,8 @@ export function UntaggedResourcesTable({
   const isHistoricalItem = (item: UntaggedItem) => {
     const name = item[resourceConfig.nameKey];
     const id = item[resourceConfig.idKey];
+    // When nameKey === idKey (e.g. endpoints), name===id is always true — only check for missing name
+    if (!resourceConfig.idKey || resourceConfig.nameKey === resourceConfig.idKey) return !name;
     return !name || name === id;
   };
   const historicalCount = allItems.filter(isHistoricalItem).length;
@@ -191,7 +193,7 @@ export function UntaggedResourcesTable({
                 <span className={`ml-2 rounded-full px-2 py-0.5 text-xs ${
                   activeUntaggedTab === tab.key ? "bg-orange-100 text-orange-600" : "bg-gray-100 text-gray-600"
                 }`}>
-                  {tab.count}
+                  {tab.count >= 500 ? "500+" : tab.count}
                 </span>
               )}
             </button>

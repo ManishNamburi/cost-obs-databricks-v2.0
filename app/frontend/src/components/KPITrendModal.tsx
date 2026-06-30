@@ -11,7 +11,7 @@ import {
   ResponsiveContainer,
 } from "recharts";
 import { useKPITrend, usePlatformKPITrend, useAppsKPITrend } from "@/hooks/useKPITrend";
-import { formatCurrency, formatNumber, formatBytes, formatComputeSecondsCompact } from "@/utils/formatters";
+import { formatCurrency, formatNumber, formatBytesNoDecimal, formatRowCount, formatComputeSecondsCompact } from "@/utils/formatters";
 
 interface KPITrendModalProps {
   kpi: string;
@@ -25,7 +25,7 @@ interface KPITrendModalProps {
   workspaceIds?: string[];
 }
 
-const SPEND_KPIS = new Set(["total_spend", "avg_daily_spend", "aiml_spend", "apps_spend", "tagged_spend", "untagged_spend", "infra_cost", "avg_cost_per_cluster", "sql_spend", "aiml_avg_endpoint_cost", "apps_avg_cost_per_app", "cost_per_tag"]);
+const SPEND_KPIS = new Set(["total_spend", "avg_daily_spend", "aiml_spend", "apps_spend", "tagged_spend", "untagged_spend", "infra_cost", "avg_cost_per_cluster", "sql_spend", "aiml_avg_endpoint_cost", "apps_avg_cost_per_app", "cost_per_tag", "user_spend", "power_user_spend", "avg_spend_per_user"]);
 
 function defaultBillingFormat(value: number, kpi: string): string {
   if (SPEND_KPIS.has(kpi)) {
@@ -38,9 +38,11 @@ function defaultBillingFormat(value: number, kpi: string): string {
 }
 
 function defaultPlatformFormat(value: number, kpi: string): string {
-  if (kpi === "total_bytes_read") return formatBytes(value);
+  if (kpi === "total_bytes_read") return formatBytesNoDecimal(value);
+  if (kpi === "total_rows_read") return formatRowCount(value);
   if (kpi === "total_compute_seconds") return formatComputeSecondsCompact(value);
   if (kpi === "avg_query_duration") return `${value.toFixed(1)}s`;
+  if (kpi === "stickiness") return `${value.toFixed(1)}%`;
   return formatNumber(value);
 }
 
@@ -172,7 +174,7 @@ export function KPITrendModal({
                       tickFormatter={(value) => fmt(value, kpi)}
                       tick={{ fontSize: 11, fill: "#6b7280" }}
                       axisLine={{ stroke: "#e5e7eb" }}
-                      width={60}
+                      width={80}
                     />
                     <Tooltip
                       formatter={(value: number | undefined) => [fmt(value ?? 0, kpi), kpiLabel]}

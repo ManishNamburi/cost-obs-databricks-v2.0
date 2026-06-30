@@ -1,5 +1,29 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { useQueryClient } from "@tanstack/react-query";
+
+function InfoTooltip({ text }: { text: string }) {
+  const [pos, setPos] = useState<{ x: number; y: number } | null>(null);
+  return (
+    <span
+      className="ml-1.5 inline-flex cursor-help"
+      onMouseEnter={e => setPos({ x: e.clientX, y: e.clientY })}
+      onMouseMove={e => setPos({ x: e.clientX, y: e.clientY })}
+      onMouseLeave={() => setPos(null)}
+    >
+      <span className="flex h-4 w-4 items-center justify-center rounded-full bg-gray-200 text-[10px] font-semibold text-gray-500">i</span>
+      {pos && createPortal(
+        <div
+          className="pointer-events-none fixed z-[9999] w-64 rounded-lg bg-gray-900 px-3 py-2 text-xs font-normal leading-relaxed text-white shadow-lg"
+          style={{ top: pos.y - 12, transform: "translateY(-100%)", left: Math.min(pos.x + 14, window.innerWidth - 272) }}
+        >
+          {text}
+        </div>,
+        document.body
+      )}
+    </span>
+  );
+}
 import {
   AreaChart,
   Area,
@@ -70,6 +94,7 @@ function getClusterUrl(host: string | null | undefined, clusterId: string, works
 export function AIMLCostCenter({ data, isLoading, startDate, endDate, host, workspaceIds, workspaceNameMap }: AIMLCostCenterProps) {
   const [endpointsPage, setEndpointsPage] = useState(1);
   const [modelsPage, setModelsPage] = useState(1);
+  const [modelsTypeFilter, setModelsTypeFilter] = useState<string | null>(null);
   const [selectedAgent, setSelectedAgent] = useState<import("@/types/billing").AIMLAgentBrick | null>(null);
   const [showHistoricalAgents, setShowHistoricalAgents] = useState(false);
   const [agentTypeFilter, setAgentTypeFilter] = useState<string>("all");
@@ -318,7 +343,7 @@ export function AIMLCostCenter({ data, isLoading, startDate, endDate, host, work
         <div
           className="rounded-lg bg-white p-6 border shadow-sm cursor-pointer hover:shadow-md hover:scale-[1.01] transition-all"
           style={{ borderColor: '#E5E5E5' }}
-          onClick={() => startDate && endDate && setSelectedKPI({kpi: "aiml_endpoints", label: "Active Endpoints"})}
+          onClick={() => startDate && endDate && setSelectedKPI({kpi: "aiml_endpoints", label: "Daily Active Endpoints"})}
         >
           <div className="flex items-center">
             <div className="flex h-12 w-12 items-center justify-center rounded-lg bg-orange-100">
@@ -327,7 +352,7 @@ export function AIMLCostCenter({ data, isLoading, startDate, endDate, host, work
               </svg>
             </div>
             <div className="ml-4">
-              <p className="text-sm font-medium text-gray-500">Active Endpoints</p>
+              <p className="flex items-center text-sm font-medium text-gray-500">Active Endpoints<InfoTooltip text="Average number of distinct model serving endpoints with billable usage per day in the selected period." /></p>
               <p className="text-2xl font-semibold text-gray-900">{formatNumber(summary.endpoint_count || 0)}</p>
               <p className="mt-1 text-xs text-gray-500">across {summary.workspace_count || 0} workspaces</p>
               <p className="mt-0.5 text-xs font-medium" style={{ color: '#FF3621' }}>Click to see trend →</p>
@@ -338,7 +363,7 @@ export function AIMLCostCenter({ data, isLoading, startDate, endDate, host, work
         <div
           className="rounded-lg bg-white p-6 border shadow-sm cursor-pointer hover:shadow-md hover:scale-[1.01] transition-all"
           style={{ borderColor: '#E5E5E5' }}
-          onClick={() => startDate && endDate && setSelectedKPI({kpi: "aiml_avg_endpoint_cost", label: "Endpoint Cost"})}
+          onClick={() => startDate && endDate && setSelectedKPI({kpi: "aiml_avg_endpoint_cost", label: "Average Daily Endpoint Cost"})}
         >
           <div className="flex items-center">
             <div className="flex h-12 w-12 items-center justify-center rounded-lg bg-orange-100">
@@ -347,7 +372,7 @@ export function AIMLCostCenter({ data, isLoading, startDate, endDate, host, work
               </svg>
             </div>
             <div className="ml-4">
-              <p className="text-sm font-medium text-gray-500">Endpoint Cost</p>
+              <p className="text-sm font-medium text-gray-500">Average Daily Endpoint Cost</p>
               <p className="text-2xl font-semibold text-gray-900">{formatCurrency(summary.avg_cost_per_endpoint || 0)}</p>
               <p className="mt-1 text-xs text-gray-500">daily per-endpoint</p>
               <p className="mt-0.5 text-xs font-medium" style={{ color: '#FF3621' }}>Click to see trend →</p>
@@ -511,74 +536,90 @@ export function AIMLCostCenter({ data, isLoading, startDate, endDate, host, work
 
         {/* Top Models Table */}
         <div className="rounded-lg bg-white p-6 border " style={{ borderColor: '#E5E5E5' }}>
-          <div className="mb-4 flex items-center gap-2">
-            <h3 className="text-lg font-semibold text-gray-900">Top Models</h3>
-            <div className="group relative">
-              <svg className="h-4 w-4 text-gray-500 cursor-help" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-              </svg>
-              <div className="absolute left-0 top-6 z-50 hidden w-72 rounded-lg border border-gray-200 bg-white p-3 text-xs text-gray-600 shadow-lg group-hover:block">
-                <p className="font-medium text-gray-900 mb-1">Top Models</p>
-                <p>Foundation Model API calls (Anthropic, OpenAI, Gemini, etc.), Feature Store lookups, and model training jobs. Unlike serverless endpoints above, these are billed by token usage or feature access rather than compute time.</p>
+          {(() => {
+            const TYPE_LABELS: Record<string, string> = { "Foundation Model API": "FMAPI Call" };
+            const typeColors: Record<string, string> = {
+              "Feature Store": "bg-teal-50 text-teal-700",
+              "Model Training": "bg-blue-50 text-blue-700",
+              "Foundation Model API": "bg-amber-50 text-amber-700",
+            };
+            const allModelRows = data.models?.models || [];
+            const distinctTypes = Array.from(new Set(allModelRows.map(m => m.model_type))).filter(Boolean);
+            const filteredModels = modelsTypeFilter
+              ? allModelRows.filter(m => m.model_type === modelsTypeFilter)
+              : allModelRows;
+            const pageModels = filteredModels.slice((modelsPage - 1) * PAGE_SIZE, modelsPage * PAGE_SIZE);
+            return (
+              <>
+          <div className="mb-4 flex items-center justify-between gap-2">
+            <div className="flex items-center gap-2">
+              <h3 className="text-lg font-semibold text-gray-900">Top Models</h3>
+              <div className="group relative">
+                <svg className="h-4 w-4 text-gray-500 cursor-help" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                </svg>
+                <div className="absolute left-0 top-6 z-50 hidden w-72 rounded-lg border border-gray-200 bg-white p-3 text-xs text-gray-600 shadow-lg group-hover:block">
+                  <p className="font-medium text-gray-900 mb-1">Top Models</p>
+                  <p>Foundation Model API calls (Anthropic, OpenAI, Gemini, etc.), Feature Store lookups, and model training jobs. Unlike serverless endpoints above, these are billed by token usage or feature access rather than compute time.</p>
+                </div>
               </div>
             </div>
+            {distinctTypes.length > 1 && (
+              <div className="flex flex-wrap gap-1.5">
+                <button
+                  onClick={() => { setModelsTypeFilter(null); setModelsPage(1); }}
+                  className={`rounded-full px-3 py-1 text-xs font-medium border transition-colors ${modelsTypeFilter === null ? "bg-gray-800 text-white border-gray-800" : "bg-white text-gray-600 border-gray-300 hover:border-gray-400"}`}
+                >
+                  All
+                </button>
+                {distinctTypes.map(t => (
+                  <button
+                    key={t}
+                    onClick={() => { setModelsTypeFilter(t); setModelsPage(1); }}
+                    className={`rounded-full px-3 py-1 text-xs font-medium border transition-colors ${modelsTypeFilter === t ? "bg-gray-800 text-white border-gray-800" : "bg-white text-gray-600 border-gray-300 hover:border-gray-400"}`}
+                  >
+                    {TYPE_LABELS[t] || t}
+                  </button>
+                ))}
+              </div>
+            )}
           </div>
-          {data.models?.models && data.models.models.length > 0 ? (
+          {allModelRows.length > 0 ? (
             <>
               <div className="overflow-x-auto">
                 <table className="min-w-full divide-y divide-gray-200">
                   <thead className="bg-gray-50">
                     <tr>
-                      <th className="px-3 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500">
-                        Model
-                      </th>
-                      <th className="px-3 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500">
-                        Type
-                      </th>
-                      <th className="px-3 py-3 text-right text-xs font-medium uppercase tracking-wider text-gray-500">
-                        Spend
-                      </th>
+                      <th className="px-3 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500">Model</th>
+                      <th className="px-3 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500">Type</th>
+                      <th className="px-3 py-3 text-right text-xs font-medium uppercase tracking-wider text-gray-500">Spend</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-gray-200 bg-white">
-                    {data.models.models.slice((modelsPage - 1) * PAGE_SIZE, modelsPage * PAGE_SIZE).map((model, idx) => {
-                      const TYPE_LABELS: Record<string, string> = {
-                        "Foundation Model API": "FMAPI Call",
-                      };
-                      const typeColors: Record<string, string> = {
-                        "Feature Store": "bg-teal-50 text-teal-700",
-                        "Model Training": "bg-blue-50 text-blue-700",
-                        "Foundation Model API": "bg-amber-50 text-amber-700",
-                      };
+                    {pageModels.map((model, idx) => {
                       const colorClass = typeColors[model.model_type] || "bg-gray-50 text-gray-700";
                       const typeLabel = TYPE_LABELS[model.model_type] || model.model_type;
                       return (
                         <tr key={idx} className={idx % 2 === 0 ? "bg-white" : "bg-gray-50"}>
-                          <td className="px-3 py-2 text-sm font-medium text-gray-900 truncate max-w-45" title={model.model_name}>
-                            {model.model_name}
-                          </td>
+                          <td className="px-3 py-2 text-sm font-medium text-gray-900 truncate max-w-45" title={model.model_name}>{model.model_name}</td>
                           <td className="whitespace-nowrap px-3 py-2 text-sm">
-                            <span className={`inline-flex rounded-full px-2 py-0.5 text-xs font-medium ${colorClass}`}>
-                              {typeLabel}
-                            </span>
+                            <span className={`inline-flex rounded-full px-2 py-0.5 text-xs font-medium ${colorClass}`}>{typeLabel}</span>
                           </td>
-                          <td className="whitespace-nowrap px-3 py-2 text-right text-sm text-gray-900">
-                            {formatCurrency(model.total_spend)}
-                          </td>
+                          <td className="whitespace-nowrap px-3 py-2 text-right text-sm text-gray-900">{formatCurrency(model.total_spend)}</td>
                         </tr>
                       );
                     })}
                   </tbody>
                 </table>
               </div>
-              {(data.models?.models?.length || 0) > PAGE_SIZE && (
+              {filteredModels.length > PAGE_SIZE && (
                 <div className="mt-3 flex items-center justify-between border-t border-gray-200 pt-3">
                   <p className="text-xs text-gray-500">
-                    {(modelsPage - 1) * PAGE_SIZE + 1}–{Math.min(modelsPage * PAGE_SIZE, data.models?.models?.length || 0)} of {data.models?.models?.length || 0}
+                    {(modelsPage - 1) * PAGE_SIZE + 1}–{Math.min(modelsPage * PAGE_SIZE, filteredModels.length)} of {filteredModels.length}
                   </p>
                   <div className="flex gap-1">
                     <button onClick={() => setModelsPage(p => Math.max(1, p - 1))} disabled={modelsPage === 1} className="rounded border border-gray-300 px-2 py-1 text-xs text-gray-600 hover:bg-gray-50 disabled:opacity-40">Prev</button>
-                    <button onClick={() => setModelsPage(p => Math.min(Math.ceil((data.models?.models?.length || 0) / PAGE_SIZE), p + 1))} disabled={modelsPage >= Math.ceil((data.models?.models?.length || 0) / PAGE_SIZE)} className="rounded border border-gray-300 px-2 py-1 text-xs text-gray-600 hover:bg-gray-50 disabled:opacity-40">Next</button>
+                    <button onClick={() => setModelsPage(p => Math.min(Math.ceil(filteredModels.length / PAGE_SIZE), p + 1))} disabled={modelsPage >= Math.ceil(filteredModels.length / PAGE_SIZE)} className="rounded border border-gray-300 px-2 py-1 text-xs text-gray-600 hover:bg-gray-50 disabled:opacity-40">Next</button>
                   </div>
                 </div>
               )}
@@ -586,6 +627,9 @@ export function AIMLCostCenter({ data, isLoading, startDate, endDate, host, work
           ) : (
             <div className="flex h-32 items-center justify-center text-gray-500">No model data available</div>
           )}
+        </>
+      );
+    })()}
         </div>
       </div>
 
@@ -613,12 +657,14 @@ export function AIMLCostCenter({ data, isLoading, startDate, endDate, host, work
 
           return (
             <>
-              <div className="mb-4 flex flex-col gap-2">
+              <div className="mb-2 flex flex-col gap-2">
                 <div className="flex items-center justify-between gap-3">
                   <div>
                     <h3 className="text-lg font-semibold text-gray-900">ML Runtime Clusters</h3>
                     <p className="text-xs text-gray-500">Clusters running the Databricks ML Runtime ({filteredMlClusters.length} clusters)</p>
                   </div>
+                </div>
+                <div className="flex items-center justify-between gap-3">
                   {allMlClusters.length > 0 && (
                     <label className="flex items-center gap-1.5 text-xs text-gray-500 cursor-pointer">
                       <input type="checkbox" checked={showHistoricalMlClusters}
@@ -631,8 +677,7 @@ export function AIMLCostCenter({ data, isLoading, startDate, endDate, host, work
                       </span>
                     </label>
                   )}
-                </div>
-                <div className="flex items-center justify-end gap-3">
+                  <div className="flex items-center gap-3">
                   {availableRuntimes.length > 0 && (
                     <div className="relative flex items-center gap-1.5" ref={mlRuntimeFilterRef}>
                       <button
@@ -677,6 +722,7 @@ export function AIMLCostCenter({ data, isLoading, startDate, endDate, host, work
                     onChange={(e) => { setMlClusterSearch(e.target.value); setMlClustersPage(1); }}
                     className="rounded-md border border-gray-300 px-3 py-1.5 text-sm text-gray-900 placeholder-gray-400 focus:border-orange-500 focus:ring-1 focus:ring-orange-500 w-44"
                   />
+                  </div>
                 </div>
               </div>
               {paginatedMlClusters.length > 0 ? (
@@ -771,12 +817,14 @@ export function AIMLCostCenter({ data, isLoading, startDate, endDate, host, work
 
           return (
             <>
-              <div className="mb-4 flex flex-col gap-2">
+              <div className="mb-2 flex flex-col gap-2">
                 <div className="flex items-center justify-between gap-3">
                   <div>
                     <h3 className="text-lg font-semibold text-gray-900">Agent Bricks</h3>
                     <p className="text-xs text-gray-500">Databricks agents and their cost attribution</p>
                   </div>
+                </div>
+                <div className="flex items-center justify-between gap-3">
                   {allAgents.length > 0 && (
                     <label className="flex items-center gap-1.5 text-xs text-gray-500 cursor-pointer">
                       <input
@@ -792,36 +840,36 @@ export function AIMLCostCenter({ data, isLoading, startDate, endDate, host, work
                       </span>
                     </label>
                   )}
-                </div>
-                <div className="flex items-center justify-end">
-                  <input
-                    type="text"
-                    placeholder="Search..."
-                    value={agentSearch}
-                    onChange={(e) => { setAgentSearch(e.target.value); setAgentsPage(1); }}
-                    className="rounded-md border border-gray-300 px-3 py-1.5 text-sm text-gray-900 placeholder-gray-400 focus:border-orange-500 focus:ring-1 focus:ring-orange-500 w-44"
-                  />
-                </div>
-                {agentTypes.length > 0 && (
                   <div className="flex items-center gap-2">
-                    <button
-                      onClick={() => { setAgentTypeFilter("all"); setAgentsPage(1); }}
-                      className={`rounded-full px-3 py-1 text-xs font-medium ${agentTypeFilter === "all" ? "text-white" : "bg-orange-50 text-orange-700 hover:bg-orange-100"}`}
-                      style={agentTypeFilter === "all" ? { backgroundColor: '#FF3621' } : undefined}
-                    >All ({allAgents.filter(a => showHistoricalAgents || !isHistoricalAgent(a)).length})</button>
-                    {agentTypes.map(t => {
-                      const count = allAgents.filter(a => ((a as any).agent_type || "Agent") === t && (showHistoricalAgents || !isHistoricalAgent(a))).length;
-                      return (
+                    {agentTypes.length > 0 && (
+                      <>
                         <button
-                          key={t}
-                          onClick={() => { setAgentTypeFilter(t); setAgentsPage(1); }}
-                          className={`rounded-full px-3 py-1 text-xs font-medium ${agentTypeFilter === t ? "text-white" : "bg-orange-50 text-orange-700 hover:bg-orange-100"}`}
-                          style={agentTypeFilter === t ? { backgroundColor: '#FF3621' } : undefined}
-                        >{t} ({count})</button>
-                      );
-                    })}
+                          onClick={() => { setAgentTypeFilter("all"); setAgentsPage(1); }}
+                          className={`rounded-full px-3 py-1 text-xs font-medium ${agentTypeFilter === "all" ? "text-white" : "bg-orange-50 text-orange-700 hover:bg-orange-100"}`}
+                          style={agentTypeFilter === "all" ? { backgroundColor: '#FF3621' } : undefined}
+                        >All ({allAgents.filter(a => showHistoricalAgents || !isHistoricalAgent(a)).length})</button>
+                        {agentTypes.map(t => {
+                          const count = allAgents.filter(a => ((a as any).agent_type || "Agent") === t && (showHistoricalAgents || !isHistoricalAgent(a))).length;
+                          return (
+                            <button
+                              key={t}
+                              onClick={() => { setAgentTypeFilter(t); setAgentsPage(1); }}
+                              className={`rounded-full px-3 py-1 text-xs font-medium ${agentTypeFilter === t ? "text-white" : "bg-orange-50 text-orange-700 hover:bg-orange-100"}`}
+                              style={agentTypeFilter === t ? { backgroundColor: '#FF3621' } : undefined}
+                            >{t} ({count})</button>
+                          );
+                        })}
+                      </>
+                    )}
+                    <input
+                      type="text"
+                      placeholder="Search..."
+                      value={agentSearch}
+                      onChange={(e) => { setAgentSearch(e.target.value); setAgentsPage(1); }}
+                      className="rounded-md border border-gray-300 px-3 py-1.5 text-sm text-gray-900 placeholder-gray-400 focus:border-orange-500 focus:ring-1 focus:ring-orange-500 w-44"
+                    />
                   </div>
-                )}
+                </div>
               </div>
               {paginatedAgents.length > 0 ? (
                 <div className="overflow-x-auto">

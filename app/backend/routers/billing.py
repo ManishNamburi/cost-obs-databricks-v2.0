@@ -32,6 +32,9 @@ from backend.queries import (
     PIPELINE_OBJECTS,
     BILLING_KPIS_FAST,
     AVG_DAILY_WORKSPACES,
+    AVG_DAILY_QUERY_USERS_MV,
+    TOTAL_WORKSPACES_ALLTIME,
+    AVG_DAILY_MODELS,
     LAKEFLOW_JOB_STATS,
     PLATFORM_KPIS,
     PLATFORM_KPIS_FAST,
@@ -1133,7 +1136,7 @@ def _get_pipeline_names() -> dict[str, str]:
         results = execute_query("""
             SELECT pipeline_id, MAX(name) as pipeline_name
             FROM system.lakeflow.pipelines
-            WHERE delete_time IS NULL AND name IS NOT NULL
+            WHERE name IS NOT NULL
             GROUP BY pipeline_id
         """)
         if results:
@@ -2053,6 +2056,7 @@ async def get_platform_kpis(
         "total_jobs": 0,
         "total_job_runs": 0,
         "successful_runs": 0,
+        "total_job_run_hours": 0,
         "unique_job_owners": 0,
         "active_workspaces": 0,
         "active_notebooks": 0,
@@ -2161,6 +2165,8 @@ async def get_kpis_bundle(
     if use_mv:
         avg_daily_ws_sql = _get_mv_query(AVG_DAILY_WORKSPACES, mv_ws)
         parallel_queries.append(("avg_daily_ws", lambda: execute_query(avg_daily_ws_sql, params)))
+        avg_daily_users_sql = _get_mv_query(AVG_DAILY_QUERY_USERS_MV, mv_ws)
+        parallel_queries.append(("avg_daily_query_users", lambda: execute_query(avg_daily_users_sql, params)))
 
     # delta_query_stats is a Delta-direct fallback; skip it when MV is available to avoid redundant scan
     if use_mv:
@@ -2170,6 +2176,10 @@ async def get_kpis_bundle(
 
     # Supplemental user count from materialized table — failures handled inside execute_query
     parallel_queries.append(("user_count", lambda: execute_query(USER_COUNT_QUERY, params)))
+    # Workspace count (all-time) and avg daily model endpoints — fast billing scans
+    parallel_queries.append(("total_workspaces", lambda: execute_query(TOTAL_WORKSPACES_ALLTIME, {})))
+    avg_daily_models_sql = _inject_ws_filter(AVG_DAILY_MODELS, billing_ws_clause)
+    parallel_queries.append(("avg_daily_models", lambda: execute_query(avg_daily_models_sql, params)))
 
     try:
         query_results = await asyncio.to_thread(execute_queries_parallel, parallel_queries, timeout=90.0)
@@ -2178,9 +2188,10 @@ async def get_kpis_bundle(
         return {"kpis": {
             "total_queries": 0, "unique_query_users": 0,
             "total_rows_read": 0, "total_bytes_read": 0, "total_compute_seconds": 0,
-            "total_jobs": 0, "total_job_runs": 0, "successful_runs": 0,
+            "total_jobs": 0, "total_job_runs": 0, "successful_runs": 0, "total_job_run_hours": 0,
             "unique_job_owners": 0, "active_workspaces": 0, "avg_daily_workspaces": 0, "active_notebooks": 0,
-            "models_served": 0, "total_serving_dbus": 0,
+            "models_served": 0, "total_serving_dbus": 0, "avg_daily_models": 0,
+            "avg_daily_query_users": 0, "total_workspace_count": 0,
             "start_date": params["start_date"], "end_date": params["end_date"],
             "error": str(e),
         }, "anomalies": {"anomalies": [], "start_date": params["start_date"], "end_date": params["end_date"]}}
@@ -2189,9 +2200,10 @@ async def get_kpis_bundle(
     kpis_response = {
         "total_queries": 0, "unique_query_users": 0,
         "total_rows_read": 0, "total_bytes_read": 0, "total_compute_seconds": 0,
-        "total_jobs": 0, "total_job_runs": 0, "successful_runs": 0,
+        "total_jobs": 0, "total_job_runs": 0, "successful_runs": 0, "total_job_run_hours": 0,
         "unique_job_owners": 0, "active_workspaces": 0, "avg_daily_workspaces": 0, "active_notebooks": 0,
-        "models_served": 0, "total_serving_dbus": 0,
+        "models_served": 0, "total_serving_dbus": 0, "avg_daily_models": 0,
+        "avg_daily_query_users": 0, "total_workspace_count": 0,
         "start_date": params["start_date"], "end_date": params["end_date"],
     }
 
@@ -2235,6 +2247,21 @@ async def get_kpis_bundle(
     lakeflow_results = query_results.get("lakeflow_kpis")
     if lakeflow_results and len(lakeflow_results) > 0:
         kpis_response["successful_runs"] = int(lakeflow_results[0].get("successful_runs") or 0)
+        kpis_response["total_job_run_hours"] = int(lakeflow_results[0].get("total_run_hours") or 0)
+
+    avg_daily_users_results = query_results.get("avg_daily_query_users")
+    if avg_daily_users_results and len(avg_daily_users_results) > 0:
+        val = avg_daily_users_results[0].get("avg_daily_query_users")
+        if val is not None:
+            kpis_response["avg_daily_query_users"] = int(val)
+
+    total_ws_results = query_results.get("total_workspaces")
+    if total_ws_results and len(total_ws_results) > 0:
+        kpis_response["total_workspace_count"] = int(total_ws_results[0].get("total_workspaces") or 0)
+
+    avg_daily_models_results = query_results.get("avg_daily_models")
+    if avg_daily_models_results and len(avg_daily_models_results) > 0:
+        kpis_response["avg_daily_models"] = int(avg_daily_models_results[0].get("avg_daily_models") or 0)
 
     # Override unique_query_users with accurate cross-range distinct count from prpr table
     uc_results = query_results.get("user_count")
@@ -2773,6 +2800,22 @@ async def get_kpi_trend(
         GROUP BY u.usage_date
         ORDER BY u.usage_date
         """
+    elif kpi == "avg_spend_per_user":
+        query = """
+        SELECT
+          u.usage_date as date,
+          SUM(u.usage_quantity * COALESCE(p.pricing.default, 0)) / NULLIF(COUNT(DISTINCT u.identity_metadata.run_as), 0) as value
+        FROM system.billing.usage u
+        LEFT JOIN system.billing.list_prices p
+          ON u.sku_name = p.sku_name
+          AND u.cloud = p.cloud
+          AND p.price_end_time IS NULL
+        WHERE u.usage_date BETWEEN :start_date AND :end_date
+          AND u.usage_quantity > 0
+          AND u.identity_metadata.run_as IS NOT NULL
+        GROUP BY u.usage_date
+        ORDER BY u.usage_date
+        """
     elif kpi == "tag_coverage_pct":
         query = """
         WITH usage_with_tags AS (
@@ -2797,6 +2840,46 @@ async def get_kpi_trend(
         GROUP BY usage_date
         ORDER BY usage_date
         """
+    elif kpi == "power_user_spend":
+        # ws_clause is embedded inline via f-string; null it out so _inject_ws_filter below is a no-op
+        query = f"""
+        WITH user_totals AS (
+          SELECT
+            u.identity_metadata.run_as AS user_email,
+            SUM(u.usage_quantity * COALESCE(p.pricing.default, 0)) AS total_spend
+          FROM system.billing.usage u
+          LEFT JOIN system.billing.list_prices p
+            ON u.sku_name = p.sku_name
+            AND u.cloud = p.cloud
+            AND p.price_end_time IS NULL
+          WHERE u.usage_date BETWEEN :start_date AND :end_date
+            AND u.usage_quantity > 0
+            AND u.identity_metadata.run_as IS NOT NULL
+            {ws_clause}
+          GROUP BY u.identity_metadata.run_as
+        ),
+        period_total AS (SELECT SUM(total_spend) AS grand_total FROM user_totals),
+        power_users AS (
+          SELECT ut.user_email
+          FROM user_totals ut, period_total pt
+          WHERE ut.total_spend / NULLIF(pt.grand_total, 0) >= 0.10
+        )
+        SELECT
+          u.usage_date AS date,
+          SUM(u.usage_quantity * COALESCE(p.pricing.default, 0)) AS value
+        FROM system.billing.usage u
+        LEFT JOIN system.billing.list_prices p
+          ON u.sku_name = p.sku_name
+          AND u.cloud = p.cloud
+          AND p.price_end_time IS NULL
+        JOIN power_users pu ON u.identity_metadata.run_as = pu.user_email
+        WHERE u.usage_date BETWEEN :start_date AND :end_date
+          AND u.usage_quantity > 0
+          {ws_clause}
+        GROUP BY u.usage_date
+        ORDER BY u.usage_date
+        """
+        ws_clause = ""  # already embedded above; prevent double-injection
     else:
         return {"error": f"Unknown KPI: {kpi}"}
 
@@ -2839,7 +2922,7 @@ async def get_kpi_trend(
         })
 
     # KPIs that represent averages/rates — use AVG when grouping into buckets
-    AVG_KPIS = {"avg_cost_per_cluster", "avg_daily_spend"}
+    AVG_KPIS = {"avg_cost_per_cluster", "avg_daily_spend", "avg_spend_per_user"}
 
     # Group into weekly/monthly buckets if needed
     if granularity == "weekly" and daily_points:
@@ -3274,6 +3357,41 @@ async def get_platform_kpi_trend(
         GROUP BY DATE(start_time)
         ORDER BY date
         """
+    elif kpi == "stickiness":
+        _qh_ws = ws_clause if ws_clause else ""
+        stickiness_query = f"""
+        WITH total_users AS (
+          SELECT COUNT(DISTINCT COALESCE(executed_by, executed_as_user_id)) AS total
+          FROM system.query.history
+          WHERE start_time >= CAST(:start_date AS TIMESTAMP)
+            AND start_time < CAST(DATE_ADD(CAST(:end_date AS DATE), 1) AS TIMESTAMP)
+            {_qh_ws}
+            AND (executed_by IS NOT NULL OR executed_as_user_id IS NOT NULL)
+        ),
+        daily_users AS (
+          SELECT
+            DATE(start_time) AS date,
+            COUNT(DISTINCT COALESCE(executed_by, executed_as_user_id)) AS dau
+          FROM system.query.history
+          WHERE start_time >= CAST(:start_date AS TIMESTAMP)
+            AND start_time < CAST(DATE_ADD(CAST(:end_date AS DATE), 1) AS TIMESTAMP)
+            {_qh_ws}
+            AND (executed_by IS NOT NULL OR executed_as_user_id IS NOT NULL)
+          GROUP BY DATE(start_time)
+        )
+        SELECT d.date, 100.0 * d.dau / NULLIF(t.total, 0) AS value
+        FROM daily_users d CROSS JOIN total_users t
+        ORDER BY d.date
+        """
+        try:
+            results = await asyncio.to_thread(execute_query, stickiness_query, params)
+        except Exception as e:
+            logger.error(f"Platform KPI trend query failed for {kpi}: {e}")
+            return {"kpi": kpi, "granularity": granularity, "data_points": [],
+                    "summary": {"period_start_value": 0, "period_end_value": 0, "change_amount": 0,
+                                "change_percent": 0, "min_value": 0, "max_value": 0, "avg_value": 0, "trend": "flat"}}
+        s_points = [{"date": str(r["date"]), "value": float(r["value"] or 0)} for r in results]
+        return _resp(_build_platform_kpi_response(kpi, granularity, s_points))
     else:
         return {"error": f"Unknown platform KPI: {kpi}"}
 
