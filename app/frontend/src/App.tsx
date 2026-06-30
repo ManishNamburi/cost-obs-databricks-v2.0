@@ -36,8 +36,6 @@ const WarehouseRightsizingView = lazy(() => lazyWithRetry(() => import("@/compon
 const WarehouseIdleTimeView = lazy(() => lazyWithRetry(() => import("@/components/SQLWarehousing360").then(m => ({ default: m.WarehouseIdleTimeView }))));
 const OptimizeMethodologyPanel = lazy(() => lazyWithRetry(() => import("@/components/SQLWarehousing360").then(m => ({ default: m.OptimizeMethodologyPanel }))));
 const ForecastingView = lazy(() => lazyWithRetry(() => import("@/components/ForecastingView").then(m => ({ default: m.ForecastingView }))));
-const ContractBurndown = lazy(() => lazyWithRetry(() => import("@/components/ContractBurndown").then(m => ({ default: m.ContractBurndown }))));
-const Alerts = lazy(() => lazyWithRetry(() => import("@/pages/Alerts")));
 const UseCases = lazy(() => lazyWithRetry(() => import("@/pages/UseCases")));
 const UsersGroups = lazy(() => lazyWithRetry(() => import("@/pages/UsersGroups")));
 const BudgetView = lazy(() => lazyWithRetry(() => import("@/components/BudgetView").then(m => ({ default: m.BudgetView }))));
@@ -55,8 +53,6 @@ function preloadTabChunks() {
   import("@/components/TaggingHub");
   import("@/components/SQLWarehousing360");
   import("@/components/ForecastingView");
-  import("@/components/ContractBurndown");
-  import("@/pages/Alerts");
   import("@/pages/UseCases");
   import("@/pages/UsersGroups");
   import("@/components/BudgetView");
@@ -103,7 +99,7 @@ function useKeepAlive() {
   }, []);
 }
 
-type ViewTab = "dbu" | "sql" | "infra" | "optimizer" | "kpis" | "aiml" | "ai-gateway" | "apps" | "tagging" | "use-cases" | "alerts" | "forecasting" | "users-groups" | "contract" | "budget";
+type ViewTab = "dbu" | "sql" | "infra" | "optimizer" | "kpis" | "aiml" | "ai-gateway" | "apps" | "tagging" | "use-cases" | "forecasting" | "users-groups" | "budget";
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -483,10 +479,6 @@ function Dashboard() {
   useQuery({ queryKey: ["monthly-consumption"], queryFn: async () => { const r = await fetch("/api/use-cases/monthly-consumption"); if (!r.ok) throw new Error("Failed"); return r.json(); }, enabled: useCasesEnabled });
   useQuery({ queryKey: ["available-tags"], queryFn: async () => { const r = await fetch("/api/tagging/available-tags"); if (!r.ok) return { tags: {}, count: 0 }; return r.json(); } });
 
-  // Alerts tab data - prefetch immediately on app load for fast tab switching
-  const { data: alertsData } = useQuery({ queryKey: ["alerts", "recent", 30], queryFn: async () => { const r = await fetch("/api/alerts/recent?days_back=30"); if (!r.ok) throw new Error("Failed"); return r.json(); } });
-  useQuery({ queryKey: ["alerts", "databricks"], queryFn: async () => { const r = await fetch("/api/alerts/databricks-alerts"); if (!r.ok) throw new Error("Failed"); return r.json(); } });
-
   // Workspace list for the filter dropdown — pool-scoped, independent of the bundle.
   const { data: wsListData, isLoading: wsListLoading } = useQuery<{ workspaces: { id: string; name: string }[] }>({
     queryKey: ["billing", "workspaces"],
@@ -579,7 +571,6 @@ function Dashboard() {
           apps: appsData,
           tagging: taggingData,
           users: usersGroupsData,
-          alerts: alertsData,
           query360: dbsqlData ?? undefined,
         },
         sections,
@@ -630,7 +621,6 @@ function Dashboard() {
         query360: dbsqlData ?? undefined,
         users: usersGroupsData,
         useCases: useCasesSummaryData,
-        alerts: alertsData,
         dateRange: {
           start: dateRange.startDate,
           end: dateRange.endDate,
@@ -1298,8 +1288,6 @@ function Dashboard() {
           </TabErrorBoundary>
         ) : activeTab === "use-cases" ? (
           <TabErrorBoundary tabName="Use Cases"><UseCases /></TabErrorBoundary>
-        ) : activeTab === "alerts" ? (
-          <TabErrorBoundary tabName="Alerts"><Alerts /></TabErrorBoundary>
         ) : activeTab === "forecasting" ? (
           <TabErrorBoundary tabName="Forecasting">
           <ForecastingView
@@ -1318,10 +1306,6 @@ function Dashboard() {
             workspaceNameMap={workspaceNameMap}
           />
           </TabErrorBoundary>
-        ) : activeTab === "contract" ? (
-          <TabErrorBoundary tabName="Contract">
-          <ContractBurndown />
-          </TabErrorBoundary>
         ) : null}
         </Suspense>
         </div>
@@ -1336,7 +1320,6 @@ function Dashboard() {
         tabVisibility={{
           ...tabVisibility,
           "use-cases": tabVisibility["use-cases"] && appSettings.enableUseCaseTracking,
-          alerts: tabVisibility.alerts && appSettings.enableAlerts,
           forecasting: tabVisibility.forecasting && appSettings.enableForecasting,
         }}
       />
@@ -1349,8 +1332,7 @@ function Dashboard() {
         onTabVisibilityChange={(v) => {
           setTabVisibility(v);
           // If the active tab was hidden, switch to the first visible tab.
-          // "contract" is not in TabVisibility (it's purely settings-gated), so skip the check for it.
-          if (activeTab !== "contract" && !v[activeTab as keyof typeof v]) {
+          if (!v[activeTab as keyof typeof v]) {
             const firstVisible = (Object.keys(v) as ViewTab[]).find((k) => v[k as keyof typeof v]);
             if (firstVisible) setActiveTab(firstVisible);
           }
