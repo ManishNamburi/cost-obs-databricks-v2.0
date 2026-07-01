@@ -1342,14 +1342,27 @@ async def get_workspace_list(
     sql = f"""
         SELECT
             CAST(u.workspace_id AS STRING) as workspace_id,
-            MAX(ws.workspace_name) as workspace_name
+            COALESCE(MAX(wsl.workspace_name), MAX(ws_dedup.workspace_name)) as workspace_name
         FROM system.billing.usage u
-        LEFT JOIN system.access.workspaces_latest ws ON CAST(u.workspace_id AS BIGINT) = CAST(ws.workspace_id AS BIGINT)
+        LEFT JOIN system.access.workspaces_latest wsl
+            ON CAST(u.workspace_id AS BIGINT) = CAST(wsl.workspace_id AS BIGINT)
+        LEFT JOIN (
+            SELECT workspace_id, workspace_name
+            FROM (
+                SELECT workspace_id, workspace_name,
+                       ROW_NUMBER() OVER (
+                           PARTITION BY workspace_id
+                           ORDER BY COALESCE(change_time, update_time, create_time) DESC
+                       ) AS rn
+                FROM system.access.workspaces
+            ) t WHERE rn = 1
+        ) ws_dedup ON CAST(u.workspace_id AS BIGINT) = CAST(ws_dedup.workspace_id AS BIGINT)
         WHERE u.usage_date BETWEEN :start_date AND :end_date
           AND u.usage_quantity > 0
+          AND u.workspace_id IS NOT NULL
           {ws_clause}
         GROUP BY u.workspace_id
-        ORDER BY COALESCE(MAX(ws.workspace_name), CAST(u.workspace_id AS STRING))
+        ORDER BY COALESCE(MAX(wsl.workspace_name), MAX(ws_dedup.workspace_name), CAST(u.workspace_id AS STRING))
     """
     def _fetch_rows() -> list:
         rows = execute_query(sql, params)
