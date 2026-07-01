@@ -1027,34 +1027,27 @@ export function CloudCostsView({
               <div className="relative" ref={workspaceFilterRef}>
                 <button
                   onClick={() => { setWorkspaceFilterOpen(o => !o); setFamilyFilterOpen(false); }}
-                  className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-medium transition-colors ${tableWorkspace ? "border-transparent text-white" : "border-gray-300 bg-white text-gray-700 hover:bg-gray-50"}`}
-                  style={tableWorkspace ? { backgroundColor: '#FF3621' } : {}}
+                  className="inline-flex items-center gap-2 rounded-full border border-gray-200 bg-white px-3 py-1.5 text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors"
                 >
-                  Workspace{tableWorkspace ? `: ${workspaceNameMap?.[tableWorkspace] || tableWorkspace}` : ""}
-                  {tableWorkspace ? (
-                    <span className="opacity-75 hover:opacity-100 ml-0.5 cursor-pointer" onClick={(e) => { e.stopPropagation(); setTableWorkspace(""); setCurrentPage(1); }}>×</span>
-                  ) : (
-                    <svg className={`h-3 w-3 text-gray-500 transition-transform ${workspaceFilterOpen ? "rotate-180" : ""}`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-                    </svg>
-                  )}
+                  {tableWorkspace ? (workspaceNameMap?.[tableWorkspace] || tableWorkspace) : "All Workspaces"}
+                  <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
+                  </svg>
                 </button>
                 {workspaceFilterOpen && (
-                  <div className="absolute right-0 top-full z-10 mt-1 w-56 overflow-y-auto rounded-lg border border-gray-200 bg-white py-1 shadow-lg" style={{ maxHeight: 260 }}>
+                  <div className="absolute right-0 top-full z-10 mt-1 w-56 overflow-y-auto rounded-lg border border-gray-200 bg-white shadow-lg" style={{ maxHeight: 260 }}>
                     {availableTableWorkspaces.map(w => {
                       const label = workspaceNameMap?.[w] || w;
                       return (
-                        <button
-                          key={w}
-                          onClick={() => { setTableWorkspace(tableWorkspace === w ? "" : w); setCurrentPage(1); setWorkspaceFilterOpen(false); }}
-                          className={`flex w-full items-center justify-between px-3 py-1.5 text-xs hover:bg-gray-50 ${tableWorkspace === w ? "bg-orange-50 text-orange-700 font-medium" : "text-gray-700"}`}
-                        >
-                          <span className="flex items-center gap-2">
-                            {tableWorkspace === w && <span className="h-1.5 w-1.5 rounded-full bg-orange-500 inline-block" />}
-                            {label}
-                          </span>
-                          {tableWorkspace === w && <svg className="h-3.5 w-3.5 text-orange-500" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" /></svg>}
-                        </button>
+                        <label key={w} className="flex items-center gap-3 px-4 py-2.5 hover:bg-gray-50 cursor-pointer select-none">
+                          <input
+                            type="checkbox"
+                            className="h-4 w-4 rounded border-gray-300 text-[#FF3621] focus:ring-1 focus:ring-[#FF3621]"
+                            checked={tableWorkspace === w}
+                            onChange={() => { setTableWorkspace(tableWorkspace === w ? "" : w); setCurrentPage(1); setWorkspaceFilterOpen(false); }}
+                          />
+                          <span className="text-sm text-gray-700">{label}</span>
+                        </label>
                       );
                     })}
                   </div>
@@ -1065,32 +1058,25 @@ export function CloudCostsView({
               <div className="relative" ref={familyFilterRef}>
                 <button
                   onClick={() => { setFamilyFilterOpen(o => !o); setWorkspaceFilterOpen(false); }}
-                  className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-medium transition-colors ${tableFamily ? "border-transparent text-white" : "border-gray-300 bg-white text-gray-700 hover:bg-gray-50"}`}
-                  style={tableFamily ? { backgroundColor: '#FF3621' } : {}}
+                  className="inline-flex items-center gap-2 rounded-full border border-gray-200 bg-white px-3 py-1.5 text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors"
                 >
-                  Instance Family{tableFamily ? `: ${tableFamily}` : ""}
-                  {tableFamily ? (
-                    <span className="opacity-75 hover:opacity-100 ml-0.5 cursor-pointer" onClick={(e) => { e.stopPropagation(); setTableFamily(""); setCurrentPage(1); }}>×</span>
-                  ) : (
-                    <svg className={`h-3 w-3 text-gray-500 transition-transform ${familyFilterOpen ? "rotate-180" : ""}`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-                    </svg>
-                  )}
+                  {tableFamily ? tableFamily : "All Instance Families"}
+                  <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
+                  </svg>
                 </button>
                 {familyFilterOpen && (
-                  <div className="absolute right-0 top-full z-10 mt-1 w-52 overflow-y-auto rounded-lg border border-gray-200 bg-white py-1 shadow-lg" style={{ maxHeight: 260 }}>
+                  <div className="absolute right-0 top-full z-10 mt-1 w-52 overflow-y-auto rounded-lg border border-gray-200 bg-white shadow-lg" style={{ maxHeight: 260 }}>
                     {availableTableFamilies.map(f => (
-                      <button
-                        key={f}
-                        onClick={() => { setTableFamily(tableFamily === f ? "" : f); setCurrentPage(1); setFamilyFilterOpen(false); }}
-                        className={`flex w-full items-center justify-between px-3 py-1.5 text-xs hover:bg-gray-50 ${tableFamily === f ? "bg-orange-50 text-orange-700 font-medium" : "text-gray-700"}`}
-                      >
-                        <span className="flex items-center gap-2">
-                          {tableFamily === f && <span className="h-1.5 w-1.5 rounded-full bg-orange-500 inline-block" />}
-                          {f}
-                        </span>
-                        {tableFamily === f && <svg className="h-3.5 w-3.5 text-orange-500" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" /></svg>}
-                      </button>
+                      <label key={f} className="flex items-center gap-3 px-4 py-2.5 hover:bg-gray-50 cursor-pointer select-none">
+                        <input
+                          type="checkbox"
+                          className="h-4 w-4 rounded border-gray-300 text-[#FF3621] focus:ring-1 focus:ring-[#FF3621]"
+                          checked={tableFamily === f}
+                          onChange={() => { setTableFamily(tableFamily === f ? "" : f); setCurrentPage(1); setFamilyFilterOpen(false); }}
+                        />
+                        <span className="text-sm text-gray-700">{f}</span>
+                      </label>
                     ))}
                   </div>
                 )}

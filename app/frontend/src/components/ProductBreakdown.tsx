@@ -91,60 +91,46 @@ export const ProductBreakdown = memo(function ProductBreakdown({ data, isLoading
     return workspaceNameMap?.[selectedWorkspace] || (ws ? (ws.workspace_name || String(ws.workspace_id)) : selectedWorkspace);
   }, [selectedWorkspace, workspaces, workspaceNameMap]);
 
+  const triggerLabel = (() => {
+    if (selectedWorkspace === "all") return "All Workspaces";
+    return selectedWorkspaceName || selectedWorkspace;
+  })();
+
   const workspaceSelector = workspaces && workspaces.length > 1 ? (
     <div className="relative" ref={dropdownRef}>
-      <div className="flex items-center gap-2">
-        <button
-          onClick={() => setDropdownOpen(!dropdownOpen)}
-          className="inline-flex items-center gap-1.5 rounded-full border border-gray-300 bg-white px-3 py-1 text-xs font-medium text-gray-700 hover:bg-gray-50 transition-colors"
-        >
-          <svg className="h-3.5 w-3.5 text-gray-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 4a1 1 0 011-1h16a1 1 0 011 1v2.586a1 1 0 01-.293.707l-6.414 6.414a1 1 0 00-.293.707V17l-4 4v-6.586a1 1 0 00-.293-.707L3.293 7.293A1 1 0 013 6.586V4z" />
-          </svg>
-          Filter
-          <svg className={`h-3 w-3 text-gray-500 transition-transform ${dropdownOpen ? 'rotate-180' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-          </svg>
-        </button>
-        {selectedWorkspaceName && (
-          <span
-            className="inline-flex items-center gap-1 rounded-full px-3 py-1 text-xs font-medium text-white cursor-pointer"
-            style={{ backgroundColor: '#FF3621' }}
-            onClick={() => setSelectedWorkspace("all")}
-            title="Click to clear filter"
-          >
-            {selectedWorkspaceName}
-            <svg className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-            </svg>
-          </span>
-        )}
-      </div>
+      <button
+        onClick={() => setDropdownOpen(!dropdownOpen)}
+        className="inline-flex items-center gap-2 rounded-full border border-gray-200 bg-white px-3 py-1.5 text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors"
+      >
+        {triggerLabel}
+        <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+          <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
+        </svg>
+      </button>
       {dropdownOpen && (
-        <div className="absolute right-0 top-full z-50 mt-1 max-h-64 w-72 overflow-y-auto rounded-lg border border-gray-200 bg-white py-1 shadow-lg">
-          <button
-            onClick={() => { setSelectedWorkspace("all"); setDropdownOpen(false); }}
-            className={`flex w-full items-center gap-2 px-3 py-2 text-left text-sm transition-colors ${
-              selectedWorkspace === "all" ? "bg-orange-50 text-orange-700 font-medium" : "text-gray-700 hover:bg-gray-50"
-            }`}
-          >
-            <span className={`h-2 w-2 rounded-full ${selectedWorkspace === "all" ? "bg-orange-500" : "bg-transparent"}`} />
-            All Workspaces
-          </button>
+        <div className="absolute right-0 top-full z-50 mt-1 max-h-64 w-72 overflow-y-auto rounded-lg border border-gray-200 bg-white shadow-lg">
+          <label className="flex items-center gap-3 px-4 py-2.5 hover:bg-gray-50 cursor-pointer select-none">
+            <input
+              type="checkbox"
+              className="h-4 w-4 rounded border-gray-300 text-[#FF3621] focus:ring-1 focus:ring-[#FF3621]"
+              checked={selectedWorkspace === "all"}
+              onChange={() => { setSelectedWorkspace("all"); setDropdownOpen(false); }}
+            />
+            <span className="text-sm text-gray-700">All Workspaces</span>
+          </label>
           {workspaces.map((ws) => {
             const wsId = String(ws.workspace_id);
             const isActive = selectedWorkspace === wsId;
             return (
-              <button
-                key={wsId}
-                onClick={() => { setSelectedWorkspace(wsId); setDropdownOpen(false); }}
-                className={`flex w-full items-center gap-2 px-3 py-2 text-left text-sm transition-colors ${
-                  isActive ? "bg-orange-50 text-orange-700 font-medium" : "text-gray-700 hover:bg-gray-50"
-                }`}
-              >
-                <span className={`h-2 w-2 rounded-full ${isActive ? "bg-orange-500" : "bg-transparent"}`} />
-                <span className="truncate">{workspaceNameMap?.[wsId] || ws.workspace_name || ws.workspace_id}</span>
-              </button>
+              <label key={wsId} className="flex items-center gap-3 px-4 py-2.5 hover:bg-gray-50 cursor-pointer select-none">
+                <input
+                  type="checkbox"
+                  className="h-4 w-4 rounded border-gray-300 text-[#FF3621] focus:ring-1 focus:ring-[#FF3621]"
+                  checked={isActive}
+                  onChange={() => { setSelectedWorkspace(isActive ? "all" : wsId); setDropdownOpen(false); }}
+                />
+                <span className="truncate text-sm text-gray-700">{workspaceNameMap?.[wsId] || ws.workspace_name || ws.workspace_id}</span>
+              </label>
             );
           })}
         </div>

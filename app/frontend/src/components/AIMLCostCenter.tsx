@@ -573,35 +573,32 @@ export function AIMLCostCenter({ data, isLoading, startDate, endDate, host, work
                 <div className="relative" ref={endpointsWorkspaceFilterRef}>
                   <button
                     onClick={() => setEndpointsWorkspaceDropdownOpen(o => !o)}
-                    className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-medium transition-colors ${endpointsWorkspaceFilter ? "border-transparent text-white" : "border-gray-300 bg-white text-gray-700 hover:bg-gray-50"}`}
-                    style={endpointsWorkspaceFilter ? { backgroundColor: '#FF3621' } : {}}
+                    className="inline-flex items-center gap-2 rounded-full border border-gray-200 bg-white px-3 py-1.5 text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors"
                   >
                     {endpointsWorkspaceFilter
                       ? ((n) => n.length > 20 ? n.slice(0, 20) + "…" : n)(workspaceNameMap?.[endpointsWorkspaceFilter] ?? `Workspace ${endpointsWorkspaceFilter}`)
-                      : "Workspace"}
-                    {endpointsWorkspaceFilter ? (
-                      <span className="ml-0.5 opacity-75 hover:opacity-100" onClick={(e) => { e.stopPropagation(); setEndpointsWorkspaceFilter(null); setEndpointsPage(1); }}>×</span>
-                    ) : (
-                      <svg className={`h-3 w-3 text-gray-500 transition-transform ${endpointsWorkspaceDropdownOpen ? "rotate-180" : ""}`} fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" /></svg>
-                    )}
+                      : "All Workspaces"}
+                    <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
+                    </svg>
                   </button>
                   {endpointsWorkspaceDropdownOpen && (
-                    <div className="absolute right-0 top-full z-[9999] mt-1 max-h-64 w-56 overflow-y-auto rounded-lg border border-gray-200 bg-white py-1 shadow-lg">
+                    <div className="absolute right-0 top-full z-[9999] mt-1 max-h-64 w-56 overflow-y-auto rounded-lg border border-gray-200 bg-white shadow-lg">
                       <button
                         onClick={() => { setEndpointsWorkspaceFilter(null); setEndpointsPage(1); setEndpointsWorkspaceDropdownOpen(false); }}
-                        className={`flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs transition-colors ${!endpointsWorkspaceFilter ? "bg-orange-50 text-orange-700 font-medium" : "text-gray-700 hover:bg-gray-50"}`}
+                        className="w-full text-left px-4 py-2.5 text-sm text-gray-700 hover:bg-gray-50 flex items-center justify-between"
                       >
-                        <span className={`h-1.5 w-1.5 rounded-full ${!endpointsWorkspaceFilter ? "bg-orange-500" : "bg-transparent"}`} />
                         All Workspaces
+                        {!endpointsWorkspaceFilter && <span className="text-[#FF3621]">✓</span>}
                       </button>
                       {endpointWorkspaces.map(wsId => (
                         <button
                           key={wsId}
                           onClick={() => { setEndpointsWorkspaceFilter(wsId); setEndpointsPage(1); setEndpointsWorkspaceDropdownOpen(false); }}
-                          className={`flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs transition-colors ${endpointsWorkspaceFilter === wsId ? "bg-orange-50 text-orange-700 font-medium" : "text-gray-700 hover:bg-gray-50"}`}
+                          className="w-full text-left px-4 py-2.5 text-sm text-gray-700 hover:bg-gray-50 flex items-center justify-between"
                         >
-                          <span className={`h-1.5 w-1.5 rounded-full ${endpointsWorkspaceFilter === wsId ? "bg-orange-500" : "bg-transparent"}`} />
-                          {workspaceNameMap?.[wsId] ?? `Workspace ${wsId}`}
+                          <span className="truncate">{workspaceNameMap?.[wsId] ?? `Workspace ${wsId}`}</span>
+                          {endpointsWorkspaceFilter === wsId && <span className="text-[#FF3621]">✓</span>}
                         </button>
                       ))}
                     </div>
@@ -612,33 +609,30 @@ export function AIMLCostCenter({ data, isLoading, startDate, endDate, host, work
                 <div className="relative" ref={endpointsCostTypeFilterRef}>
                   <button
                     onClick={() => setEndpointsCostTypeDropdownOpen(o => !o)}
-                    className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-medium transition-colors ${endpointsCostTypeFilter ? "border-transparent text-white" : "border-gray-300 bg-white text-gray-700 hover:bg-gray-50"}`}
-                    style={endpointsCostTypeFilter ? { backgroundColor: '#FF3621' } : {}}
+                    className="inline-flex items-center gap-2 rounded-full border border-gray-200 bg-white px-3 py-1.5 text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors"
                   >
-                    {endpointsCostTypeFilter || "Cost type"}
-                    {endpointsCostTypeFilter ? (
-                      <span className="ml-0.5 opacity-75 hover:opacity-100" onClick={(e) => { e.stopPropagation(); setEndpointsCostTypeFilter(null); setEndpointsPage(1); }}>×</span>
-                    ) : (
-                      <svg className={`h-3 w-3 text-gray-500 transition-transform ${endpointsCostTypeDropdownOpen ? "rotate-180" : ""}`} fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" /></svg>
-                    )}
+                    {endpointsCostTypeFilter || "All Cost Types"}
+                    <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
+                    </svg>
                   </button>
                   {endpointsCostTypeDropdownOpen && (
-                    <div className="absolute right-0 top-full z-[9999] mt-1 max-h-64 w-48 overflow-y-auto rounded-lg border border-gray-200 bg-white py-1 shadow-lg">
+                    <div className="absolute right-0 top-full z-[9999] mt-1 max-h-64 w-48 overflow-y-auto rounded-lg border border-gray-200 bg-white shadow-lg">
                       <button
                         onClick={() => { setEndpointsCostTypeFilter(null); setEndpointsPage(1); setEndpointsCostTypeDropdownOpen(false); }}
-                        className={`flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs transition-colors ${!endpointsCostTypeFilter ? "bg-orange-50 text-orange-700 font-medium" : "text-gray-700 hover:bg-gray-50"}`}
+                        className="w-full text-left px-4 py-2.5 text-sm text-gray-700 hover:bg-gray-50 flex items-center justify-between"
                       >
-                        <span className={`h-1.5 w-1.5 rounded-full ${!endpointsCostTypeFilter ? "bg-orange-500" : "bg-transparent"}`} />
-                        All cost types
+                        All Cost Types
+                        {!endpointsCostTypeFilter && <span className="text-[#FF3621]">✓</span>}
                       </button>
                       {endpointCostTypes.map(ct => (
                         <button
                           key={ct}
                           onClick={() => { setEndpointsCostTypeFilter(ct); setEndpointsPage(1); setEndpointsCostTypeDropdownOpen(false); }}
-                          className={`flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs transition-colors ${endpointsCostTypeFilter === ct ? "bg-orange-50 text-orange-700 font-medium" : "text-gray-700 hover:bg-gray-50"}`}
+                          className="w-full text-left px-4 py-2.5 text-sm text-gray-700 hover:bg-gray-50 flex items-center justify-between"
                         >
-                          <span className={`h-1.5 w-1.5 rounded-full ${endpointsCostTypeFilter === ct ? "bg-orange-500" : "bg-transparent"}`} />
                           {ct}
+                          {endpointsCostTypeFilter === ct && <span className="text-[#FF3621]">✓</span>}
                         </button>
                       ))}
                     </div>
@@ -739,55 +733,27 @@ export function AIMLCostCenter({ data, isLoading, startDate, endDate, host, work
               <div className="relative" ref={modelsTypeDropdownRef}>
                 <button
                   onClick={() => setModelsTypeDropdownOpen((o) => !o)}
-                  className={`flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-medium transition-colors ${modelsTypeFilters.length > 0 ? "border-[#FF3621] text-[#FF3621]" : "border-gray-300 text-gray-700 hover:bg-gray-50"}`}
+                  className="inline-flex items-center gap-2 rounded-full border border-gray-200 bg-white px-3 py-1.5 text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors"
                 >
-                  <svg className="h-4 w-4 shrink-0 text-gray-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 4a1 1 0 011-1h16a1 1 0 011 1v2a1 1 0 01-.293.707L13 13.414V19a1 1 0 01-.553.894l-4 2A1 1 0 017 21v-7.586L3.293 6.707A1 1 0 013 6V4z" />
-                  </svg>
                   <span className="max-w-[140px] truncate">
                     {modelsTypeFilters.length === 0
                       ? "All Types"
                       : modelsTypeFilters.length === 1
                       ? (TYPE_LABELS[modelsTypeFilters[0]] || modelsTypeFilters[0])
-                      : `${modelsTypeFilters.length} Types`}
+                      : `Types (${modelsTypeFilters.length})`}
                   </span>
-                  {modelsTypeFilters.length > 0 && (
-                    <button
-                      onClick={(e) => { e.stopPropagation(); setModelsTypeFilters([]); setModelsPage(1); }}
-                      className="ml-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded-full bg-gray-200 text-gray-500 hover:bg-gray-300"
-                      title="Clear filter"
-                    >
-                      <svg className="h-2.5 w-2.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M6 18L18 6M6 6l12 12" />
-                      </svg>
-                    </button>
-                  )}
-                  <svg
-                    className={`ml-0.5 h-4 w-4 shrink-0 text-gray-400 transition-transform ${modelsTypeDropdownOpen ? "rotate-180" : ""}`}
-                    fill="none" viewBox="0 0 24 24" stroke="currentColor"
-                  >
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                  <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
                   </svg>
                 </button>
                 {modelsTypeDropdownOpen && (
-                  <div className="absolute right-0 z-20 mt-2 min-w-[200px] rounded-lg border border-gray-200 bg-white p-3 shadow-lg">
-                    <div className="mb-2 flex items-center justify-between">
-                      <span className="text-xs font-semibold uppercase tracking-wide text-gray-500">Model Type</span>
-                      <div className="flex gap-2">
-                        <button onClick={() => { setModelsTypeFilters([]); setModelsPage(1); }} className="text-xs text-gray-500 hover:text-gray-800">All</button>
-                        <span className="text-gray-300">·</span>
-                        <button onClick={() => { setModelsTypeFilters([]); setModelsPage(1); }} className="text-xs text-gray-500 hover:text-gray-800">Clear</button>
-                      </div>
-                    </div>
-                    <div className="space-y-1">
+                  <div className="absolute right-0 z-20 mt-1 min-w-[200px] rounded-lg border border-gray-200 bg-white shadow-lg">
+                    <div className="space-y-0 py-1">
                       {distinctTypes.map((t) => {
                         const count = allModelRows.filter(m => m.model_type === t).length;
                         const checked = modelsTypeFilters.includes(t);
                         return (
-                          <label
-                            key={t}
-                            className={`flex cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 ${checked ? "bg-red-50 hover:bg-red-100" : "hover:bg-gray-50"}`}
-                          >
+                          <label key={t} className="flex items-center gap-3 px-4 py-2.5 hover:bg-gray-50 cursor-pointer select-none">
                             <input
                               type="checkbox"
                               checked={checked}
@@ -797,16 +763,13 @@ export function AIMLCostCenter({ data, isLoading, startDate, endDate, host, work
                                 );
                                 setModelsPage(1);
                               }}
-                              className="h-3.5 w-3.5 rounded border-gray-300 accent-[#FF3621]"
+                              className="h-4 w-4 rounded border-gray-300 text-[#FF3621] focus:ring-1 focus:ring-[#FF3621]"
                             />
                             <span className="flex-1 truncate text-sm text-gray-700">{TYPE_LABELS[t] || t}</span>
-                            <span className="text-xs text-gray-400">{count}</span>
+                            <span className="text-xs text-gray-500">{count}</span>
                           </label>
                         );
                       })}
-                    </div>
-                    <div className="mt-3 border-t border-gray-100 pt-2 text-[11px] text-gray-400">
-                      {modelsTypeFilters.length === 0 ? `All ${allModelRows.length}` : `${filteredModels.length} of ${allModelRows.length}`} models
                     </div>
                   </div>
                 )}
@@ -907,36 +870,33 @@ export function AIMLCostCenter({ data, isLoading, startDate, endDate, host, work
                     </label>
                   )}
                   {availableRuntimes.length > 0 && (
-                    <div className="relative flex items-center gap-1.5" ref={mlRuntimeFilterRef}>
+                    <div className="relative" ref={mlRuntimeFilterRef}>
                       <button
                         onClick={() => setMlRuntimeFilterOpen(o => !o)}
-                        className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-medium transition-colors ${mlRuntimeFilter ? "border-transparent text-white" : "border-gray-300 bg-white text-gray-700 hover:bg-gray-50"}`}
-                        style={mlRuntimeFilter ? { backgroundColor: '#FF3621' } : {}}
+                        className="inline-flex items-center gap-2 rounded-full border border-gray-200 bg-white px-3 py-1.5 text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors"
                       >
-                        {mlRuntimeFilter ? (mlRuntimeFilter.length > 18 ? mlRuntimeFilter.substring(0, 18) + "…" : mlRuntimeFilter) : "Runtime"}
-                        {mlRuntimeFilter ? (
-                          <span className="opacity-75 hover:opacity-100 ml-0.5" onClick={(e) => { e.stopPropagation(); setMlRuntimeFilter(null); setMlClustersPage(1); }}>×</span>
-                        ) : (
-                          <svg className={`h-3 w-3 text-gray-500 transition-transform ${mlRuntimeFilterOpen ? "rotate-180" : ""}`} fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" /></svg>
-                        )}
+                        {mlRuntimeFilter ? (mlRuntimeFilter.length > 18 ? mlRuntimeFilter.substring(0, 18) + "…" : mlRuntimeFilter) : "All Runtimes"}
+                        <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
+                        </svg>
                       </button>
                       {mlRuntimeFilterOpen && (
                         <div className="absolute right-0 top-full z-10 mt-1 max-h-64 w-56 overflow-y-auto rounded-lg border border-gray-200 bg-white py-1 shadow-lg">
                           <button
                             onClick={() => { setMlRuntimeFilter(null); setMlClustersPage(1); setMlRuntimeFilterOpen(false); }}
-                            className={`flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs transition-colors ${!mlRuntimeFilter ? "bg-orange-50 text-orange-700 font-medium" : "text-gray-700 hover:bg-gray-50"}`}
+                            className="w-full text-left px-4 py-2.5 text-sm text-gray-700 hover:bg-gray-50 flex items-center justify-between"
                           >
-                            <span className={`h-1.5 w-1.5 rounded-full ${!mlRuntimeFilter ? "bg-orange-500" : "bg-transparent"}`} />
                             All Runtimes
+                            {!mlRuntimeFilter && <span>✓</span>}
                           </button>
                           {availableRuntimes.map(r => (
                             <button
                               key={r}
                               onClick={() => { setMlRuntimeFilter(r); setMlClustersPage(1); setMlRuntimeFilterOpen(false); }}
-                              className={`flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs transition-colors ${mlRuntimeFilter === r ? "bg-orange-50 text-orange-700 font-medium" : "text-gray-700 hover:bg-gray-50"}`}
+                              className="w-full text-left px-4 py-2.5 text-sm text-gray-700 hover:bg-gray-50 flex items-center justify-between"
                             >
-                              <span className={`h-1.5 w-1.5 rounded-full ${mlRuntimeFilter === r ? "bg-orange-500" : "bg-transparent"}`} />
                               {r}
+                              {mlRuntimeFilter === r && <span>✓</span>}
                             </button>
                           ))}
                         </div>
@@ -1069,33 +1029,30 @@ export function AIMLCostCenter({ data, isLoading, startDate, endDate, host, work
                     <div className="relative" ref={agentTypeDropdownRef}>
                       <button
                         onClick={() => setAgentTypeDropdownOpen((o) => !o)}
-                        className={`flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-medium transition-colors ${agentTypeFilter !== "all" ? "border-[#FF3621] text-[#FF3621]" : "border-gray-300 text-gray-700 hover:bg-gray-50"}`}
+                        className="inline-flex items-center gap-2 rounded-full border border-gray-200 bg-white px-3 py-1.5 text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors"
                       >
-                        <svg className={`h-3 w-3 shrink-0 ${agentTypeFilter !== "all" ? "text-[#FF3621]" : "text-gray-500"}`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 4a1 1 0 011-1h16a1 1 0 011 1v2a1 1 0 01-.293.707L13 13.414V19a1 1 0 01-.553.894l-4 2A1 1 0 017 21v-7.586L3.293 6.707A1 1 0 013 6V4z" />
-                        </svg>
                         <span>{agentTypeFilter === "all" ? "All Types" : agentTypeFilter}</span>
-                        <svg className={`h-3 w-3 text-gray-400 transition-transform ${agentTypeDropdownOpen ? "rotate-180" : ""}`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                        <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
                         </svg>
                       </button>
                       {agentTypeDropdownOpen && (
                         <div className="absolute right-0 top-full z-[9999] mt-1 min-w-[160px] rounded-lg border border-gray-200 bg-white py-1 shadow-lg">
                           <button
                             onClick={() => { setAgentTypeFilter("all"); setAgentsPage(1); setAgentTypeDropdownOpen(false); }}
-                            className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs hover:bg-gray-50"
+                            className="w-full text-left px-4 py-2.5 text-sm text-gray-700 hover:bg-gray-50 flex items-center justify-between"
                           >
-                            <span className={`h-2 w-2 rounded-full shrink-0 ${agentTypeFilter === "all" ? "bg-[#FF3621]" : "bg-transparent border border-gray-300"}`} />
-                            <span className={agentTypeFilter === "all" ? "font-medium text-[#FF3621]" : "text-gray-700"}>All Types</span>
+                            All Types
+                            {agentTypeFilter === "all" && <span>✓</span>}
                           </button>
                           {agentTypes.map(t => (
                             <button
                               key={t}
                               onClick={() => { setAgentTypeFilter(t); setAgentsPage(1); setAgentTypeDropdownOpen(false); }}
-                              className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs hover:bg-gray-50"
+                              className="w-full text-left px-4 py-2.5 text-sm text-gray-700 hover:bg-gray-50 flex items-center justify-between"
                             >
-                              <span className={`h-2 w-2 rounded-full shrink-0 ${agentTypeFilter === t ? "bg-[#FF3621]" : "bg-transparent border border-gray-300"}`} />
-                              <span className={agentTypeFilter === t ? "font-medium text-[#FF3621]" : "text-gray-700"}>{t}</span>
+                              {t}
+                              {agentTypeFilter === t && <span>✓</span>}
                             </button>
                           ))}
                         </div>

@@ -849,17 +849,16 @@ export function AppsCostCenter({ data: initialData, isLoading: initialLoading, h
               <div className="relative" data-ws-filter-dropdown>
                 <button
                   onClick={() => { setWsFilterOpen(!wsFilterOpen); setWsFilterSearch(""); }}
-                  className="inline-flex items-center gap-1.5 rounded-full border border-gray-300 bg-white px-3 py-1 text-xs font-medium text-gray-700 hover:bg-gray-50 transition-colors"
+                  className="inline-flex items-center gap-2 rounded-full border border-gray-200 bg-white px-3 py-1.5 text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors"
                 >
-                  <svg className="h-3.5 w-3.5 text-gray-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 4a1 1 0 011-1h16a1 1 0 011 1v2.586a1 1 0 01-.293.707l-6.414 6.414a1 1 0 00-.293.707V17l-4 4v-6.586a1 1 0 00-.293-.707L3.293 7.293A1 1 0 013 6.586V4z" />
+                  {selectedWorkspaces.length === 0
+                    ? "All Workspaces"
+                    : selectedWorkspaces.length === 1
+                    ? (availableWorkspaces.find(w => w.id === selectedWorkspaces[0])?.name || selectedWorkspaces[0])
+                    : `Workspaces (${selectedWorkspaces.length})`}
+                  <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
                   </svg>
-                  Workspace
-                  {selectedWorkspaces.length > 0 && (
-                    <span className="inline-flex h-4 w-4 items-center justify-center rounded-full text-[10px] font-bold text-white" style={{ backgroundColor: '#FF3621' }}>
-                      {selectedWorkspaces.length}
-                    </span>
-                  )}
                 </button>
                 {wsFilterOpen && (
                   <div className="absolute right-0 top-full z-50 mt-1 w-72 rounded-lg border border-gray-200 bg-white shadow-lg">
@@ -869,7 +868,7 @@ export function AppsCostCenter({ data: initialData, isLoading: initialLoading, h
                         value={wsFilterSearch}
                         onChange={(e) => setWsFilterSearch(e.target.value)}
                         placeholder="Search workspaces..."
-                        className="w-full rounded-md border border-gray-300 px-3 py-1.5 text-sm focus:border-orange-500 focus:outline-none focus:ring-1 focus:ring-orange-500"
+                        className="w-full rounded-md border border-gray-300 px-3 py-1.5 text-sm focus:border-[#FF3621] focus:outline-none focus:ring-1 focus:ring-[#FF3621]"
                         autoFocus
                       />
                     </div>
@@ -877,20 +876,18 @@ export function AppsCostCenter({ data: initialData, isLoading: initialLoading, h
                       {availableWorkspaces
                         .filter(ws => !wsFilterSearch || ws.name.toLowerCase().includes(wsFilterSearch.toLowerCase()))
                         .map(ws => (
-                          <button
+                          <label
                             key={ws.id}
-                            onClick={() => handleToggleWorkspace(ws.id)}
-                            className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm hover:bg-gray-50"
+                            className="flex items-center gap-3 px-4 py-2.5 hover:bg-gray-50 cursor-pointer select-none"
                           >
-                            <div className={`flex h-4 w-4 shrink-0 items-center justify-center rounded border ${selectedWorkspaces.includes(ws.id) ? "border-orange-500 bg-orange-500" : "border-gray-300"}`}>
-                              {selectedWorkspaces.includes(ws.id) && (
-                                <svg className="h-3 w-3 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
-                                </svg>
-                              )}
-                            </div>
-                            <span className="truncate text-xs text-gray-700">{ws.name}</span>
-                          </button>
+                            <input
+                              type="checkbox"
+                              checked={selectedWorkspaces.includes(ws.id)}
+                              onChange={() => handleToggleWorkspace(ws.id)}
+                              className="h-4 w-4 rounded border-gray-300 text-[#FF3621] focus:ring-1 focus:ring-[#FF3621]"
+                            />
+                            <span className="truncate text-sm text-gray-700">{ws.name}</span>
+                          </label>
                         ))}
                       {availableWorkspaces.filter(ws => !wsFilterSearch || ws.name.toLowerCase().includes(wsFilterSearch.toLowerCase())).length === 0 && (
                         <div className="px-3 py-2 text-sm text-gray-500">No matching workspaces</div>
@@ -1210,14 +1207,11 @@ export function AppsCostCenter({ data: initialData, isLoading: initialLoading, h
               <div className="relative" data-artifact-app-dropdown>
                 <button
                   onClick={() => { setArtifactAppFilterOpen(v => !v); setArtifactAppFilterSearch(""); }}
-                  className={`flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-medium transition-colors ${
-                    artifactAppFilter ? 'text-white border-transparent' : 'bg-white border-gray-300 text-gray-700 hover:border-gray-400'
-                  }`}
-                  style={artifactAppFilter ? { backgroundColor: '#FF3621', borderColor: '#FF3621' } : undefined}
+                  className="inline-flex items-center gap-2 rounded-full border border-gray-200 bg-white px-3 py-1.5 text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors"
                 >
-                  {artifactAppFilter ? artifactAppFilter : 'Filter by app'}
-                  <svg className={`h-3 w-3 transition-transform ${artifactAppFilterOpen ? 'rotate-180' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                  {artifactAppFilter ? artifactAppFilter : 'All Apps'}
+                  <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
                   </svg>
                 </button>
                 {artifactAppFilterOpen && (
@@ -1235,21 +1229,23 @@ export function AppsCostCenter({ data: initialData, isLoading: initialLoading, h
                     <div className="max-h-56 overflow-y-auto">
                       <button
                         onClick={() => { setArtifactAppFilter(null); setArtifactAppFilterOpen(false); setArtifactPage(1); }}
-                        className={`w-full px-3 py-2 text-left text-xs transition-colors ${!artifactAppFilter ? 'bg-orange-50 font-medium text-[#FF3621]' : 'text-gray-700 hover:bg-gray-50'}`}
+                        className="w-full text-left px-4 py-2.5 text-sm text-gray-700 hover:bg-gray-50 flex items-center justify-between"
                       >
-                        All apps
+                        All Apps
+                        {!artifactAppFilter && <span className="text-[#FF3621]">✓</span>}
                       </button>
                       {filteredAppNames.map(name => (
                         <button
                           key={name}
                           onClick={() => { setArtifactAppFilter(name); setArtifactAppFilterOpen(false); setArtifactPage(1); }}
-                          className={`w-full truncate px-3 py-2 text-left text-xs transition-colors ${artifactAppFilter === name ? 'bg-orange-50 font-medium text-[#FF3621]' : 'text-gray-700 hover:bg-gray-50'}`}
+                          className="w-full text-left px-4 py-2.5 text-sm text-gray-700 hover:bg-gray-50 flex items-center justify-between"
                         >
-                          {name}
+                          <span className="truncate">{name}</span>
+                          {artifactAppFilter === name && <span className="text-[#FF3621]">✓</span>}
                         </button>
                       ))}
                       {filteredAppNames.length === 0 && (
-                        <p className="px-3 py-2 text-xs text-gray-400">No apps found</p>
+                        <p className="px-4 py-2 text-xs text-gray-400">No apps found</p>
                       )}
                     </div>
                   </div>
@@ -1260,49 +1256,42 @@ export function AppsCostCenter({ data: initialData, isLoading: initialLoading, h
               <div className="relative" data-artifact-type-dropdown>
                 <button
                   onClick={() => setArtifactTypeDropdownOpen(v => !v)}
-                  className={`flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-medium transition-colors ${
-                    artifactTypeFilters.length > 0 ? 'text-white border-transparent' : 'bg-white border-gray-300 text-gray-700 hover:border-gray-400'
-                  }`}
-                  style={artifactTypeFilters.length > 0 ? { backgroundColor: '#FF3621', borderColor: '#FF3621' } : undefined}
+                  className="inline-flex items-center gap-2 rounded-full border border-gray-200 bg-white px-3 py-1.5 text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors"
                 >
                   {artifactTypeFilters.length > 0
                     ? artifactTypeFilters.length === 1
                       ? artifactTypeFilters[0].replace(/_/g, ' ')
-                      : `${artifactTypeFilters.length} types`
-                    : 'Resource type'}
-                  <svg className={`h-3 w-3 transition-transform ${artifactTypeDropdownOpen ? 'rotate-180' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                      : `Resource Types (${artifactTypeFilters.length})`
+                    : 'All Resource Types'}
+                  <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
                   </svg>
                 </button>
                 {artifactTypeDropdownOpen && (
                   <div className="absolute right-0 top-full z-[9999] mt-1 w-56 rounded-lg border border-gray-200 bg-white shadow-lg">
                     <div className="max-h-64 overflow-y-auto py-1">
-                      <button
-                        onClick={() => { setArtifactTypeFilters([]); setArtifactPage(1); }}
-                        className={`w-full px-3 py-2 text-left text-xs transition-colors ${artifactTypeFilters.length === 0 ? 'bg-orange-50 font-medium text-[#FF3621]' : 'text-gray-700 hover:bg-gray-50'}`}
-                      >
-                        All types ({data.connected_artifacts.length})
-                      </button>
                       {artifactTypes.map((type: string) => {
                         const count = data.connected_artifacts.filter((a: AppsConnectedArtifact) => a.artifact_type === type).length;
                         const checked = artifactTypeFilters.includes(type);
                         return (
-                          <button
+                          <label
                             key={type}
-                            onClick={() => {
-                              setArtifactTypeFilters(prev =>
-                                prev.includes(type) ? prev.filter(t => t !== type) : [...prev, type]
-                              );
-                              setArtifactPage(1);
-                            }}
-                            className="flex w-full items-center gap-2 px-3 py-2 text-left text-xs text-gray-700 transition-colors hover:bg-gray-50"
+                            className="flex items-center gap-3 px-4 py-2.5 hover:bg-gray-50 cursor-pointer select-none"
                           >
-                            <span className={`flex h-3.5 w-3.5 shrink-0 items-center justify-center rounded border ${checked ? 'border-transparent' : 'border-gray-300 bg-white'}`} style={checked ? { backgroundColor: '#FF3621' } : undefined}>
-                              {checked && <svg className="h-2.5 w-2.5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" /></svg>}
-                            </span>
-                            <span className="flex-1 truncate">{type.replace(/_/g, ' ')}</span>
-                            <span className="text-gray-400">({count})</span>
-                          </button>
+                            <input
+                              type="checkbox"
+                              checked={checked}
+                              onChange={() => {
+                                setArtifactTypeFilters(prev =>
+                                  prev.includes(type) ? prev.filter(t => t !== type) : [...prev, type]
+                                );
+                                setArtifactPage(1);
+                              }}
+                              className="h-4 w-4 rounded border-gray-300 text-[#FF3621] focus:ring-1 focus:ring-[#FF3621]"
+                            />
+                            <span className="flex-1 truncate text-sm text-gray-700">{type.replace(/_/g, ' ')}</span>
+                            <span className="text-xs text-gray-400">({count})</span>
+                          </label>
                         );
                       })}
                     </div>
