@@ -624,7 +624,7 @@ export function TaggingHub({ data, isLoading, host, startDate, endDate, workspac
                   className="inline-flex items-center gap-2 rounded-full border border-gray-200 bg-white px-3 py-1.5 text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors"
                 >
                   {selectedTagValueFilters.length === 0
-                    ? "All Tags"
+                    ? "Value"
                     : selectedTagValueFilters.length === 1
                       ? selectedTagValueFilters[0]
                       : `Tags (${selectedTagValueFilters.length})`}
@@ -768,7 +768,7 @@ export function TaggingHub({ data, isLoading, host, startDate, endDate, workspac
                   className="inline-flex items-center gap-2 rounded-full border border-gray-200 bg-white px-3 py-1.5 text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors"
                 >
                   {selectedTagFilters.length === 0
-                    ? "All Keys"
+                    ? "Tag"
                     : selectedTagFilters.length === 1
                       ? selectedTagFilters[0]
                       : `Keys (${selectedTagFilters.length})`}
