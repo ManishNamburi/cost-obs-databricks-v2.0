@@ -572,24 +572,35 @@ export default function UsersGroups({ startDate, endDate, dateRange, anonymizeUs
             <div className="relative" ref={typeFilterRef}>
               <button
                 onClick={() => setTypeFilterOpen(o => !o)}
-                className="inline-flex items-center gap-2 rounded-full border border-gray-200 bg-white px-3 py-1.5 text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors"
+                className={`flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-sm font-medium transition-colors ${typeFilter !== "all" ? "border-[#FF3621] text-[#FF3621]" : "border-gray-300 text-gray-700 hover:bg-gray-50"}`}
               >
-                {typeFilter === "all" ? "All Types" : typeFilter === "users" ? "Users" : "Service Principals"}
-                <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" /></svg>
+                {typeFilter === "all" ? "Type" : typeFilter === "users" ? "Users" : "Service Principals"}
+                {typeFilter !== "all" && (
+                  <button onClick={(e) => { e.stopPropagation(); setTypeFilter("all"); setPage(0); }} className="ml-0.5 flex h-3.5 w-3.5 shrink-0 items-center justify-center rounded-full bg-orange-100 text-orange-600 hover:bg-orange-200">
+                    <svg className="h-2 w-2" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M6 18L18 6M6 6l12 12" /></svg>
+                  </button>
+                )}
+                <svg className={`h-4 w-4 transition-transform ${typeFilterOpen ? "rotate-180" : ""}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" /></svg>
               </button>
               {typeFilterOpen && (
-                <div className="absolute left-0 top-full z-10 mt-1 w-44 rounded-lg border border-gray-200 bg-white shadow-lg">
-                  {(["all", "users", "sps"] as const).map(t => (
-                    <div
+                <div className="absolute left-0 top-full z-[9999] mt-1 min-w-[180px] rounded-lg border border-gray-200 bg-white shadow-lg">
+                  <div className="sticky top-0 flex items-center justify-between border-b border-gray-100 bg-white px-3 py-2">
+                    <span className="text-[10px] font-semibold uppercase tracking-wider text-gray-400">Type</span>
+                    {typeFilter !== "all" && (
+                      <button onClick={(e) => { e.stopPropagation(); setTypeFilter("all"); setPage(0); setTypeFilterOpen(false); }} className="text-xs text-gray-500 hover:text-gray-800">Clear</button>
+                    )}
+                  </div>
+                  {(["users", "sps"] as const).map(t => (
+                    <button
                       key={t}
-                      onClick={() => { setTypeFilter(t); setPage(0); setTypeFilterOpen(false); }}
-                      className="px-4 py-2.5 text-sm hover:bg-gray-50 cursor-pointer flex items-center justify-between"
+                      onClick={() => { setTypeFilter(typeFilter === t ? "all" : t); setPage(0); setTypeFilterOpen(false); }}
+                      className="flex w-full items-center gap-2 px-3 py-2.5 text-left text-xs hover:bg-gray-50"
                     >
-                      <span className={typeFilter === t ? "font-medium text-gray-900" : "text-gray-700"}>
-                        {t === "all" ? "All Types" : t === "users" ? "Users" : "Service Principals"}
-                      </span>
-                      {typeFilter === t && <span className="text-[#FF3621]">✓</span>}
-                    </div>
+                      <div className={`flex h-4 w-4 shrink-0 items-center justify-center rounded border ${typeFilter === t ? "border-orange-500 bg-orange-500" : "border-gray-300"}`}>
+                        {typeFilter === t && <svg className="h-3 w-3 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" /></svg>}
+                      </div>
+                      <span className="truncate text-gray-700">{t === "users" ? "Users" : "Service Principals"}</span>
+                    </button>
                   ))}
                 </div>
               )}
@@ -598,22 +609,35 @@ export default function UsersGroups({ startDate, endDate, dateRange, anonymizeUs
             <div className="relative" ref={productFilterRef}>
               <button
                 onClick={() => setProductFilterOpen(o => !o)}
-                className="inline-flex items-center gap-2 rounded-full border border-gray-200 bg-white px-3 py-1.5 text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors"
+                className={`flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-sm font-medium transition-colors ${productFilter !== "all" ? "border-[#FF3621] text-[#FF3621]" : "border-gray-300 text-gray-700 hover:bg-gray-50"}`}
               >
-                {productFilter !== "all" ? productFilter : "All Products"}
-                <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" /></svg>
+                {productFilter !== "all" ? productFilter : "Product"}
+                {productFilter !== "all" && (
+                  <button onClick={(e) => { e.stopPropagation(); setProductFilter("all"); setPage(0); }} className="ml-0.5 flex h-3.5 w-3.5 shrink-0 items-center justify-center rounded-full bg-orange-100 text-orange-600 hover:bg-orange-200">
+                    <svg className="h-2 w-2" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M6 18L18 6M6 6l12 12" /></svg>
+                  </button>
+                )}
+                <svg className={`h-4 w-4 transition-transform ${productFilterOpen ? "rotate-180" : ""}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" /></svg>
               </button>
               {productFilterOpen && (
-                <div className="absolute left-0 top-full z-10 mt-1 w-52 overflow-y-auto rounded-lg border border-gray-200 bg-white shadow-lg" style={{ maxHeight: 260 }}>
+                <div className="absolute left-0 top-full z-[9999] mt-1 min-w-[200px] max-h-64 overflow-y-auto rounded-lg border border-gray-200 bg-white shadow-lg">
+                  <div className="sticky top-0 flex items-center justify-between border-b border-gray-100 bg-white px-3 py-2">
+                    <span className="text-[10px] font-semibold uppercase tracking-wider text-gray-400">Product</span>
+                    {productFilter !== "all" && (
+                      <button onClick={(e) => { e.stopPropagation(); setProductFilter("all"); setPage(0); setProductFilterOpen(false); }} className="text-xs text-gray-500 hover:text-gray-800">Clear</button>
+                    )}
+                  </div>
                   {uniqueProducts.map(p => (
-                    <div
+                    <button
                       key={p}
                       onClick={() => { setProductFilter(productFilter === p ? "all" : p); setPage(0); setProductFilterOpen(false); }}
-                      className="px-4 py-2.5 text-sm hover:bg-gray-50 cursor-pointer flex items-center justify-between"
+                      className="flex w-full items-center gap-2 px-3 py-2.5 text-left text-xs hover:bg-gray-50"
                     >
-                      <span className={productFilter === p ? "font-medium text-gray-900" : "text-gray-700"}>{p}</span>
-                      {productFilter === p && <span className="text-[#FF3621]">✓</span>}
-                    </div>
+                      <div className={`flex h-4 w-4 shrink-0 items-center justify-center rounded border ${productFilter === p ? "border-orange-500 bg-orange-500" : "border-gray-300"}`}>
+                        {productFilter === p && <svg className="h-3 w-3 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" /></svg>}
+                      </div>
+                      <span className="truncate text-gray-700">{p}</span>
+                    </button>
                   ))}
                 </div>
               )}
@@ -622,24 +646,27 @@ export default function UsersGroups({ startDate, endDate, dateRange, anonymizeUs
             <div className="relative" ref={sortRef}>
               <button
                 onClick={() => setSortOpen(o => !o)}
-                className="inline-flex items-center gap-2 rounded-full border border-gray-200 bg-white px-3 py-1.5 text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors"
+                className="flex items-center gap-1.5 rounded-full border border-gray-300 px-3 py-1.5 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-50"
               >
                 {sortBy === "spend" ? "Spend" : sortBy === "dbus" ? "DBUs" : "Active Days"}
-                <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" /></svg>
+                <svg className={`h-4 w-4 transition-transform ${sortOpen ? "rotate-180" : ""}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" /></svg>
               </button>
               {sortOpen && (
-                <div className="absolute left-0 top-full z-10 mt-1 w-36 rounded-lg border border-gray-200 bg-white shadow-lg">
+                <div className="absolute left-0 top-full z-[9999] mt-1 min-w-[150px] rounded-lg border border-gray-200 bg-white shadow-lg">
+                  <div className="sticky top-0 flex items-center justify-between border-b border-gray-100 bg-white px-3 py-2">
+                    <span className="text-[10px] font-semibold uppercase tracking-wider text-gray-400">Sort by</span>
+                  </div>
                   {(["spend", "dbus", "days"] as const).map(s => (
-                    <div
+                    <button
                       key={s}
                       onClick={() => { setSortBy(s); setPage(0); setSortOpen(false); }}
-                      className="px-4 py-2.5 text-sm hover:bg-gray-50 cursor-pointer flex items-center justify-between"
+                      className="flex w-full items-center gap-2 px-3 py-2.5 text-left text-xs hover:bg-gray-50"
                     >
-                      <span className={sortBy === s ? "font-medium text-gray-900" : "text-gray-700"}>
-                        {s === "spend" ? "Spend" : s === "dbus" ? "DBUs" : "Active Days"}
-                      </span>
-                      {sortBy === s && <span className="text-[#FF3621]">✓</span>}
-                    </div>
+                      <div className={`flex h-4 w-4 shrink-0 items-center justify-center rounded border ${sortBy === s ? "border-orange-500 bg-orange-500" : "border-gray-300"}`}>
+                        {sortBy === s && <svg className="h-3 w-3 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" /></svg>}
+                      </div>
+                      <span className="truncate text-gray-700">{s === "spend" ? "Spend" : s === "dbus" ? "DBUs" : "Active Days"}</span>
+                    </button>
                   ))}
                 </div>
               )}

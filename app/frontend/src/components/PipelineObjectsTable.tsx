@@ -165,25 +165,36 @@ export const PipelineObjectsTable = memo(function PipelineObjectsTable({ data, i
               onClick={() => setFilterDropdownOpen(o => !o)}
               className={`flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-medium transition-colors ${filter !== "all" ? "border-[#FF3621] text-[#FF3621]" : "border-gray-300 bg-white text-gray-700 hover:border-gray-400"}`}
             >
-              {filter === "all" ? `All (${activeObjects.length})` : filter === "Job" ? `Jobs (${jobCount})` : `SDP (${pipelineCount})`}
+              {filter === "all" ? `Type` : filter === "Job" ? `Jobs (${jobCount})` : `SDP (${pipelineCount})`}
+              {filter !== "all" && (
+                <button onClick={(e) => { e.stopPropagation(); setFilter("all"); setCurrentPage(1); }} className="ml-0.5 flex h-3.5 w-3.5 shrink-0 items-center justify-center rounded-full bg-orange-100 text-orange-600 hover:bg-orange-200">
+                  <svg className="h-2 w-2" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M6 18L18 6M6 6l12 12" /></svg>
+                </button>
+              )}
               <svg className={`h-3 w-3 transition-transform ${filterDropdownOpen ? "rotate-180" : ""}`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
               </svg>
             </button>
             {filterDropdownOpen && (
-              <div className="absolute right-0 top-full z-[9999] mt-1 w-44 rounded-lg border border-gray-200 bg-white py-1 shadow-lg">
-                {(["all", "Job", "SDP Pipeline"] as const).map((f) => {
-                  const label = f === "all" ? `All (${activeObjects.length})` : f === "Job" ? `Jobs (${jobCount})` : `SDP (${pipelineCount})`;
+              <div className="absolute right-0 top-full z-[9999] mt-1 min-w-[160px] rounded-lg border border-gray-200 bg-white shadow-lg">
+                <div className="sticky top-0 flex items-center justify-between border-b border-gray-100 bg-white px-3 py-2">
+                  <span className="text-[10px] font-semibold uppercase tracking-wider text-gray-400">Type</span>
+                  {filter !== "all" && (
+                    <button onClick={(e) => { e.stopPropagation(); setFilter("all"); setCurrentPage(1); setFilterDropdownOpen(false); }} className="text-xs text-gray-500 hover:text-gray-800">Clear</button>
+                  )}
+                </div>
+                {(["Job", "SDP Pipeline"] as const).map((f) => {
+                  const label = f === "Job" ? `Jobs (${jobCount})` : `SDP (${pipelineCount})`;
                   return (
                     <button
                       key={f}
-                      onClick={() => { setFilter(f); setFilterDropdownOpen(false); setCurrentPage(1); }}
-                      className={`flex w-full items-center gap-2 px-3 py-2 text-left text-xs transition-colors ${filter === f ? "bg-orange-50 font-medium text-[#FF3621]" : "text-gray-700 hover:bg-gray-50"}`}
+                      onClick={() => { setFilter(filter === f ? "all" : f); setFilterDropdownOpen(false); setCurrentPage(1); }}
+                      className="flex w-full items-center gap-2 px-3 py-2.5 text-left text-xs hover:bg-gray-50"
                     >
-                      <span className={`flex h-3 w-3 shrink-0 items-center justify-center rounded-full border ${filter === f ? "border-transparent" : "border-gray-300"}`} style={filter === f ? { backgroundColor: '#FF3621' } : undefined}>
-                        {filter === f && <svg className="h-2 w-2 text-white" fill="currentColor" viewBox="0 0 8 8"><circle cx="4" cy="4" r="2" /></svg>}
-                      </span>
-                      {label}
+                      <div className={`flex h-4 w-4 shrink-0 items-center justify-center rounded border ${filter === f ? "border-orange-500 bg-orange-500" : "border-gray-300"}`}>
+                        {filter === f && <svg className="h-3 w-3 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" /></svg>}
+                      </div>
+                      <span className="text-gray-700">{label}</span>
                     </button>
                   );
                 })}

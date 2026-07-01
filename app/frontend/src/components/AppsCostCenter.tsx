@@ -849,19 +849,24 @@ export function AppsCostCenter({ data: initialData, isLoading: initialLoading, h
               <div className="relative" data-ws-filter-dropdown>
                 <button
                   onClick={() => { setWsFilterOpen(!wsFilterOpen); setWsFilterSearch(""); }}
-                  className="inline-flex items-center gap-2 rounded-full border border-gray-200 bg-white px-3 py-1.5 text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors"
+                  className={`flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-sm font-medium transition-colors ${selectedWorkspaces.length > 0 ? "border-[#FF3621] text-[#FF3621]" : "border-gray-300 text-gray-700 hover:bg-gray-50"}`}
                 >
                   {selectedWorkspaces.length === 0
-                    ? "All Workspaces"
+                    ? "Workspaces"
                     : selectedWorkspaces.length === 1
                     ? (availableWorkspaces.find(w => w.id === selectedWorkspaces[0])?.name || selectedWorkspaces[0])
-                    : `Workspaces (${selectedWorkspaces.length})`}
-                  <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    : `${selectedWorkspaces.length} Workspaces`}
+                  {selectedWorkspaces.length > 0 && (
+                    <button onClick={(e) => { e.stopPropagation(); setSelectedWorkspaces([]); }} className="ml-0.5 flex h-3.5 w-3.5 shrink-0 items-center justify-center rounded-full bg-orange-100 text-orange-600 hover:bg-orange-200">
+                      <svg className="h-2 w-2" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M6 18L18 6M6 6l12 12" /></svg>
+                    </button>
+                  )}
+                  <svg className={`h-4 w-4 transition-transform ${wsFilterOpen ? "rotate-180" : ""}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                     <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
                   </svg>
                 </button>
                 {wsFilterOpen && (
-                  <div className="absolute right-0 top-full z-50 mt-1 w-72 rounded-lg border border-gray-200 bg-white shadow-lg">
+                  <div className="absolute right-0 top-full z-[9999] mt-1 min-w-[200px] max-h-64 overflow-y-auto rounded-lg border border-gray-200 bg-white shadow-lg">
                     <div className="p-2">
                       <input
                         type="text"
@@ -872,33 +877,30 @@ export function AppsCostCenter({ data: initialData, isLoading: initialLoading, h
                         autoFocus
                       />
                     </div>
-                    <div className="max-h-60 overflow-y-auto py-1">
-                      {availableWorkspaces
-                        .filter(ws => !wsFilterSearch || ws.name.toLowerCase().includes(wsFilterSearch.toLowerCase()))
-                        .map(ws => (
-                          <label
-                            key={ws.id}
-                            className="flex items-center gap-3 px-4 py-2.5 hover:bg-gray-50 cursor-pointer select-none"
-                          >
-                            <input
-                              type="checkbox"
-                              checked={selectedWorkspaces.includes(ws.id)}
-                              onChange={() => handleToggleWorkspace(ws.id)}
-                              className="h-4 w-4 rounded border-gray-300 text-[#FF3621] focus:ring-1 focus:ring-[#FF3621]"
-                            />
-                            <span className="truncate text-sm text-gray-700">{ws.name}</span>
-                          </label>
-                        ))}
-                      {availableWorkspaces.filter(ws => !wsFilterSearch || ws.name.toLowerCase().includes(wsFilterSearch.toLowerCase())).length === 0 && (
-                        <div className="px-3 py-2 text-sm text-gray-500">No matching workspaces</div>
-                      )}
-                    </div>
-                    {selectedWorkspaces.length > 0 && (
-                      <div className="border-t border-gray-200 p-2">
-                        <button onClick={() => setSelectedWorkspaces([])} className="w-full rounded-md px-3 py-1.5 text-sm font-medium text-gray-600 hover:bg-gray-100">
-                          Clear all
-                        </button>
+                    <div className="sticky top-[52px] flex items-center justify-between border-b border-gray-100 bg-white px-3 py-2">
+                      <span className="text-[10px] font-semibold uppercase tracking-wider text-gray-400">Workspaces</span>
+                      <div className="flex items-center gap-2 text-xs">
+                        <button onClick={(e) => { e.stopPropagation(); setSelectedWorkspaces(availableWorkspaces.map(ws => ws.id)); }} className="text-gray-500 hover:text-gray-800">All</button>
+                        <span className="text-gray-300">·</span>
+                        <button onClick={(e) => { e.stopPropagation(); setSelectedWorkspaces([]); }} className="text-gray-500 hover:text-gray-800">Clear</button>
                       </div>
+                    </div>
+                    {availableWorkspaces
+                      .filter(ws => !wsFilterSearch || ws.name.toLowerCase().includes(wsFilterSearch.toLowerCase()))
+                      .map(ws => (
+                        <button
+                          key={ws.id}
+                          onClick={() => handleToggleWorkspace(ws.id)}
+                          className="flex w-full items-center gap-2 px-3 py-2.5 text-left text-xs hover:bg-gray-50"
+                        >
+                          <div className={`flex h-4 w-4 shrink-0 items-center justify-center rounded border ${selectedWorkspaces.includes(ws.id) ? "border-orange-500 bg-orange-500" : "border-gray-300"}`}>
+                            {selectedWorkspaces.includes(ws.id) && <svg className="h-3 w-3 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" /></svg>}
+                          </div>
+                          <span className="truncate text-gray-700">{ws.name}</span>
+                        </button>
+                      ))}
+                    {availableWorkspaces.filter(ws => !wsFilterSearch || ws.name.toLowerCase().includes(wsFilterSearch.toLowerCase())).length === 0 && (
+                      <div className="px-3 py-2 text-sm text-gray-500">No matching workspaces</div>
                     )}
                   </div>
                 )}
