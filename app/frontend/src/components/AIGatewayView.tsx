@@ -259,7 +259,7 @@ function TopUsersTable({ rows }: { rows: Array<{ client_user: string; request_co
           </tr>
         </thead>
         <tbody className="divide-y divide-gray-100 bg-white">
-          {rows.slice(0, 10).map((r, i) => (
+          {rows.map((r, i) => (
             <tr key={i} className="hover:bg-gray-50">
               <td className="px-3 py-3 text-sm text-gray-900 max-w-[220px] truncate" title={r.client_user}>
                 {r.client_user}
@@ -291,6 +291,7 @@ interface AIGatewayViewProps {
 
 export function AIGatewayView({ data, isLoading }: AIGatewayViewProps) {
   const [subTab, setSubTab] = useState<SubTab>("overview");
+  const [gatewaySearch, setGatewaySearch] = useState("");
 
   if (isLoading) {
     return (
@@ -425,10 +426,33 @@ export function AIGatewayView({ data, isLoading }: AIGatewayViewProps) {
 
       {subTab === "users" && (
         <div className="rounded-lg bg-white border p-5" style={{ borderColor: "#E5E5E5" }}>
-          <h3 className="mb-3 text-sm font-semibold text-gray-700">Top Users by Request Volume</h3>
-          {users.length > 0 ? (
-            <TopUsersTable rows={users} />
-          ) : (
+          <div className="mb-3 flex items-center justify-between gap-3">
+            <h3 className="text-sm font-semibold text-gray-700">Top Users by Request Volume</h3>
+            {users.length > 0 && (
+              <div className="relative">
+                <svg className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                </svg>
+                <input
+                  type="text"
+                  placeholder="Search users..."
+                  value={gatewaySearch}
+                  onChange={(e) => setGatewaySearch(e.target.value)}
+                  className="rounded-full border border-gray-200 bg-white py-1.5 pl-9 pr-4 text-sm placeholder:text-gray-400 focus:border-[#FF3621] focus:outline-none focus:ring-1 focus:ring-[#FF3621]"
+                />
+              </div>
+            )}
+          </div>
+          {users.length > 0 ? (() => {
+            const filteredUsers = gatewaySearch
+              ? users.filter(u => u.client_user.toLowerCase().includes(gatewaySearch.toLowerCase()))
+              : users.slice(0, 10);
+            return filteredUsers.length > 0 ? (
+              <TopUsersTable rows={filteredUsers} />
+            ) : (
+              <p className="py-6 text-center text-sm text-gray-500">No users match your search.</p>
+            );
+          })() : (
             <p className="py-6 text-center text-sm text-gray-500">No user data available for this period.</p>
           )}
         </div>
