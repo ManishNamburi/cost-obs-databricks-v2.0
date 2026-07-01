@@ -1352,7 +1352,7 @@ async def get_workspace_list(
                 SELECT workspace_id, workspace_name,
                        ROW_NUMBER() OVER (
                            PARTITION BY workspace_id
-                           ORDER BY COALESCE(change_time, update_time, create_time) DESC
+                           ORDER BY COALESCE(workspace_last_modified_at, workspace_created_at) DESC
                        ) AS rn
                 FROM system.access.workspaces
             ) t WHERE rn = 1
