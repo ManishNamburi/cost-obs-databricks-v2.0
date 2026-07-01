@@ -589,7 +589,7 @@ export function AIMLCostCenter({ data, isLoading, startDate, endDate, host, work
                   {endpointsWorkspaceDropdownOpen && (
                     <div className="absolute right-0 top-full z-[9999] mt-1 max-h-64 w-56 overflow-y-auto rounded-lg border border-gray-200 bg-white shadow-lg">
                       <div className="sticky top-0 flex items-center justify-between border-b border-gray-100 bg-white px-3 py-2">
-                        <span className="text-[10px] font-semibold uppercase tracking-wider text-gray-400">Workspace</span>
+                        <span className="text-[10px] font-semibold uppercase tracking-wider text-gray-500">Workspace</span>
                         {endpointsWorkspaceFilter && (
                           <button onClick={(e) => { e.stopPropagation(); setEndpointsWorkspaceFilter(null); setEndpointsPage(1); setEndpointsWorkspaceDropdownOpen(false); }} className="text-xs text-gray-500 hover:text-gray-800">Clear</button>
                         )}
@@ -627,7 +627,7 @@ export function AIMLCostCenter({ data, isLoading, startDate, endDate, host, work
                   {endpointsCostTypeDropdownOpen && (
                     <div className="absolute right-0 top-full z-[9999] mt-1 max-h-64 w-48 overflow-y-auto rounded-lg border border-gray-200 bg-white shadow-lg">
                       <div className="sticky top-0 flex items-center justify-between border-b border-gray-100 bg-white px-3 py-2">
-                        <span className="text-[10px] font-semibold uppercase tracking-wider text-gray-400">Cost Type</span>
+                        <span className="text-[10px] font-semibold uppercase tracking-wider text-gray-500">Cost Type</span>
                         {endpointsCostTypeFilter && (
                           <button onClick={(e) => { e.stopPropagation(); setEndpointsCostTypeFilter(null); setEndpointsPage(1); setEndpointsCostTypeDropdownOpen(false); }} className="text-xs text-gray-500 hover:text-gray-800">Clear</button>
                         )}
@@ -743,7 +743,7 @@ export function AIMLCostCenter({ data, isLoading, startDate, endDate, host, work
               <div className="relative" ref={modelsTypeDropdownRef}>
                 <button
                   onClick={() => setModelsTypeDropdownOpen((o) => !o)}
-                  className="inline-flex items-center gap-2 rounded-full border border-gray-200 bg-white px-3 py-1.5 text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors"
+                  className={`flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-sm font-medium transition-colors ${modelsTypeFilters.length > 0 ? "border-[#FF3621] text-[#FF3621]" : "border-gray-300 text-gray-700 hover:bg-gray-50"}`}
                 >
                   <span className="max-w-[140px] truncate">
                     {modelsTypeFilters.length === 0
@@ -752,14 +752,19 @@ export function AIMLCostCenter({ data, isLoading, startDate, endDate, host, work
                       ? (TYPE_LABELS[modelsTypeFilters[0]] || modelsTypeFilters[0])
                       : `${modelsTypeFilters.length} Types`}
                   </span>
-                  <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  {modelsTypeFilters.length > 0 && (
+                    <button onClick={(e) => { e.stopPropagation(); setModelsTypeFilters([]); setModelsPage(1); }} className="ml-0.5 flex h-3.5 w-3.5 shrink-0 items-center justify-center rounded-full bg-orange-100 text-orange-600 hover:bg-orange-200">
+                      <svg className="h-2 w-2" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M6 18L18 6M6 6l12 12" /></svg>
+                    </button>
+                  )}
+                  <svg className={`h-4 w-4 transition-transform ${modelsTypeDropdownOpen ? "rotate-180" : ""}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                     <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
                   </svg>
                 </button>
                 {modelsTypeDropdownOpen && (
                   <div className="absolute right-0 z-20 mt-1 min-w-[200px] max-h-64 overflow-y-auto rounded-lg border border-gray-200 bg-white shadow-lg">
                     <div className="sticky top-0 flex items-center justify-between border-b border-gray-100 bg-white px-3 py-2">
-                      <span className="text-[10px] font-semibold uppercase tracking-wider text-gray-400">Types</span>
+                      <span className="text-[10px] font-semibold uppercase tracking-wider text-gray-500">Types</span>
                       <div className="flex items-center gap-2 text-xs">
                         <button onClick={(e) => { e.stopPropagation(); setModelsTypeFilters([...distinctTypes]); setModelsPage(1); }} className="text-gray-500 hover:text-gray-800">All</button>
                         <span className="text-gray-300">·</span>
@@ -890,7 +895,7 @@ export function AIMLCostCenter({ data, isLoading, startDate, endDate, host, work
                       {mlRuntimeFilterOpen && (
                         <div className="absolute right-0 top-full z-[9999] mt-1 max-h-64 w-56 overflow-y-auto rounded-lg border border-gray-200 bg-white shadow-lg">
                           <div className="sticky top-0 flex items-center justify-between border-b border-gray-100 bg-white px-3 py-2">
-                            <span className="text-[10px] font-semibold uppercase tracking-wider text-gray-400">Runtime</span>
+                            <span className="text-[10px] font-semibold uppercase tracking-wider text-gray-500">Runtime</span>
                             {mlRuntimeFilter && (
                               <button onClick={(e) => { e.stopPropagation(); setMlRuntimeFilter(null); setMlClustersPage(1); setMlRuntimeFilterOpen(false); }} className="text-xs text-gray-500 hover:text-gray-800">Clear</button>
                             )}
@@ -1057,7 +1062,7 @@ export function AIMLCostCenter({ data, isLoading, startDate, endDate, host, work
                       {agentTypeDropdownOpen && (
                         <div className="absolute right-0 top-full z-[9999] mt-1 min-w-[180px] max-h-64 overflow-y-auto rounded-lg border border-gray-200 bg-white shadow-lg">
                           <div className="sticky top-0 flex items-center justify-between border-b border-gray-100 bg-white px-3 py-2">
-                            <span className="text-[10px] font-semibold uppercase tracking-wider text-gray-400">Types</span>
+                            <span className="text-[10px] font-semibold uppercase tracking-wider text-gray-500">Types</span>
                             <div className="flex items-center gap-2 text-xs">
                               <button onClick={(e) => { e.stopPropagation(); setAgentTypeFilter([...agentTypes]); setAgentsPage(1); }} className="text-gray-500 hover:text-gray-800">All</button>
                               <span className="text-gray-300">·</span>

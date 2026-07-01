@@ -878,7 +878,7 @@ export function AppsCostCenter({ data: initialData, isLoading: initialLoading, h
                       />
                     </div>
                     <div className="sticky top-[52px] flex items-center justify-between border-b border-gray-100 bg-white px-3 py-2">
-                      <span className="text-[10px] font-semibold uppercase tracking-wider text-gray-400">Workspaces</span>
+                      <span className="text-[10px] font-semibold uppercase tracking-wider text-gray-500">Workspaces</span>
                       <div className="flex items-center gap-2 text-xs">
                         <button onClick={(e) => { e.stopPropagation(); setSelectedWorkspaces(availableWorkspaces.map(ws => ws.id)); }} className="text-gray-500 hover:text-gray-800">All</button>
                         <span className="text-gray-300">·</span>
@@ -1209,15 +1209,20 @@ export function AppsCostCenter({ data: initialData, isLoading: initialLoading, h
               <div className="relative" data-artifact-app-dropdown>
                 <button
                   onClick={() => { setArtifactAppFilterOpen(v => !v); setArtifactAppFilterSearch(""); }}
-                  className="inline-flex items-center gap-2 rounded-full border border-gray-200 bg-white px-3 py-1.5 text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors"
+                  className={`flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-sm font-medium transition-colors ${artifactAppFilter ? "border-[#FF3621] text-[#FF3621]" : "border-gray-300 text-gray-700 hover:bg-gray-50"}`}
                 >
-                  {artifactAppFilter ? artifactAppFilter : 'All Apps'}
-                  <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  {artifactAppFilter ? artifactAppFilter : 'App'}
+                  {artifactAppFilter && (
+                    <button onClick={(e) => { e.stopPropagation(); setArtifactAppFilter(null); setArtifactPage(1); }} className="ml-0.5 flex h-3.5 w-3.5 shrink-0 items-center justify-center rounded-full bg-orange-100 text-orange-600 hover:bg-orange-200">
+                      <svg className="h-2 w-2" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M6 18L18 6M6 6l12 12" /></svg>
+                    </button>
+                  )}
+                  <svg className={`h-4 w-4 transition-transform ${artifactAppFilterOpen ? "rotate-180" : ""}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                     <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
                   </svg>
                 </button>
                 {artifactAppFilterOpen && (
-                  <div className="absolute right-0 top-full z-[9999] mt-1 w-64 rounded-lg border border-gray-200 bg-white shadow-lg">
+                  <div className="absolute right-0 top-full z-[9999] mt-1 min-w-[220px] max-h-72 rounded-lg border border-gray-200 bg-white shadow-lg">
                     <div className="p-2">
                       <input
                         autoFocus
@@ -1228,26 +1233,27 @@ export function AppsCostCenter({ data: initialData, isLoading: initialLoading, h
                         className="w-full rounded border border-gray-200 px-2 py-1.5 text-xs focus:border-[#FF3621] focus:outline-none focus:ring-1 focus:ring-[#FF3621]"
                       />
                     </div>
-                    <div className="max-h-56 overflow-y-auto">
-                      <button
-                        onClick={() => { setArtifactAppFilter(null); setArtifactAppFilterOpen(false); setArtifactPage(1); }}
-                        className="w-full text-left px-4 py-2.5 text-sm text-gray-700 hover:bg-gray-50 flex items-center justify-between"
-                      >
-                        All Apps
-                        {!artifactAppFilter && <span className="text-[#FF3621]">✓</span>}
-                      </button>
+                    <div className="sticky top-[52px] flex items-center justify-between border-b border-gray-100 bg-white px-3 py-2">
+                      <span className="text-[10px] font-semibold uppercase tracking-wider text-gray-500">App</span>
+                      {artifactAppFilter && (
+                        <button onClick={(e) => { e.stopPropagation(); setArtifactAppFilter(null); setArtifactPage(1); setArtifactAppFilterOpen(false); }} className="text-xs text-gray-500 hover:text-gray-800">Clear</button>
+                      )}
+                    </div>
+                    <div className="max-h-48 overflow-y-auto">
                       {filteredAppNames.map(name => (
                         <button
                           key={name}
-                          onClick={() => { setArtifactAppFilter(name); setArtifactAppFilterOpen(false); setArtifactPage(1); }}
-                          className="w-full text-left px-4 py-2.5 text-sm text-gray-700 hover:bg-gray-50 flex items-center justify-between"
+                          onClick={() => { setArtifactAppFilter(artifactAppFilter === name ? null : name); setArtifactAppFilterOpen(false); setArtifactPage(1); }}
+                          className="flex w-full items-center gap-2 px-3 py-2.5 text-left text-xs hover:bg-gray-50"
                         >
-                          <span className="truncate">{name}</span>
-                          {artifactAppFilter === name && <span className="text-[#FF3621]">✓</span>}
+                          <div className={`flex h-4 w-4 shrink-0 items-center justify-center rounded border ${artifactAppFilter === name ? "border-orange-500 bg-orange-500" : "border-gray-300"}`}>
+                            {artifactAppFilter === name && <svg className="h-3 w-3 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" /></svg>}
+                          </div>
+                          <span className="truncate text-gray-700">{name}</span>
                         </button>
                       ))}
                       {filteredAppNames.length === 0 && (
-                        <p className="px-4 py-2 text-xs text-gray-400">No apps found</p>
+                        <p className="px-4 py-2 text-xs text-gray-500">No apps found</p>
                       )}
                     </div>
                   </div>
@@ -1258,45 +1264,49 @@ export function AppsCostCenter({ data: initialData, isLoading: initialLoading, h
               <div className="relative" data-artifact-type-dropdown>
                 <button
                   onClick={() => setArtifactTypeDropdownOpen(v => !v)}
-                  className="inline-flex items-center gap-2 rounded-full border border-gray-200 bg-white px-3 py-1.5 text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors"
+                  className={`flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-sm font-medium transition-colors ${artifactTypeFilters.length > 0 ? "border-[#FF3621] text-[#FF3621]" : "border-gray-300 text-gray-700 hover:bg-gray-50"}`}
                 >
                   {artifactTypeFilters.length > 0
                     ? artifactTypeFilters.length === 1
                       ? artifactTypeFilters[0].replace(/_/g, ' ')
-                      : `Resource Types (${artifactTypeFilters.length})`
-                    : 'All Resource Types'}
-                  <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                      : `${artifactTypeFilters.length} Types`
+                    : 'Resource Type'}
+                  {artifactTypeFilters.length > 0 && (
+                    <button onClick={(e) => { e.stopPropagation(); setArtifactTypeFilters([]); setArtifactPage(1); }} className="ml-0.5 flex h-3.5 w-3.5 shrink-0 items-center justify-center rounded-full bg-orange-100 text-orange-600 hover:bg-orange-200">
+                      <svg className="h-2 w-2" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M6 18L18 6M6 6l12 12" /></svg>
+                    </button>
+                  )}
+                  <svg className={`h-4 w-4 transition-transform ${artifactTypeDropdownOpen ? "rotate-180" : ""}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                     <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
                   </svg>
                 </button>
                 {artifactTypeDropdownOpen && (
-                  <div className="absolute right-0 top-full z-[9999] mt-1 w-56 rounded-lg border border-gray-200 bg-white shadow-lg">
-                    <div className="max-h-64 overflow-y-auto py-1">
-                      {artifactTypes.map((type: string) => {
-                        const count = data.connected_artifacts.filter((a: AppsConnectedArtifact) => a.artifact_type === type).length;
-                        const checked = artifactTypeFilters.includes(type);
-                        return (
-                          <label
-                            key={type}
-                            className="flex items-center gap-3 px-4 py-2.5 hover:bg-gray-50 cursor-pointer select-none"
-                          >
-                            <input
-                              type="checkbox"
-                              checked={checked}
-                              onChange={() => {
-                                setArtifactTypeFilters(prev =>
-                                  prev.includes(type) ? prev.filter(t => t !== type) : [...prev, type]
-                                );
-                                setArtifactPage(1);
-                              }}
-                              className="h-4 w-4 rounded border-gray-300 text-[#FF3621] focus:ring-1 focus:ring-[#FF3621]"
-                            />
-                            <span className="flex-1 truncate text-sm text-gray-700">{type.replace(/_/g, ' ')}</span>
-                            <span className="text-xs text-gray-400">({count})</span>
-                          </label>
-                        );
-                      })}
+                  <div className="absolute right-0 top-full z-[9999] mt-1 min-w-[200px] max-h-64 overflow-y-auto rounded-lg border border-gray-200 bg-white shadow-lg">
+                    <div className="sticky top-0 flex items-center justify-between border-b border-gray-100 bg-white px-3 py-2">
+                      <span className="text-[10px] font-semibold uppercase tracking-wider text-gray-500">Resource Type</span>
+                      <div className="flex items-center gap-2 text-xs">
+                        <button onClick={(e) => { e.stopPropagation(); setArtifactTypeFilters([...artifactTypes]); setArtifactPage(1); }} className="text-gray-500 hover:text-gray-800">All</button>
+                        <span className="text-gray-300">·</span>
+                        <button onClick={(e) => { e.stopPropagation(); setArtifactTypeFilters([]); setArtifactPage(1); }} className="text-gray-500 hover:text-gray-800">Clear</button>
+                      </div>
                     </div>
+                    {artifactTypes.map((type: string) => {
+                      const count = data.connected_artifacts.filter((a: AppsConnectedArtifact) => a.artifact_type === type).length;
+                      const checked = artifactTypeFilters.includes(type);
+                      return (
+                        <button
+                          key={type}
+                          onClick={() => { setArtifactTypeFilters(prev => prev.includes(type) ? prev.filter(t => t !== type) : [...prev, type]); setArtifactPage(1); }}
+                          className="flex w-full items-center gap-2 px-3 py-2.5 text-left text-xs hover:bg-gray-50"
+                        >
+                          <div className={`flex h-4 w-4 shrink-0 items-center justify-center rounded border ${checked ? "border-orange-500 bg-orange-500" : "border-gray-300"}`}>
+                            {checked && <svg className="h-3 w-3 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" /></svg>}
+                          </div>
+                          <span className="flex-1 truncate text-gray-700">{type.replace(/_/g, ' ')}</span>
+                          <span className="text-xs text-gray-500">({count})</span>
+                        </button>
+                      );
+                    })}
                   </div>
                 )}
               </div>

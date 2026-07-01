@@ -621,14 +621,19 @@ export function TaggingHub({ data, isLoading, host, startDate, endDate, workspac
               <div className="relative" data-tag-value-filter-dropdown>
                 <button
                   onClick={() => { setTagValueFilterDropdownOpen(!tagValueFilterDropdownOpen); setTagValueFilterSearch(""); }}
-                  className="inline-flex items-center gap-2 rounded-full border border-gray-200 bg-white px-3 py-1.5 text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors"
+                  className={`flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-sm font-medium transition-colors ${selectedTagValueFilters.length > 0 ? "border-[#FF3621] text-[#FF3621]" : "border-gray-300 text-gray-700 hover:bg-gray-50"}`}
                 >
                   {selectedTagValueFilters.length === 0
                     ? "Value"
                     : selectedTagValueFilters.length === 1
                       ? selectedTagValueFilters[0]
                       : `Tags (${selectedTagValueFilters.length})`}
-                  <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  {selectedTagValueFilters.length > 0 && (
+                    <button onClick={(e) => { e.stopPropagation(); handleClearTagValueFilters(); }} className="ml-0.5 flex h-3.5 w-3.5 shrink-0 items-center justify-center rounded-full bg-orange-100 text-orange-600 hover:bg-orange-200">
+                      <svg className="h-2 w-2" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M6 18L18 6M6 6l12 12" /></svg>
+                    </button>
+                  )}
+                  <svg className={`h-4 w-4 transition-transform ${tagValueFilterDropdownOpen ? "rotate-180" : ""}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                     <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
                   </svg>
                 </button>
@@ -646,7 +651,7 @@ export function TaggingHub({ data, isLoading, host, startDate, endDate, workspac
                     </div>
                     <div className="max-h-60 overflow-y-auto">
                       <div className="sticky top-0 flex items-center justify-between border-b border-gray-100 bg-white px-3 py-2">
-                        <span className="text-[10px] font-semibold uppercase tracking-wider text-gray-400">Tag Values</span>
+                        <span className="text-[10px] font-semibold uppercase tracking-wider text-gray-500">Tag Values</span>
                         <div className="flex items-center gap-2 text-xs">
                           <button onClick={(e) => { e.stopPropagation(); setSelectedTagValueFilters([...availableTagValues]); }} className="text-gray-500 hover:text-gray-800">All</button>
                           <span className="text-gray-300">·</span>
@@ -764,14 +769,19 @@ export function TaggingHub({ data, isLoading, host, startDate, endDate, workspac
               <div className="relative" data-tag-filter-dropdown>
                 <button
                   onClick={() => { setTagFilterDropdownOpen(!tagFilterDropdownOpen); setTagFilterSearch(""); }}
-                  className="inline-flex items-center gap-2 rounded-full border border-gray-200 bg-white px-3 py-1.5 text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors"
+                  className={`flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-sm font-medium transition-colors ${selectedTagFilters.length > 0 ? "border-[#FF3621] text-[#FF3621]" : "border-gray-300 text-gray-700 hover:bg-gray-50"}`}
                 >
                   {selectedTagFilters.length === 0
                     ? "Tag"
                     : selectedTagFilters.length === 1
                       ? selectedTagFilters[0]
                       : `Keys (${selectedTagFilters.length})`}
-                  <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  {selectedTagFilters.length > 0 && (
+                    <button onClick={(e) => { e.stopPropagation(); handleClearTagFilters(); }} className="ml-0.5 flex h-3.5 w-3.5 shrink-0 items-center justify-center rounded-full bg-orange-100 text-orange-600 hover:bg-orange-200">
+                      <svg className="h-2 w-2" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M6 18L18 6M6 6l12 12" /></svg>
+                    </button>
+                  )}
+                  <svg className={`h-4 w-4 transition-transform ${tagFilterDropdownOpen ? "rotate-180" : ""}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                     <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
                   </svg>
                 </button>
@@ -789,7 +799,7 @@ export function TaggingHub({ data, isLoading, host, startDate, endDate, workspac
                     </div>
                     <div className="max-h-60 overflow-y-auto">
                       <div className="sticky top-0 flex items-center justify-between border-b border-gray-100 bg-white px-3 py-2">
-                        <span className="text-[10px] font-semibold uppercase tracking-wider text-gray-400">Tag Keys</span>
+                        <span className="text-[10px] font-semibold uppercase tracking-wider text-gray-500">Tag Keys</span>
                         <div className="flex items-center gap-2 text-xs">
                           <button onClick={(e) => { e.stopPropagation(); setSelectedTagFilters([...availableTagKeys]); }} className="text-gray-500 hover:text-gray-800">All</button>
                           <span className="text-gray-300">·</span>
