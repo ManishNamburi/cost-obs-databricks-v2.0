@@ -1339,7 +1339,7 @@ async def get_workspace_list(
     }
     configured_ids = wf.get_configured_workspace_ids()
     ws_clause = wf.build_ws_filter_clause() if configured_ids else ""
-    sql = f"""
+    sql_with_names = f"""
         SELECT
             CAST(u.workspace_id AS STRING) as workspace_id,
             COALESCE(MAX(wsl.workspace_name), MAX(ws_dedup.workspace_name)) as workspace_name
@@ -1347,15 +1347,9 @@ async def get_workspace_list(
         LEFT JOIN system.access.workspaces_latest wsl
             ON CAST(u.workspace_id AS BIGINT) = CAST(wsl.workspace_id AS BIGINT)
         LEFT JOIN (
-            SELECT workspace_id, workspace_name
-            FROM (
-                SELECT workspace_id, workspace_name,
-                       ROW_NUMBER() OVER (
-                           PARTITION BY workspace_id
-                           ORDER BY COALESCE(workspace_last_modified_at, workspace_created_at) DESC
-                       ) AS rn
-                FROM system.access.workspaces
-            ) t WHERE rn = 1
+            SELECT workspace_id, MAX(workspace_name) as workspace_name
+            FROM system.access.workspaces
+            GROUP BY workspace_id
         ) ws_dedup ON CAST(u.workspace_id AS BIGINT) = CAST(ws_dedup.workspace_id AS BIGINT)
         WHERE u.usage_date BETWEEN :start_date AND :end_date
           AND u.usage_quantity > 0
@@ -1364,8 +1358,24 @@ async def get_workspace_list(
         GROUP BY u.workspace_id
         ORDER BY COALESCE(MAX(wsl.workspace_name), MAX(ws_dedup.workspace_name), CAST(u.workspace_id AS STRING))
     """
+    sql_ids_only = f"""
+        SELECT
+            CAST(workspace_id AS STRING) as workspace_id,
+            CAST(NULL AS STRING) as workspace_name
+        FROM system.billing.usage
+        WHERE usage_date BETWEEN :start_date AND :end_date
+          AND usage_quantity > 0
+          AND workspace_id IS NOT NULL
+          {ws_clause}
+        GROUP BY workspace_id
+        ORDER BY workspace_id
+    """
     def _fetch_rows() -> list:
-        rows = execute_query(sql, params)
+        try:
+            rows = execute_query(sql_with_names, params)
+        except Exception as e:
+            logger.warning("get_workspace_list: workspace name query failed (%s: %s), falling back to IDs only", type(e).__name__, e)
+            rows = execute_query(sql_ids_only, params)
         # AccountClient names take priority over system table names
         if _account_ws_names:
             rows = [{**r, "workspace_name": _account_ws_names.get(r["workspace_id"]) or r["workspace_name"]} for r in rows]
