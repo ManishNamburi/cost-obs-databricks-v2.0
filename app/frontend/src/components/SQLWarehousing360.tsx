@@ -956,16 +956,15 @@ export function SQLWarehousing360({ sqlBreakdownData: _sqlBreakdownData, queryDa
                 <div className="relative">
                   <button
                     onClick={() => setQuerySourceDropdownOpen((o) => !o)}
-                    className="inline-flex items-center gap-2 rounded-full border border-gray-200 bg-white px-3 py-1.5 text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors"
+                    className={`flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-sm font-medium transition-colors ${querySourceFilters.length > 0 ? "border-[#FF3621] text-[#FF3621]" : "border-gray-200 bg-white text-gray-700 hover:bg-gray-50"}`}
                   >
-                    <span className="max-w-[140px] truncate">
-                      {querySourceFilters.length === 0
-                        ? "Sources"
-                        : querySourceFilters.length === 1
-                        ? querySourceFilters[0]
-                        : `Sources (${querySourceFilters.length})`}
-                    </span>
-                    <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    {querySourceFilters.length === 0 ? "Sources" : querySourceFilters.length === 1 ? querySourceFilters[0] : `${querySourceFilters.length} Sources`}
+                    {querySourceFilters.length > 0 && (
+                      <button onClick={(e) => { e.stopPropagation(); setQuerySourceFilters([]); setQueriesPage(1); }} className="ml-0.5 flex h-3.5 w-3.5 shrink-0 items-center justify-center rounded-full bg-orange-100 text-orange-600 hover:bg-orange-200">
+                        <svg className="h-2 w-2" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M6 18L18 6M6 6l12 12" /></svg>
+                      </button>
+                    )}
+                    <svg className={`h-4 w-4 transition-transform ${querySourceDropdownOpen ? "rotate-180" : ""}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                       <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
                     </svg>
                   </button>
