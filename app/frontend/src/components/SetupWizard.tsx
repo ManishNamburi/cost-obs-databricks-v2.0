@@ -1230,7 +1230,7 @@ function WorkspaceFilterStep({
                   />
                   <div className="min-w-0">
                     <div className="text-sm font-medium text-gray-800 truncate">{ws.name}</div>
-                    <div className="text-xs font-mono text-gray-400">{ws.id}</div>
+                    <div className="text-xs font-mono text-gray-500">{ws.id}</div>
                   </div>
                 </label>
               );

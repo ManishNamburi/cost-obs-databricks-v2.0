@@ -108,7 +108,7 @@ function ModelTable({ rows }: { rows: AIGatewayModelRow[] }) {
                 </td>
                 <td className="whitespace-nowrap px-3 py-3 text-right text-sm text-gray-900">
                   {fmtRequests(r.request_count)}
-                  <span className="ml-1 text-xs text-gray-400">{sharePct.toFixed(0)}%</span>
+                  <span className="ml-1 text-xs text-gray-500">{sharePct.toFixed(0)}%</span>
                 </td>
                 <td className="whitespace-nowrap px-3 py-3 text-right text-sm text-gray-600">
                   {fmtTokens(r.total_tokens)}
@@ -120,17 +120,17 @@ function ModelTable({ rows }: { rows: AIGatewayModelRow[] }) {
                   {r.error_count > 0 ? (
                     <span className="text-red-600 font-medium">{fmtRequests(r.error_count)}</span>
                   ) : (
-                    <span className="text-gray-400">—</span>
+                    <span className="text-gray-500">—</span>
                   )}
                 </td>
                 <td className="whitespace-nowrap px-3 py-3 text-right text-sm">
                   {r.cost_source === "unavailable" ? (
-                    <span className="text-gray-400">—</span>
+                    <span className="text-gray-500">—</span>
                   ) : (
                     <span className={r.cost_source === "token_estimate" ? "text-amber-600" : "text-gray-900"}>
                       {formatCurrency(r.estimated_cost_usd)}
                       {r.cost_source === "token_estimate" && (
-                        <span className="ml-1 text-[10px] text-gray-400" title="Token-based estimate">~</span>
+                        <span className="ml-1 text-[10px] text-gray-500" title="Token-based estimate">~</span>
                       )}
                     </span>
                   )}
@@ -180,12 +180,12 @@ function RouteTable({ rows }: { rows: AIGatewayRouteRow[] }) {
               </td>
               <td className="whitespace-nowrap px-3 py-3 text-right text-sm">
                 {r.cost_source === "unavailable" ? (
-                  <span className="text-gray-400">—</span>
+                  <span className="text-gray-500">—</span>
                 ) : (
                   <span className={r.cost_source === "token_estimate" ? "text-amber-600" : "text-gray-900"}>
                     {formatCurrency(r.estimated_cost_usd)}
                     {r.cost_source === "token_estimate" && (
-                      <span className="ml-1 text-[10px] text-gray-400">~</span>
+                      <span className="ml-1 text-[10px] text-gray-500">~</span>
                     )}
                   </span>
                 )}
@@ -266,7 +266,7 @@ function TopUsersTable({ rows }: { rows: Array<{ client_user: string; request_co
               </td>
               <td className="whitespace-nowrap px-3 py-3 text-right text-sm text-gray-900">
                 {fmtRequests(r.request_count)}
-                <span className="ml-1 text-xs text-gray-400">
+                <span className="ml-1 text-xs text-gray-500">
                   {total > 0 ? (r.request_count / total * 100).toFixed(0) : 0}%
                 </span>
               </td>
@@ -328,7 +328,7 @@ export function AIGatewayView({ data, isLoading }: AIGatewayViewProps) {
           <p className="text-sm text-gray-500">
             Request volume, token consumption, and cost attribution
             {data.table && (
-              <span className="ml-2 text-xs text-gray-400">← {data.table}</span>
+              <span className="ml-2 text-xs text-gray-500">← {data.table}</span>
             )}
           </p>
         </div>
@@ -408,7 +408,7 @@ export function AIGatewayView({ data, isLoading }: AIGatewayViewProps) {
         <div className="rounded-lg bg-white border p-5" style={{ borderColor: "#E5E5E5" }}>
           <div className="mb-3 flex items-center justify-between">
             <h3 className="text-sm font-semibold text-gray-700">By Model</h3>
-            <p className="text-xs text-gray-400">~ = token-based cost estimate for external models</p>
+            <p className="text-xs text-gray-500">~ = token-based cost estimate for external models</p>
           </div>
           <ModelTable rows={models} />
         </div>
@@ -418,7 +418,7 @@ export function AIGatewayView({ data, isLoading }: AIGatewayViewProps) {
         <div className="rounded-lg bg-white border p-5" style={{ borderColor: "#E5E5E5" }}>
           <div className="mb-3 flex items-center justify-between">
             <h3 className="text-sm font-semibold text-gray-700">By Route</h3>
-            <p className="text-xs text-gray-400">AI Gateway routes with their backing models</p>
+            <p className="text-xs text-gray-500">AI Gateway routes with their backing models</p>
           </div>
           <RouteTable rows={routes} />
         </div>

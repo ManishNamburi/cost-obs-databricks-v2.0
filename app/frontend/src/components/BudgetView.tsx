@@ -249,7 +249,7 @@ export function BudgetView({ data, isLoading }: BudgetViewProps) {
       )}
 
       {data.as_of && (
-        <p className="text-xs text-gray-400">
+        <p className="text-xs text-gray-500">
           Data as of {new Date(data.as_of).toLocaleString()}
         </p>
       )}
