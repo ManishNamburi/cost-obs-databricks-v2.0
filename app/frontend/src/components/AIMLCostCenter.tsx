@@ -105,17 +105,21 @@ export function AIMLCostCenter({ data, isLoading, startDate, endDate, host, work
   const [endpointsPage, setEndpointsPage] = useState(1);
   const [modelsPage, setModelsPage] = useState(1);
   const [modelsTypeFilters, setModelsTypeFilters] = useState<string[]>([]);
+  const modelsTypeSeen = useRef<Set<string>>(new Set());
   const [modelsTypeDropdownOpen, setModelsTypeDropdownOpen] = useState(false);
   const [selectedAgent, setSelectedAgent] = useState<import("@/types/billing").AIMLAgentBrick | null>(null);
   const [showHistoricalAgents, setShowHistoricalAgents] = useState(false);
   const [agentTypeFilter, setAgentTypeFilter] = useState<string[]>([]);
+  const agentTypeSeen = useRef<Set<string>>(new Set());
   const [agentsPage, setAgentsPage] = useState(1);
   const [mlClustersPage, setMlClustersPage] = useState(1);
   const [showHistoricalMlClusters, setShowHistoricalMlClusters] = useState(false);
   const [mlClusterSearch, setMlClusterSearch] = useState("");
-  const [mlRuntimeFilter, setMlRuntimeFilter] = useState<string | null>(null);
+  const [mlRuntimeFilter, setMlRuntimeFilter] = useState<string[]>([]);
+  const mlRuntimeSeen = useRef<Set<string>>(new Set());
   const [endpointsCostTypeFilter, setEndpointsCostTypeFilter] = useState<string | null>(null);
-  const [endpointsWorkspaceFilter, setEndpointsWorkspaceFilter] = useState<string | null>(null);
+  const [endpointsWorkspaceFilter, setEndpointsWorkspaceFilter] = useState<string[]>([]);
+  const endpointsWorkspaceSeen = useRef<Set<string>>(new Set());
   const [endpointsWorkspaceDropdownOpen, setEndpointsWorkspaceDropdownOpen] = useState(false);
   const [endpointsCostTypeDropdownOpen, setEndpointsCostTypeDropdownOpen] = useState(false);
   const [mlRuntimeFilterOpen, setMlRuntimeFilterOpen] = useState(false);
@@ -150,6 +154,62 @@ export function AIMLCostCenter({ data, isLoading, startDate, endDate, host, work
     document.addEventListener("mousedown", handleClick);
     return () => document.removeEventListener("mousedown", handleClick);
   }, [mlRuntimeFilterOpen]);
+
+  // Available lists, memoized so effects run only when the underlying data changes.
+  const availableMlRuntimes = useMemo(
+    () => Array.from(new Set((data?.ml_clusters?.clusters || []).map(c => c.runtime_version).filter(Boolean))) as string[],
+    [data?.ml_clusters?.clusters],
+  );
+  const availableAgentTypes = useMemo(
+    () => Array.from(new Set((data?.agent_bricks?.agents || []).map(a => a.agent_type || "Agent"))),
+    [data?.agent_bricks?.agents],
+  );
+  const availableModelTypes = useMemo(
+    () => Array.from(new Set((data?.models?.models || []).map(m => m.model_type))).filter(Boolean) as string[],
+    [data?.models?.models],
+  );
+
+  // Sync-add pattern: unseen items get added to the filter, preserving user unselections
+  // of previously-seen items. On first data load this behaves the same as default-all init.
+  useEffect(() => {
+    const seen = mlRuntimeSeen.current;
+    const fresh = availableMlRuntimes.filter(x => !seen.has(x));
+    if (fresh.length === 0) return;
+    setMlRuntimeFilter(prev => Array.from(new Set([...prev, ...fresh])));
+    fresh.forEach(x => seen.add(x));
+  }, [availableMlRuntimes]);
+
+  useEffect(() => {
+    const seen = agentTypeSeen.current;
+    const fresh = availableAgentTypes.filter(x => !seen.has(x));
+    if (fresh.length === 0) return;
+    setAgentTypeFilter(prev => Array.from(new Set([...prev, ...fresh])));
+    fresh.forEach(x => seen.add(x));
+  }, [availableAgentTypes]);
+
+  useEffect(() => {
+    const seen = modelsTypeSeen.current;
+    const fresh = availableModelTypes.filter(x => !seen.has(x));
+    if (fresh.length === 0) return;
+    setModelsTypeFilters(prev => Array.from(new Set([...prev, ...fresh])));
+    fresh.forEach(x => seen.add(x));
+  }, [availableModelTypes]);
+
+  const availableEndpointWorkspaces = useMemo(() => {
+    const ids = new Set<string>();
+    for (const e of data?.endpoints?.endpoints || []) {
+      if (e.workspace_id && e.endpoint_name && e.endpoint_name !== 'UNKNOWN') ids.add(e.workspace_id);
+    }
+    return Array.from(ids);
+  }, [data?.endpoints?.endpoints]);
+
+  useEffect(() => {
+    const seen = endpointsWorkspaceSeen.current;
+    const fresh = availableEndpointWorkspaces.filter(x => !seen.has(x));
+    if (fresh.length === 0) return;
+    setEndpointsWorkspaceFilter(prev => Array.from(new Set([...prev, ...fresh])));
+    fresh.forEach(x => seen.add(x));
+  }, [availableEndpointWorkspaces]);
 
   useEffect(() => {
     if (!endpointsWorkspaceDropdownOpen) return;
@@ -256,24 +316,30 @@ export function AIMLCostCenter({ data, isLoading, startDate, endDate, host, work
     });
   }, [data?.categories, categoryColorMap]);
 
+  const endpointWorkspaceNames = useMemo(() => {
+    const map: Record<string, string> = {};
+    for (const e of data?.endpoints?.endpoints || []) {
+      if (e.workspace_id && e.workspace_name) map[e.workspace_id] = e.workspace_name;
+    }
+    return map;
+  }, [data?.endpoints]);
+
+  const resolveWsName = (wsId: string) =>
+    workspaceNameMap?.[wsId] || endpointWorkspaceNames[wsId] || `Workspace ${wsId}`;
+
   const endpointWorkspaces = useMemo(() => {
     if (!data?.endpoints?.endpoints) return [];
     const ids = new Set<string>();
     for (const e of data.endpoints.endpoints) {
       if (e.workspace_id && e.endpoint_name && e.endpoint_name !== 'UNKNOWN') ids.add(e.workspace_id);
     }
-    return Array.from(ids).sort((a, b) => {
-      const nameA = workspaceNameMap?.[a] || a;
-      const nameB = workspaceNameMap?.[b] || b;
-      return nameA.localeCompare(nameB);
-    });
-  }, [data?.endpoints, workspaceNameMap]);
+    return Array.from(ids).sort((a, b) => resolveWsName(a).localeCompare(resolveWsName(b)));
+  }, [data?.endpoints, workspaceNameMap, endpointWorkspaceNames]);
 
   const endpointsWorkspaceFiltered = useMemo(() => {
     if (!data?.endpoints?.endpoints) return [];
     const rows = data.endpoints.endpoints.filter(e => e.endpoint_name && e.endpoint_name !== 'UNKNOWN');
-    if (!endpointsWorkspaceFilter) return rows;
-    return rows.filter(e => e.workspace_id === endpointsWorkspaceFilter);
+    return rows.filter(e => !!e.workspace_id && endpointsWorkspaceFilter.includes(e.workspace_id));
   }, [data?.endpoints, endpointsWorkspaceFilter]);
 
   const endpointCostTypes = useMemo(() => {
@@ -298,11 +364,14 @@ export function AIMLCostCenter({ data, isLoading, startDate, endDate, host, work
 
   useEffect(() => { setEndpointsPage(1); }, [endpointsData.length]);
 
+  const endpointsWorkspaceFilterKey = useMemo(
+    () => [...endpointsWorkspaceFilter].sort().join(','),
+    [endpointsWorkspaceFilter],
+  );
   useEffect(() => {
     setEndpointsCostTypeFilter(null);
     setEndpointsPage(1);
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [endpointsWorkspaceFilter]);
+  }, [endpointsWorkspaceFilterKey]);
 
   if (isLoading) {
     return (
@@ -570,46 +639,45 @@ export function AIMLCostCenter({ data, isLoading, startDate, endDate, host, work
               </div>
             </div>
             <div className="ml-auto flex items-center gap-2">
-              {endpointWorkspaces.length > 1 && (
+              {endpointWorkspaces.length > 0 && (() => {
+                const isPartialWs = endpointsWorkspaceFilter.length > 0 && endpointsWorkspaceFilter.length < endpointWorkspaces.length;
+                const singleName = endpointsWorkspaceFilter.length === 1 ? resolveWsName(endpointsWorkspaceFilter[0]) : null;
+                return (
                 <div className="relative" ref={endpointsWorkspaceFilterRef}>
                   <button
                     onClick={() => setEndpointsWorkspaceDropdownOpen(o => !o)}
-                    className={`flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-medium transition-colors ${endpointsWorkspaceFilter ? "border-[#FF3621] text-[#FF3621]" : "border-gray-300 text-gray-700 hover:bg-gray-50"}`}
+                    className={`flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-medium transition-colors ${isPartialWs ? "border-[#FF3621] text-[#FF3621]" : "border-gray-300 text-gray-700 hover:bg-gray-50"}`}
                   >
-                    {endpointsWorkspaceFilter
-                      ? ((n) => n.length > 20 ? n.slice(0, 20) + "…" : n)(workspaceNameMap?.[endpointsWorkspaceFilter] ?? `Workspace ${endpointsWorkspaceFilter}`)
+                    {singleName
+                      ? (singleName.length > 20 ? singleName.slice(0, 20) + "…" : singleName)
+                      : isPartialWs
+                      ? `${endpointsWorkspaceFilter.length} workspaces`
                       : "Workspace"}
-                    {endpointsWorkspaceFilter && (
-                      <button onClick={(e) => { e.stopPropagation(); setEndpointsWorkspaceFilter(null); setEndpointsPage(1); }} className="ml-0.5 flex h-3.5 w-3.5 shrink-0 items-center justify-center rounded-full bg-orange-100 text-orange-600 hover:bg-orange-200">
-                        <svg className="h-2 w-2" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M6 18L18 6M6 6l12 12" /></svg>
-                      </button>
-                    )}
                     <svg className={`h-3 w-3 transition-transform ${endpointsWorkspaceDropdownOpen ? "rotate-180" : ""}`} fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" /></svg>
                   </button>
                   {endpointsWorkspaceDropdownOpen && (
                     <div className="absolute right-0 top-full z-[9999] mt-1 max-h-64 w-56 overflow-y-auto rounded-lg border border-gray-200 bg-white shadow-lg">
                       <div className="sticky top-0 flex items-center justify-between border-b border-gray-100 bg-white px-3 py-2">
                         <span className="text-[10px] font-semibold uppercase tracking-wider text-gray-500">Workspace</span>
-                        {endpointsWorkspaceFilter && (
-                          <button onClick={(e) => { e.stopPropagation(); setEndpointsWorkspaceFilter(null); setEndpointsPage(1); setEndpointsWorkspaceDropdownOpen(false); }} className="text-xs text-gray-500 hover:text-gray-800">Clear</button>
-                        )}
+                        <button onClick={(e) => { e.stopPropagation(); setEndpointsWorkspaceFilter([...endpointWorkspaces]); setEndpointsPage(1); }} className="text-xs text-gray-500 hover:text-gray-800">Reset</button>
                       </div>
                       {endpointWorkspaces.map(wsId => (
                         <button
                           key={wsId}
-                          onClick={() => { setEndpointsWorkspaceFilter(wsId); setEndpointsPage(1); setEndpointsWorkspaceDropdownOpen(false); }}
+                          onClick={() => { setEndpointsWorkspaceFilter(prev => prev.includes(wsId) ? prev.filter(x => x !== wsId) : [...prev, wsId]); setEndpointsPage(1); }}
                           className="flex w-full items-center gap-2 px-3 py-2.5 text-left text-xs hover:bg-gray-50"
                         >
-                          <div className={`flex h-4 w-4 shrink-0 items-center justify-center rounded border ${endpointsWorkspaceFilter === wsId ? "border-orange-500 bg-orange-500" : "border-gray-300"}`}>
-                            {endpointsWorkspaceFilter === wsId && <svg className="h-3 w-3 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" /></svg>}
+                          <div className={`flex h-4 w-4 shrink-0 items-center justify-center rounded border ${endpointsWorkspaceFilter.includes(wsId) ? "border-orange-500 bg-orange-500" : "border-gray-300"}`}>
+                            {endpointsWorkspaceFilter.includes(wsId) && <svg className="h-3 w-3 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" /></svg>}
                           </div>
-                          <span className="truncate text-gray-700">{workspaceNameMap?.[wsId] ?? `Workspace ${wsId}`}</span>
+                          <span className="truncate text-gray-700">{resolveWsName(wsId)}</span>
                         </button>
                       ))}
                     </div>
                   )}
                 </div>
-              )}
+                );
+              })()}
               {endpointCostTypes.length > 1 && (
                 <div className="relative" ref={endpointsCostTypeFilterRef}>
                   <button
@@ -651,7 +719,7 @@ export function AIMLCostCenter({ data, isLoading, startDate, endDate, host, work
             </div>
           </div>
           {endpointsData.length > 0 ? (() => {
-            const epUrl = getEndpointUrl(host, endpointsWorkspaceFilter ?? workspaceIds?.[0]);
+            const epUrl = getEndpointUrl(host, endpointsWorkspaceFilter.length === 1 ? endpointsWorkspaceFilter[0] : workspaceIds?.[0]);
             return (
               <>
                 <div className="overflow-x-auto">
@@ -720,9 +788,7 @@ export function AIMLCostCenter({ data, isLoading, startDate, endDate, host, work
             };
             const allModelRows = data.models?.models || [];
             const distinctTypes = Array.from(new Set(allModelRows.map(m => m.model_type))).filter(Boolean);
-            const filteredModels = modelsTypeFilters.length > 0
-              ? allModelRows.filter(m => modelsTypeFilters.includes(m.model_type))
-              : allModelRows;
+            const filteredModels = allModelRows.filter(m => modelsTypeFilters.includes(m.model_type));
             const pageModels = filteredModels.slice((modelsPage - 1) * PAGE_SIZE, modelsPage * PAGE_SIZE);
             return (
               <>
@@ -739,24 +805,21 @@ export function AIMLCostCenter({ data, isLoading, startDate, endDate, host, work
                 </div>
               </div>
             </div>
-            {distinctTypes.length > 1 && (
+            {distinctTypes.length > 1 && (() => {
+              const isPartialTypes = modelsTypeFilters.length > 0 && modelsTypeFilters.length < distinctTypes.length;
+              return (
               <div className="relative" ref={modelsTypeDropdownRef}>
                 <button
                   onClick={() => setModelsTypeDropdownOpen((o) => !o)}
-                  className={`flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-sm font-medium transition-colors ${modelsTypeFilters.length > 0 ? "border-[#FF3621] text-[#FF3621]" : "border-gray-300 text-gray-700 hover:bg-gray-50"}`}
+                  className={`flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-sm font-medium transition-colors ${isPartialTypes ? "border-[#FF3621] text-[#FF3621]" : "border-gray-300 text-gray-700 hover:bg-gray-50"}`}
                 >
                   <span className="max-w-[140px] truncate">
-                    {modelsTypeFilters.length === 0
-                      ? "Types"
-                      : modelsTypeFilters.length === 1
+                    {modelsTypeFilters.length === 1
                       ? (TYPE_LABELS[modelsTypeFilters[0]] || modelsTypeFilters[0])
-                      : `${modelsTypeFilters.length} Types`}
+                      : isPartialTypes
+                      ? `${modelsTypeFilters.length} Types`
+                      : "Types"}
                   </span>
-                  {modelsTypeFilters.length > 0 && (
-                    <button onClick={(e) => { e.stopPropagation(); setModelsTypeFilters([]); setModelsPage(1); }} className="ml-0.5 flex h-3.5 w-3.5 shrink-0 items-center justify-center rounded-full bg-orange-100 text-orange-600 hover:bg-orange-200">
-                      <svg className="h-2 w-2" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M6 18L18 6M6 6l12 12" /></svg>
-                    </button>
-                  )}
                   <svg className={`h-4 w-4 transition-transform ${modelsTypeDropdownOpen ? "rotate-180" : ""}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                     <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
                   </svg>
@@ -783,7 +846,8 @@ export function AIMLCostCenter({ data, isLoading, startDate, endDate, host, work
                   </div>
                 )}
               </div>
-            )}
+              );
+            })()}
           </div>
           {allModelRows.length > 0 ? (
             <>
@@ -842,11 +906,9 @@ export function AIMLCostCenter({ data, isLoading, startDate, endDate, host, work
           const allMlClusters = data.ml_clusters?.clusters || [];
           const isHistoricalMlCluster = (c: typeof allMlClusters[0]) => !c.cluster_name || c.cluster_name === c.cluster_id || c.cluster_name === "Unknown";
           const historicalMlCount = allMlClusters.filter(isHistoricalMlCluster).length;
-          const availableRuntimes = Array.from(new Set(allMlClusters.map(c => c.runtime_version).filter(Boolean))).sort();
+          const availableRuntimes = Array.from(new Set(allMlClusters.map(c => c.runtime_version).filter(Boolean))).sort() as string[];
           const searchedMlClusters = allMlClusters.filter(c => showHistoricalMlClusters || !isHistoricalMlCluster(c));
-          const runtimeFilteredClusters = mlRuntimeFilter
-            ? searchedMlClusters.filter(c => c.runtime_version === mlRuntimeFilter)
-            : searchedMlClusters;
+          const runtimeFilteredClusters = searchedMlClusters.filter(c => mlRuntimeFilter.includes(c.runtime_version));
           const filteredMlClusters = mlClusterSearch
             ? runtimeFilteredClusters.filter(c =>
                 (c.cluster_name || "").toLowerCase().includes(mlClusterSearch.toLowerCase()) ||
@@ -882,32 +944,35 @@ export function AIMLCostCenter({ data, isLoading, startDate, endDate, host, work
                     <div className="relative" ref={mlRuntimeFilterRef}>
                       <button
                         onClick={() => setMlRuntimeFilterOpen(o => !o)}
-                        className={`flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-medium transition-colors ${mlRuntimeFilter ? "border-[#FF3621] text-[#FF3621]" : "border-gray-300 text-gray-700 hover:bg-gray-50"}`}
+                        className={`flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-medium transition-colors ${mlRuntimeFilter.length > 0 && mlRuntimeFilter.length < availableRuntimes.length ? "border-[#FF3621] text-[#FF3621]" : "border-gray-300 text-gray-700 hover:bg-gray-50"}`}
                       >
-                        {mlRuntimeFilter ? (mlRuntimeFilter.length > 18 ? mlRuntimeFilter.substring(0, 18) + "…" : mlRuntimeFilter) : "Runtime"}
-                        {mlRuntimeFilter && (
-                          <button onClick={(e) => { e.stopPropagation(); setMlRuntimeFilter(null); setMlClustersPage(1); }} className="ml-0.5 flex h-3.5 w-3.5 shrink-0 items-center justify-center rounded-full bg-orange-100 text-orange-600 hover:bg-orange-200">
-                            <svg className="h-2 w-2" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M6 18L18 6M6 6l12 12" /></svg>
-                          </button>
-                        )}
+                        {mlRuntimeFilter.length === 0
+                          ? "Runtime"
+                          : mlRuntimeFilter.length === 1
+                          ? (mlRuntimeFilter[0].length > 18 ? mlRuntimeFilter[0].substring(0, 18) + "…" : mlRuntimeFilter[0])
+                          : mlRuntimeFilter.length === availableRuntimes.length
+                          ? "Runtime"
+                          : `${mlRuntimeFilter.length} runtimes`}
                         <svg className={`h-3 w-3 transition-transform ${mlRuntimeFilterOpen ? "rotate-180" : ""}`} fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" /></svg>
                       </button>
                       {mlRuntimeFilterOpen && (
                         <div className="absolute right-0 top-full z-[9999] mt-1 max-h-64 w-56 overflow-y-auto rounded-lg border border-gray-200 bg-white shadow-lg">
                           <div className="sticky top-0 flex items-center justify-between border-b border-gray-100 bg-white px-3 py-2">
                             <span className="text-[10px] font-semibold uppercase tracking-wider text-gray-500">Runtime</span>
-                            {mlRuntimeFilter && (
-                              <button onClick={(e) => { e.stopPropagation(); setMlRuntimeFilter(null); setMlClustersPage(1); setMlRuntimeFilterOpen(false); }} className="text-xs text-gray-500 hover:text-gray-800">Clear</button>
-                            )}
+                            <div className="flex items-center gap-2 text-xs">
+                              <button onClick={(e) => { e.stopPropagation(); setMlRuntimeFilter([...availableRuntimes]); setMlClustersPage(1); }} className="text-gray-500 hover:text-gray-800">All</button>
+                              <span className="text-gray-300">·</span>
+                              <button onClick={(e) => { e.stopPropagation(); setMlRuntimeFilter([]); setMlClustersPage(1); }} className="text-gray-500 hover:text-gray-800">Clear</button>
+                            </div>
                           </div>
                           {availableRuntimes.map(r => (
                             <button
                               key={r}
-                              onClick={() => { setMlRuntimeFilter(r); setMlClustersPage(1); setMlRuntimeFilterOpen(false); }}
+                              onClick={() => { setMlRuntimeFilter(prev => prev.includes(r) ? prev.filter(x => x !== r) : [...prev, r]); setMlClustersPage(1); }}
                               className="flex w-full items-center gap-2 px-3 py-2.5 text-left text-xs hover:bg-gray-50"
                             >
-                              <div className={`flex h-4 w-4 shrink-0 items-center justify-center rounded border ${mlRuntimeFilter === r ? "border-orange-500 bg-orange-500" : "border-gray-300"}`}>
-                                {mlRuntimeFilter === r && <svg className="h-3 w-3 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" /></svg>}
+                              <div className={`flex h-4 w-4 shrink-0 items-center justify-center rounded border ${mlRuntimeFilter.includes(r) ? "border-orange-500 bg-orange-500" : "border-gray-300"}`}>
+                                {mlRuntimeFilter.includes(r) && <svg className="h-3 w-3 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" /></svg>}
                               </div>
                               <span className="truncate text-gray-700">{r}</span>
                             </button>
@@ -1014,7 +1079,7 @@ export function AIMLCostCenter({ data, isLoading, startDate, endDate, host, work
           const agentTypes = Array.from(new Set(allAgents.map(a => (a as any).agent_type || "Agent")));
           const filteredAgents = allAgents
             .filter(a => showHistoricalAgents || !isHistoricalAgent(a))
-            .filter(a => agentTypeFilter.length === 0 || agentTypeFilter.includes((a as any).agent_type || "Agent"))
+            .filter(a => agentTypeFilter.includes((a as any).agent_type || "Agent"))
             .filter(a => !agentSearch || (a.agent_name || "").toLowerCase().includes(agentSearch.toLowerCase()) || (a.endpoint_id || "").toLowerCase().includes(agentSearch.toLowerCase()));
           const agentTotalPages = Math.ceil(filteredAgents.length / PAGE_SIZE);
           const agentStart = (agentsPage - 1) * PAGE_SIZE;
@@ -1043,18 +1108,20 @@ export function AIMLCostCenter({ data, isLoading, startDate, endDate, host, work
                       </span>
                     </label>
                   )}
-                  {agentTypes.length > 1 && (
+                  {agentTypes.length > 1 && (() => {
+                    const isPartialAgentTypes = agentTypeFilter.length > 0 && agentTypeFilter.length < agentTypes.length;
+                    return (
                     <div className="relative" ref={agentTypeDropdownRef}>
                       <button
+                        type="button"
                         onClick={() => setAgentTypeDropdownOpen((o) => !o)}
-                        className={`flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-sm font-medium transition-colors ${agentTypeFilter.length > 0 ? "border-[#FF3621] text-[#FF3621]" : "border-gray-200 bg-white text-gray-700 hover:bg-gray-50"}`}
+                        className={`flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-sm font-medium transition-colors ${isPartialAgentTypes ? "border-[#FF3621] text-[#FF3621]" : "border-gray-200 bg-white text-gray-700 hover:bg-gray-50"}`}
                       >
-                        {agentTypeFilter.length === 0 ? "Types" : agentTypeFilter.length === 1 ? agentTypeFilter[0] : `${agentTypeFilter.length} Types`}
-                        {agentTypeFilter.length > 0 && (
-                          <button onClick={(e) => { e.stopPropagation(); setAgentTypeFilter([]); setAgentsPage(1); }} className="ml-0.5 flex h-3.5 w-3.5 shrink-0 items-center justify-center rounded-full bg-orange-100 text-orange-600 hover:bg-orange-200">
-                            <svg className="h-2 w-2" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M6 18L18 6M6 6l12 12" /></svg>
-                          </button>
-                        )}
+                        {agentTypeFilter.length === 1
+                          ? agentTypeFilter[0]
+                          : isPartialAgentTypes
+                          ? `${agentTypeFilter.length} Types`
+                          : "Types"}
                         <svg className={`h-4 w-4 transition-transform ${agentTypeDropdownOpen ? "rotate-180" : ""}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                           <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
                         </svg>
@@ -1064,13 +1131,13 @@ export function AIMLCostCenter({ data, isLoading, startDate, endDate, host, work
                           <div className="sticky top-0 flex items-center justify-between border-b border-gray-100 bg-white px-3 py-2">
                             <span className="text-[10px] font-semibold uppercase tracking-wider text-gray-500">Types</span>
                             <div className="flex items-center gap-2 text-xs">
-                              <button onClick={(e) => { e.stopPropagation(); setAgentTypeFilter([...agentTypes]); setAgentsPage(1); }} className="text-gray-500 hover:text-gray-800">All</button>
+                              <button type="button" onClick={(e) => { e.stopPropagation(); setAgentTypeFilter([...agentTypes]); setAgentsPage(1); }} className="text-gray-500 hover:text-gray-800">All</button>
                               <span className="text-gray-300">·</span>
-                              <button onClick={(e) => { e.stopPropagation(); setAgentTypeFilter([]); setAgentsPage(1); }} className="text-gray-500 hover:text-gray-800">Clear</button>
+                              <button type="button" onClick={(e) => { e.stopPropagation(); setAgentTypeFilter([]); setAgentsPage(1); }} className="text-gray-500 hover:text-gray-800">Clear</button>
                             </div>
                           </div>
                           {agentTypes.map(t => (
-                            <button key={t} onClick={() => { setAgentTypeFilter((prev) => prev.includes(t) ? prev.filter((x) => x !== t) : [...prev, t]); setAgentsPage(1); }}
+                            <button type="button" key={t} onClick={() => { setAgentTypeFilter((prev) => prev.includes(t) ? prev.filter((x) => x !== t) : [...prev, t]); setAgentsPage(1); }}
                               className="flex w-full items-center gap-2 px-3 py-2.5 text-left text-xs hover:bg-gray-50">
                               <div className={`flex h-4 w-4 shrink-0 items-center justify-center rounded border ${agentTypeFilter.includes(t) ? "border-orange-500 bg-orange-500" : "border-gray-300"}`}>
                                 {agentTypeFilter.includes(t) && <svg className="h-3 w-3 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" /></svg>}
@@ -1081,7 +1148,8 @@ export function AIMLCostCenter({ data, isLoading, startDate, endDate, host, work
                         </div>
                       )}
                     </div>
-                  )}
+                    );
+                  })()}
                   <div className="relative w-44">
                     <svg className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
                       <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
