@@ -634,16 +634,18 @@ def delta_cache_invalidate(pattern: str | None = None) -> None:
 # Singleton WorkspaceClient instance
 _workspace_client: WorkspaceClient | None = None
 _workspace_client_lock = threading.Lock()
-_workspace_client_error: Exception | None = None
 
 
 def get_workspace_client() -> WorkspaceClient:
     """Get or create a singleton WorkspaceClient instance.
 
-    Thread-safe via double-checked locking. Caches init failures so concurrent
-    threads don't pile up retrying a broken SDK init on restart.
+    Double-checked locking ensures only one thread runs WorkspaceClient() init
+    (prevents concurrent auth fetches on restart). Failures are NOT cached —
+    the next caller acquires the lock and retries from scratch, which is correct
+    for transient errors (a permanent error cache bricked all SDK usage on any
+    single transient init failure).
     """
-    global _workspace_client, _workspace_client_error
+    global _workspace_client
 
     if _workspace_client is not None:
         return _workspace_client
@@ -651,20 +653,13 @@ def get_workspace_client() -> WorkspaceClient:
     with _workspace_client_lock:
         if _workspace_client is not None:
             return _workspace_client
-        if _workspace_client_error is not None:
-            raise _workspace_client_error
-        try:
-            token = os.getenv("DATABRICKS_TOKEN")
-            host = os.getenv("DATABRICKS_HOST")
-            if token and host:
-                _workspace_client = WorkspaceClient(host=host, token=token)
-            else:
-                _workspace_client = WorkspaceClient()
-            logger.info("Created WorkspaceClient singleton")
-        except Exception as e:
-            _workspace_client_error = e
-            logger.error("WorkspaceClient initialization failed: %s", e)
-            raise
+        token = os.getenv("DATABRICKS_TOKEN")
+        host = os.getenv("DATABRICKS_HOST")
+        if token and host:
+            _workspace_client = WorkspaceClient(host=host, token=token)
+        else:
+            _workspace_client = WorkspaceClient()
+        logger.info("Created WorkspaceClient singleton")
 
     return _workspace_client
 
