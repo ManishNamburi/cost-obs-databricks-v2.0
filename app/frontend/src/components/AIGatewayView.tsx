@@ -438,7 +438,7 @@ export function AIGatewayView({ data, isLoading }: AIGatewayViewProps) {
                   placeholder="Search users..."
                   value={gatewaySearch}
                   onChange={(e) => setGatewaySearch(e.target.value)}
-                  className="rounded-full border border-gray-200 bg-white py-1.5 pl-9 pr-4 text-sm placeholder:text-gray-400 focus:border-[#FF3621] focus:outline-none focus:ring-1 focus:ring-[#FF3621]"
+                  className="w-44 rounded-full border border-gray-200 bg-white py-1.5 pl-9 pr-4 text-xs placeholder:text-gray-400 focus:border-[#FF3621] focus:outline-none focus:ring-1 focus:ring-[#FF3621]"
                 />
               </div>
             )}

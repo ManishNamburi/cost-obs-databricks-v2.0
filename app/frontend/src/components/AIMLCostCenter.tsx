@@ -122,6 +122,7 @@ export function AIMLCostCenter({ data, isLoading, startDate, endDate, host, work
   const [endpointsWorkspaceFilter, setEndpointsWorkspaceFilter] = useState<string[]>([]);
   const endpointsWorkspaceSeen = useRef<Set<string>>(new Set());
   const [endpointsWorkspaceDropdownOpen, setEndpointsWorkspaceDropdownOpen] = useState(false);
+  const [endpointsWorkspaceSearch, setEndpointsWorkspaceSearch] = useState("");
   const [endpointsCostTypeDropdownOpen, setEndpointsCostTypeDropdownOpen] = useState(false);
   const [mlRuntimeFilterOpen, setMlRuntimeFilterOpen] = useState(false);
   const mlRuntimeFilterRef = useRef<HTMLDivElement>(null);
@@ -213,7 +214,10 @@ export function AIMLCostCenter({ data, isLoading, startDate, endDate, host, work
   }, [availableEndpointWorkspaces]);
 
   useEffect(() => {
-    if (!endpointsWorkspaceDropdownOpen) return;
+    if (!endpointsWorkspaceDropdownOpen) {
+      setEndpointsWorkspaceSearch("");
+      return;
+    }
     const handleClick = (e: MouseEvent) => {
       if (endpointsWorkspaceFilterRef.current && !endpointsWorkspaceFilterRef.current.contains(e.target as Node)) {
         setEndpointsWorkspaceDropdownOpen(false);
@@ -660,8 +664,13 @@ export function AIMLCostCenter({ data, isLoading, startDate, endDate, host, work
                       : "Workspace"}
                     <svg className={`h-3 w-3 transition-transform ${endpointsWorkspaceDropdownOpen ? "rotate-180" : ""}`} fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" /></svg>
                   </button>
-                  {endpointsWorkspaceDropdownOpen && (
-                    <div className="absolute right-0 top-full z-[9999] mt-1 w-56 rounded-lg border border-gray-200 bg-white shadow-lg">
+                  {endpointsWorkspaceDropdownOpen && (() => {
+                    const q = endpointsWorkspaceSearch.trim().toLowerCase();
+                    const filteredWs = q
+                      ? endpointWorkspaces.filter(w => resolveWsName(w).toLowerCase().includes(q) || w.toLowerCase().includes(q))
+                      : endpointWorkspaces;
+                    return (
+                    <div className="absolute right-0 top-full z-[9999] mt-1 w-60 rounded-lg border border-gray-200 bg-white shadow-lg">
                       <div className="sticky top-0 flex items-center justify-between border-b border-gray-100 bg-white px-3 py-2">
                         <span className="text-[10px] font-semibold uppercase tracking-wider text-gray-500">Workspace</span>
                         <div className="flex items-center gap-2 text-xs">
@@ -670,8 +679,21 @@ export function AIMLCostCenter({ data, isLoading, startDate, endDate, host, work
                           <button onClick={(e) => { e.stopPropagation(); setEndpointsWorkspaceFilter([]); setEndpointsPage(1); }} className="text-gray-500 hover:text-gray-800">Clear</button>
                         </div>
                       </div>
+                      <div className="border-b border-gray-100 p-2">
+                        <input
+                          type="text"
+                          value={endpointsWorkspaceSearch}
+                          onChange={(e) => setEndpointsWorkspaceSearch(e.target.value)}
+                          placeholder="Search workspaces..."
+                          className="w-full rounded border border-gray-200 px-2 py-1 text-xs focus:border-[#FF3621] focus:outline-none focus:ring-1 focus:ring-[#FF3621]"
+                          autoFocus
+                        />
+                      </div>
+                      {filteredWs.length === 0 ? (
+                        <div className="px-3 py-2 text-xs text-gray-500">No matching workspaces</div>
+                      ) : (
                       <VirtualizedList
-                        items={endpointWorkspaces}
+                        items={filteredWs}
                         itemHeight={36}
                         maxHeight={256}
                         getKey={(wsId) => wsId}
@@ -687,8 +709,10 @@ export function AIMLCostCenter({ data, isLoading, startDate, endDate, host, work
                           </button>
                         )}
                       />
+                      )}
                     </div>
-                  )}
+                    );
+                  })()}
                 </div>
                 );
               })()}

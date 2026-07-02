@@ -290,6 +290,38 @@ warehouse_uptime AS (
   WHERE window_start < window_end
   GROUP BY warehouse_id
 ),
+billing_uptime AS (
+  -- Fallback: derive uptime from hourly billing buckets for classic warehouses
+  -- that emit no lifecycle events in the window (or lookback). Each usage row is
+  -- an hour-granular bucket; overlap with the analysis window is clipped and summed.
+  SELECT
+    usage_metadata.warehouse_id AS warehouse_id,
+    LEAST(
+      SUM(
+        (UNIX_TIMESTAMP(LEAST(usage_end_time, CAST(:end_ts AS TIMESTAMP)))
+         - UNIX_TIMESTAMP(GREATEST(usage_start_time, CAST(:start_ts AS TIMESTAMP)))
+        ) / 60.0
+      ),
+      (UNIX_TIMESTAMP(CAST(:end_ts AS TIMESTAMP)) - UNIX_TIMESTAMP(CAST(:start_ts AS TIMESTAMP))) / 60.0
+    ) AS total_running_minutes
+  FROM system.billing.usage
+  WHERE usage_date BETWEEN :start_date AND :end_date
+    AND usage_metadata.warehouse_id IS NOT NULL
+    AND usage_quantity > 0
+    AND sku_name NOT LIKE '%SERVERLESS%'
+    AND usage_end_time > CAST(:start_ts AS TIMESTAMP)
+    AND usage_start_time < CAST(:end_ts AS TIMESTAMP)
+    {ws_clause}
+  GROUP BY usage_metadata.warehouse_id
+),
+combined_uptime AS (
+  SELECT
+    COALESCE(e.warehouse_id, b.warehouse_id) AS warehouse_id,
+    COALESCE(e.total_running_minutes, b.total_running_minutes) AS total_running_minutes,
+    CASE WHEN e.warehouse_id IS NOT NULL THEN 'events' ELSE 'billing' END AS uptime_source
+  FROM warehouse_uptime e
+  FULL OUTER JOIN billing_uptime b ON e.warehouse_id = b.warehouse_id
+),
 query_time AS (
   SELECT
     qh.compute.warehouse_id AS warehouse_id,
@@ -328,6 +360,7 @@ SELECT
   COALESCE(i.warehouse_size, 'Unknown') AS warehouse_size,
   COALESCE(i.warehouse_type, 'CLASSIC') AS warehouse_type,
   i.workspace_id,
+  u.uptime_source,
   ROUND(u.total_running_minutes) AS total_running_minutes,
   ROUND(COALESCE(q.total_query_minutes, 0)) AS total_query_minutes,
   ROUND(GREATEST(u.total_running_minutes - COALESCE(q.total_query_minutes, 0), 0)) AS idle_minutes,
@@ -345,11 +378,12 @@ SELECT
          / u.total_running_minutes
     ELSE 0.0
   END AS estimated_idle_spend
-FROM warehouse_uptime u
+FROM combined_uptime u
 LEFT JOIN query_time q ON u.warehouse_id = q.warehouse_id
 JOIN wh_info i ON u.warehouse_id = i.warehouse_id
 LEFT JOIN wh_cost c ON u.warehouse_id = c.warehouse_id
 WHERE u.total_running_minutes >= 10
+  AND COALESCE(i.warehouse_type, 'CLASSIC') != 'SERVERLESS'
 ORDER BY estimated_idle_spend DESC
 LIMIT 25
 """
@@ -380,7 +414,12 @@ async def get_warehouse_idle_time(
     end_date: str | None = None,
     workspace_ids: str | None = None,
 ) -> dict[str, Any]:
-    """Idle time per warehouse: uptime from warehouse_events (with 7-day lookback) minus active query time."""
+    """Idle time per warehouse: uptime from warehouse_events (with 7-day lookback) minus active query time.
+
+    Falls back to hourly billing buckets for classic warehouses that emit no lifecycle events
+    in the window — each row carries `uptime_source` = 'events' or 'billing' so the UI can flag
+    the approximation.
+    """
     global _idle_time_cache, _idle_time_cache_ts
     from backend.db import get_default_start_date, get_default_end_date
     from backend import workspace_filter as wf
@@ -423,6 +462,7 @@ async def get_warehouse_idle_time(
             "warehouse_size": row.get("warehouse_size"),
             "warehouse_type": row.get("warehouse_type") or "CLASSIC",
             "workspace_id": str(row.get("workspace_id") or ""),
+            "uptime_source": row.get("uptime_source") or "events",
             "total_running_minutes": int(row.get("total_running_minutes") or 0),
             "total_query_minutes": int(row.get("total_query_minutes") or 0),
             "idle_minutes": int(row.get("idle_minutes") or 0),
