@@ -665,7 +665,11 @@ export function TaggingHub({ data, isLoading, host, startDate, endDate, workspac
                     <div className="max-h-60 overflow-y-auto">
                       <div className="sticky top-0 flex items-center justify-between border-b border-gray-100 bg-white px-3 py-2">
                         <span className="text-[10px] font-semibold uppercase tracking-wider text-gray-500">Tag Values</span>
-                        <button onClick={(e) => { e.stopPropagation(); setSelectedTagValueFilters([...availableTagValues]); }} className="text-xs text-gray-500 hover:text-gray-800">Reset</button>
+                        <div className="flex items-center gap-2 text-xs">
+                          <button onClick={(e) => { e.stopPropagation(); setSelectedTagValueFilters([...availableTagValues]); }} className="text-gray-500 hover:text-gray-800">All</button>
+                          <span className="text-gray-300">·</span>
+                          <button onClick={(e) => { e.stopPropagation(); setSelectedTagValueFilters([]); }} className="text-gray-500 hover:text-gray-800">Clear</button>
+                        </div>
                       </div>
                       {availableTagValues
                         .filter(kv => !tagValueFilterSearch || kv.toLowerCase().includes(tagValueFilterSearch.toLowerCase()))
@@ -712,7 +716,11 @@ export function TaggingHub({ data, isLoading, host, startDate, endDate, workspac
                   </span>
                 );
               })}
-              <button onClick={() => setSelectedTagValueFilters([...availableTagValues])} className="text-xs text-gray-500 hover:text-gray-700">Reset</button>
+              <span className="inline-flex items-center gap-2 text-xs">
+                <button onClick={() => setSelectedTagValueFilters([...availableTagValues])} className="text-gray-500 hover:text-gray-700">All</button>
+                <span className="text-gray-300">·</span>
+                <button onClick={() => setSelectedTagValueFilters([])} className="text-gray-500 hover:text-gray-700">Clear</button>
+              </span>
             </div>
           )}
           {filteredTags.length > 0 ? (() => {
@@ -809,7 +817,11 @@ export function TaggingHub({ data, isLoading, host, startDate, endDate, workspac
                     <div className="max-h-60 overflow-y-auto">
                       <div className="sticky top-0 flex items-center justify-between border-b border-gray-100 bg-white px-3 py-2">
                         <span className="text-[10px] font-semibold uppercase tracking-wider text-gray-500">Tag Keys</span>
-                        <button onClick={(e) => { e.stopPropagation(); setSelectedTagFilters([...availableTagKeys]); }} className="text-xs text-gray-500 hover:text-gray-800">Reset</button>
+                        <div className="flex items-center gap-2 text-xs">
+                          <button onClick={(e) => { e.stopPropagation(); setSelectedTagFilters([...availableTagKeys]); }} className="text-gray-500 hover:text-gray-800">All</button>
+                          <span className="text-gray-300">·</span>
+                          <button onClick={(e) => { e.stopPropagation(); setSelectedTagFilters([]); }} className="text-gray-500 hover:text-gray-800">Clear</button>
+                        </div>
                       </div>
                       {availableTagKeys
                         .filter(k => !tagFilterSearch || k.toLowerCase().includes(tagFilterSearch.toLowerCase()))
@@ -847,7 +859,11 @@ export function TaggingHub({ data, isLoading, host, startDate, endDate, workspac
                   </button>
                 </span>
               ))}
-              <button onClick={() => setSelectedTagFilters([...availableTagKeys])} className="text-xs text-gray-500 hover:text-gray-700">Reset</button>
+              <span className="inline-flex items-center gap-2 text-xs">
+                <button onClick={() => setSelectedTagFilters([...availableTagKeys])} className="text-gray-500 hover:text-gray-700">All</button>
+                <span className="text-gray-300">·</span>
+                <button onClick={() => setSelectedTagFilters([])} className="text-gray-500 hover:text-gray-700">Clear</button>
+              </span>
             </div>
           )}
           {filteredTagBreakdownData.length > 0 ? (() => {
