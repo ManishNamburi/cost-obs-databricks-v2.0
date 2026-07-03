@@ -236,8 +236,8 @@ function TimeseriesChart({ rows }: { rows: AIGatewayTimeseriesRow[] }) {
           }
         />
         <Legend wrapperStyle={{ fontSize: 12 }} />
-        <Area yAxisId="req" type="monotone" dataKey="requests" name="Requests" stroke="#FF3621" fill="rgba(255,54,33,0.12)" strokeWidth={2} dot={false} />
-        <Area yAxisId="tok" type="monotone" dataKey="tokens_k" name="Tokens" stroke="#06B6D4" fill="rgba(6,182,212,0.08)" strokeWidth={2} dot={false} />
+        <Area isAnimationActive={false} yAxisId="req" type="monotone" dataKey="requests" name="Requests" stroke="#FF3621" fill="rgba(255,54,33,0.12)" strokeWidth={2} dot={false} />
+        <Area isAnimationActive={false} yAxisId="tok" type="monotone" dataKey="tokens_k" name="Tokens" stroke="#06B6D4" fill="rgba(6,182,212,0.08)" strokeWidth={2} dot={false} />
       </AreaChart>
     </ResponsiveContainer>
   );
@@ -396,7 +396,7 @@ export function AIGatewayView({ data, isLoading }: AIGatewayViewProps) {
                     contentStyle={{ fontSize: 12, borderRadius: 8 }}
                     formatter={(v: number | undefined) => [fmtRequests(v ?? 0), "Requests"]}
                   />
-                  <Bar dataKey="request_count" name="Requests" fill="#FF3621" radius={[0, 3, 3, 0]} />
+                  <Bar isAnimationActive={false} dataKey="request_count" name="Requests" fill="#FF3621" radius={[0, 3, 3, 0]} />
                 </BarChart>
               </ResponsiveContainer>
             </div>
@@ -430,7 +430,7 @@ export function AIGatewayView({ data, isLoading }: AIGatewayViewProps) {
             <h3 className="text-sm font-semibold text-gray-700">Top Users by Request Volume</h3>
             {users.length > 0 && (
               <div className="relative">
-                <svg className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
+                <svg className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-500" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
                   <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
                 </svg>
                 <input
