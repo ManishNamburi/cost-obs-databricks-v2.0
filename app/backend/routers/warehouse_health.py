@@ -330,24 +330,85 @@ combined_uptime AS (
   FROM warehouse_uptime e
   FULL OUTER JOIN billing_agg b ON e.warehouse_id = b.warehouse_id
 ),
-query_time AS (
-  SELECT
-    qh.compute.warehouse_id AS warehouse_id,
-    SUM(GREATEST(
-      (UNIX_TIMESTAMP(COALESCE(qh.end_time, CURRENT_TIMESTAMP())) - UNIX_TIMESTAMP(qh.start_time)) / 60.0,
-      0
-    )) AS total_query_minutes
-  FROM system.query.history qh
-  WHERE qh.start_time >= CAST(:start_ts AS TIMESTAMP)
-    AND qh.start_time < CAST(:end_ts AS TIMESTAMP)
-    AND qh.compute.warehouse_id IS NOT NULL
-  GROUP BY qh.compute.warehouse_id
-),
 wh_info AS (
-  SELECT warehouse_id, warehouse_name, warehouse_size, workspace_id, warehouse_type
+  -- max_clusters + auto_stop_minutes drive the two-path idle model. Column
+  -- names match system.compute.warehouses schema.
+  SELECT
+    warehouse_id, warehouse_name, warehouse_size, workspace_id, warehouse_type,
+    COALESCE(auto_stop_minutes, 10) AS auto_stop_mins,
+    COALESCE(max_clusters, 1) AS max_num_clusters
   FROM system.compute.warehouses
   WHERE 1=1 {ws_clause_wh}
   QUALIFY ROW_NUMBER() OVER (PARTITION BY warehouse_id ORDER BY change_time DESC) = 1
+),
+-- Union-of-query-windows for busy time. Sum-of-durations overcounts under
+-- concurrency; interval-merge collapses overlapping queries to a single window
+-- so busy time never exceeds wall-clock even when N queries ran in parallel.
+qw_raw AS (
+  SELECT
+    qh.compute.warehouse_id AS warehouse_id,
+    GREATEST(qh.start_time, CAST(:start_ts AS TIMESTAMP)) AS w_start,
+    LEAST(COALESCE(qh.end_time, CAST(:end_ts AS TIMESTAMP)), CAST(:end_ts AS TIMESTAMP)) AS w_end
+  FROM system.query.history qh
+  WHERE qh.start_time < CAST(:end_ts AS TIMESTAMP)
+    AND COALESCE(qh.end_time, CAST(:end_ts AS TIMESTAMP)) > CAST(:start_ts AS TIMESTAMP)
+    AND qh.compute.warehouse_id IS NOT NULL
+),
+qw_flagged AS (
+  SELECT warehouse_id, w_start, w_end,
+    MAX(w_end) OVER (
+      PARTITION BY warehouse_id ORDER BY w_start
+      ROWS BETWEEN UNBOUNDED PRECEDING AND 1 PRECEDING
+    ) AS prev_max_end
+  FROM qw_raw
+),
+qw_grouped AS (
+  SELECT warehouse_id, w_start, w_end,
+    SUM(CASE WHEN prev_max_end IS NULL OR w_start > prev_max_end THEN 1 ELSE 0 END)
+      OVER (PARTITION BY warehouse_id ORDER BY w_start
+            ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW) AS grp
+  FROM qw_flagged
+),
+qw_merged AS (
+  SELECT warehouse_id, grp,
+    MIN(w_start) AS grp_start,
+    MAX(w_end) AS grp_end
+  FROM qw_grouped
+  GROUP BY warehouse_id, grp
+),
+busy_union AS (
+  SELECT warehouse_id,
+    SUM(GREATEST((UNIX_TIMESTAMP(grp_end) - UNIX_TIMESTAMP(grp_start)) / 60.0, 0)) AS busy_union_minutes
+  FROM qw_merged
+  GROUP BY warehouse_id
+),
+-- Warm-hold approximation: gaps between merged busy windows, each capped at
+-- auto_stop_mins. Any gap longer than auto_stop_mins would have triggered a
+-- shutdown, so only the first auto_stop_mins of the gap is billable warm-hold.
+qw_with_lag AS (
+  SELECT
+    qm.warehouse_id, qm.grp_start, qm.grp_end,
+    LAG(qm.grp_end) OVER (PARTITION BY qm.warehouse_id ORDER BY qm.grp_start) AS prev_end,
+    wh.auto_stop_mins
+  FROM qw_merged qm
+  JOIN wh_info wh ON qm.warehouse_id = wh.warehouse_id
+),
+warm_hold AS (
+  SELECT warehouse_id,
+    SUM(GREATEST(
+      LEAST(
+        (UNIX_TIMESTAMP(grp_start) - UNIX_TIMESTAMP(prev_end)) / 60.0,
+        auto_stop_mins * 1.0
+      ),
+      0
+    )) AS warm_hold_minutes
+  FROM qw_with_lag
+  WHERE prev_end IS NOT NULL
+  GROUP BY warehouse_id
+),
+lookback_minutes AS (
+  SELECT (UNIX_TIMESTAMP(CAST(:end_ts AS TIMESTAMP))
+          - UNIX_TIMESTAMP(CAST(:start_ts AS TIMESTAMP))) / 60.0 AS lookback_min
 )
 SELECT
   u.warehouse_id,
@@ -357,28 +418,56 @@ SELECT
   i.workspace_id,
   u.uptime_source,
   ROUND(u.total_running_minutes) AS total_running_minutes,
-  ROUND(COALESCE(q.total_query_minutes, 0)) AS total_query_minutes,
-  ROUND(GREATEST(u.total_running_minutes - COALESCE(q.total_query_minutes, 0), 0)) AS idle_minutes,
+  ROUND(COALESCE(bu.busy_union_minutes, 0)) AS busy_union_minutes,
+  ROUND(GREATEST(u.total_running_minutes - COALESCE(bu.busy_union_minutes, 0), 0)) AS idle_minutes,
   CASE
     WHEN u.total_running_minutes > 0
-    THEN ROUND(100.0 * GREATEST(u.total_running_minutes - COALESCE(q.total_query_minutes, 0), 0)
+    THEN ROUND(100.0 * GREATEST(u.total_running_minutes - COALESCE(bu.busy_union_minutes, 0), 0)
          / u.total_running_minutes, 1)
     ELSE 0.0
   END AS idle_pct,
-  COALESCE(c.total_spend, 0) AS total_spend,
+  i.auto_stop_mins,
+  i.max_num_clusters,
+  ROUND(COALESCE(wh.warm_hold_minutes, 0)) AS warm_hold_minutes,
   CASE
-    WHEN u.total_running_minutes > 0
-    THEN COALESCE(c.total_spend, 0)
-         * GREATEST(u.total_running_minutes - COALESCE(q.total_query_minutes, 0), 0)
-         / u.total_running_minutes
+    WHEN (COALESCE(bu.busy_union_minutes, 0) + COALESCE(wh.warm_hold_minutes, 0)) > 0
+    THEN ROUND(100.0 * COALESCE(wh.warm_hold_minutes, 0)
+         / (COALESCE(bu.busy_union_minutes, 0) + COALESCE(wh.warm_hold_minutes, 0)), 1)
     ELSE 0.0
-  END AS estimated_idle_spend
+  END AS keep_alive_score,
+  COALESCE(c.total_spend, 0) AS total_spend,
+  -- Only allocate spend to idle wall-clock for CLASSIC single-cluster
+  -- warehouses. Serverless bills per-query with warm-hold at a reduced rate,
+  -- not full-rate wall-clock. Multi-cluster warehouses have concurrent
+  -- cluster billing that wall-clock cluster_count > 0 can't reconstruct.
+  -- We also suppress attribution when uptime came from the billing fallback
+  -- (missing lifecycle events) since the running_minutes denominator is
+  -- itself uncertain there.
+  CASE
+    WHEN COALESCE(i.warehouse_type, 'CLASSIC') != 'SERVERLESS'
+      AND i.max_num_clusters <= 1
+      AND u.uptime_source = 'events'
+      AND u.total_running_minutes > 0
+    THEN COALESCE(c.total_spend, 0)
+         * GREATEST(u.total_running_minutes - COALESCE(bu.busy_union_minutes, 0), 0)
+         / u.total_running_minutes
+    ELSE NULL
+  END AS estimated_idle_spend,
+  -- Low-confidence: serverless running > 95% of the lookback window is almost
+  -- certainly a keep-alive artifact (something pings just under auto_stop_mins),
+  -- not literal continuous compute. Flag it so the UI can badge the row.
+  (i.warehouse_type = 'SERVERLESS'
+    AND u.total_running_minutes >= 0.95 * (SELECT lookback_min FROM lookback_minutes)) AS low_confidence
 FROM combined_uptime u
-LEFT JOIN query_time q ON u.warehouse_id = q.warehouse_id
+LEFT JOIN busy_union bu ON u.warehouse_id = bu.warehouse_id
+LEFT JOIN warm_hold wh ON u.warehouse_id = wh.warehouse_id
 JOIN wh_info i ON u.warehouse_id = i.warehouse_id
 LEFT JOIN billing_agg c ON u.warehouse_id = c.warehouse_id
 WHERE u.total_running_minutes >= 10
-ORDER BY estimated_idle_spend DESC
+ORDER BY
+  COALESCE(estimated_idle_spend, -1) DESC,
+  warm_hold_minutes DESC,
+  total_spend DESC
 LIMIT 25
 """
 
@@ -450,6 +539,7 @@ async def get_warehouse_idle_time(
 
     warehouses = []
     for row in rows:
+        _est_idle = row.get("estimated_idle_spend")
         warehouses.append({
             "warehouse_id": row.get("warehouse_id"),
             "warehouse_name": row.get("warehouse_name"),
@@ -458,11 +548,20 @@ async def get_warehouse_idle_time(
             "workspace_id": str(row.get("workspace_id") or ""),
             "uptime_source": row.get("uptime_source") or "events",
             "total_running_minutes": int(row.get("total_running_minutes") or 0),
-            "total_query_minutes": int(row.get("total_query_minutes") or 0),
+            # Renamed from total_query_minutes — busy time is now union-of-query-windows
+            # so it's bounded by wall-clock even under high concurrency.
+            "busy_union_minutes": int(row.get("busy_union_minutes") or 0),
             "idle_minutes": int(row.get("idle_minutes") or 0),
             "idle_pct": float(row.get("idle_pct") or 0),
+            "warm_hold_minutes": int(row.get("warm_hold_minutes") or 0),
+            "keep_alive_score": float(row.get("keep_alive_score") or 0),
+            "auto_stop_mins": int(row.get("auto_stop_mins") or 10),
+            "max_num_clusters": int(row.get("max_num_clusters") or 1),
             "total_spend": float(row.get("total_spend") or 0),
-            "estimated_idle_spend": float(row.get("estimated_idle_spend") or 0),
+            # None when the SQL suppressed attribution (serverless / multi-cluster /
+            # billing-fallback uptime). Frontend renders "—" for null.
+            "estimated_idle_spend": float(_est_idle) if _est_idle is not None else None,
+            "low_confidence": bool(row.get("low_confidence") or False),
         })
 
     # If no classic warehouses found, check whether serverless warehouses exist (can't generate lifecycle events)
