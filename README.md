@@ -16,6 +16,33 @@ Built on FastAPI + React, deployed as a [Databricks App](https://docs.databricks
 
 ---
 
+## What's new in 2.1 (2026-07-03)
+
+Ports the v1 1.1 field-hardening pass into v2's `app/backend/` + `app/frontend/` package layout while retaining v2's bundle-based deployment, Lakebase state store, and AI Gateway feature set.
+
+**Service principal display names.** SP identities that previously rendered as `SP-<hex>` across the Users, SQL, AI/ML, Apps, and workspace tables now resolve to their SCIM `display_name` via `/api/user/service-principals`. Backend keys are lowercased and the frontend does a case-insensitive lookup, so billing UUIDs match regardless of case. On a fetch failure, the map re-tries every 5 minutes so recovery (e.g. after granting SCIM permission) no longer requires a pod restart.
+
+**Apps bundle materialized view.** New `daily_apps_summary` pre-aggregation at (usage_date, workspace_id, app_id, sku_name) grain filtered to `billing_origin_product = 'APPS'`. Powers all six APPS query slots (summary, per-app breakdown, timeseries, filtered averages, avg-cost-per-app, sku breakdown) via an MV fast path with automatic fallback to raw scans when the MV is unavailable.
+
+**Tagging bundle fast paths.** `daily_tag_summary` MV now backs the tag statistics KPIs and coverage summary. The tagging bundle previously timed out around 75–90 s on large accounts on cold-warehouse first loads; the MV path is sub-second once warm.
+
+**Reliability**
+- **Concurrent MV rebuild lock.** All uvicorn workers now share `/tmp/cost-obs-mv-refresh.lock`. The startup refresh path previously fired `CREATE OR REPLACE TABLE AS SELECT` concurrently from every worker in the pod, producing `DELTA_METADATA_CHANGED` and `DELTA_CONCURRENT_APPEND` errors on the core MV tables. Startup and the nightly scheduler now mutex against each other on the same lock.
+- **No more `$0` lockouts.** When a critical Apps bundle query timed out on a cold warehouse, the resulting zero-value response was being cached for the full 30 min TTL — even after the warehouse warmed up, users saw `$0` until the cache expired. Timed-out or all-zero responses now short-cache to 60 s so the next request recovers automatically.
+- **Faster SP registry recovery.** SP-fetch failures previously cached an empty map for 24 h. Now uses 24 h on success + 5 min on failure via an `_sp_cache_ok` flag.
+- **Apps workspace-filter passthrough.** The Apps tab client-side workspace filter treated the "all workspaces selected" state as an active filter, which dropped registry apps that had no billing (empty `workspace_names`). Fixed to pass through when the selection equals `availableWorkspaces.length` or is empty, and to include apps without workspace data in partial-selection mode.
+
+**Performance**
+- **Uvicorn workers dropped from 4 to 2.** This app is nearly 100 % I/O bound; four workers on the Databricks Apps small tier were oversubscribing CPU and quadrupling per-worker `TTLCache` duplication + SDK client footprint for no gain. Each worker still uses its `ThreadPoolExecutor(10)` for per-request query parallelism.
+- **Optimizer prefetches gated to tab visits.** `warehouse-health` and `warehouse-idle-time` were firing on Dashboard mount and starving concurrent bundles on cold start. They now fire only when `activeTab === "optimizer"`.
+- **Chart flicker eliminated.** `isAnimationActive={false}` on Bar/Line/Area/Pie primitives across 14+ chart consumers removes the label flicker that appeared during Recharts' initial-render animation.
+
+**UI polish**
+- **WCAG AA contrast.** All non-placeholder `text-gray-400` usages promoted to `text-gray-500`.
+- **Palette drift cleanup.** `sky-*`, `teal-*`, and `emerald-*` classes replaced with `blue-*` / `cyan-*` / `green-*` to align with the Databricks brand palette.
+
+---
+
 ## What's changed in the new deployment model
 
 - **Setup is simpler.** The SQL warehouse is bound as an Apps resource and injected as `DATABRICKS_WAREHOUSE_ID`. Workspace scoping is controlled with `COST_OBS_WORKSPACES`. Customers no longer need to select a warehouse or change workspace scope inside the app UI.
