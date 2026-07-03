@@ -39,7 +39,7 @@ const OptimizeMethodologyPanel = lazy(() => lazyWithRetry(() => import("@/compon
 // ForecastingView removed from active app (internal-only; excluded from external mirror)
 const UseCases = lazy(() => lazyWithRetry(() => import("@/pages/UseCases")));
 const UsersGroups = lazy(() => lazyWithRetry(() => import("@/pages/UsersGroups")));
-const BudgetView = lazy(() => lazyWithRetry(() => import("@/components/BudgetView").then(m => ({ default: m.BudgetView }))));
+// BudgetView removed from active app (internal-only; excluded from external mirror)
 
 // Preload all lazy chunks during browser idle time so tab switches are instant.
 // React.lazy caches the promise, so these import() calls prime the module cache
@@ -55,7 +55,6 @@ function preloadTabChunks() {
   import("@/components/SQLWarehousing360");
   import("@/pages/UseCases");
   import("@/pages/UsersGroups");
-  import("@/components/BudgetView");
 }
 
 import {
@@ -78,7 +77,6 @@ import {
   useInfraBundle,
   useKPIsBundle,
   useUsersGroupsBundle,
-  useBudgetDashboard,
 } from "@/hooks/useBillingData";
 import type { DateRange, WorkspaceBreakdown } from "@/types/billing";
 import { generateCostReport } from "@/utils/pdfExport";
@@ -99,7 +97,7 @@ function useKeepAlive() {
   }, []);
 }
 
-type ViewTab = "dbu" | "sql" | "infra" | "optimizer" | "kpis" | "aiml" | "ai-gateway" | "apps" | "tagging" | "use-cases" | "users-groups" | "budget";
+type ViewTab = "dbu" | "sql" | "infra" | "optimizer" | "kpis" | "aiml" | "ai-gateway" | "apps" | "tagging" | "use-cases" | "users-groups";
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -459,7 +457,6 @@ function Dashboard() {
 
   const { data: aimlData, isLoading: aimlLoading } = useAIMLDashboardBundle(dateRange, _wsIds, warehouseReady);
   const { data: aiGatewayData, isLoading: aiGatewayLoading } = useAIGatewayDashboardBundle(dateRange, _wsIds, activeTab === "ai-gateway");
-  const { data: budgetData, isLoading: budgetLoading } = useBudgetDashboard(activeTab === "budget");
   const { data: appsData, isLoading: appsLoading } = useAppsDashboardBundle(dateRange, _wsIds, warehouseReady);
   const { data: taggingData, isLoading: taggingLoading } = useTaggingDashboardBundle(dateRange, _wsIds, warehouseReady);
 
@@ -1144,21 +1141,6 @@ function Dashboard() {
                 Optimize
               </button>
               )}
-              {tabVisibility.budget && (
-              <button
-                onClick={() => setActiveTab("budget")}
-                className={`whitespace-nowrap border-b-2 px-1 py-3 text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-gray-400 ${
-                  activeTab === "budget"
-                    ? "border-[#FF3621] text-[#FF3621]"
-                    : "border-transparent text-gray-500 hover:border-gray-300 hover:text-gray-700"
-                }`}
-              >
-                <svg className="mr-2 -mt-0.5 inline h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 7h6m0 10v-3m-3 3h.01M9 17h.01M9 14h.01M12 14h.01M15 11h.01M12 11h.01M9 11h.01M7 21h10a2 2 0 002-2V5a2 2 0 00-2-2H7a2 2 0 00-2 2v14a2 2 0 002 2z" />
-                </svg>
-                Budgets
-              </button>
-              )}
             </nav>
           </div>
         </div>
@@ -1310,13 +1292,6 @@ function Dashboard() {
           <AIGatewayView
             data={aiGatewayData}
             isLoading={aiGatewayLoading}
-          />
-          </TabErrorBoundary>
-        ) : activeTab === "budget" ? (
-          <TabErrorBoundary tabName="Budgets">
-          <BudgetView
-            data={budgetData}
-            isLoading={budgetLoading}
           />
           </TabErrorBoundary>
         ) : activeTab === "apps" ? (
