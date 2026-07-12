@@ -1,0 +1,481 @@
+"""
+Genie Cost Reporting Router (customer-facing, static dashboard tab).
+
+Adapts the internal cost-reporting query pattern (which lives on
+`main.data_commercialization.genie_daily_workspace_usage_by_attribute` +
+`eng_billable_usage.billable_usage` — neither of which customers have) to
+what customers *do* have: `system.billing.usage`, `system.billing.list_prices`,
+and `system.access.workspaces_latest`.
+
+Two dimensions of uncertainty against real customer data:
+ 1. **Genie sub-surface detection.** The internal source table has a `surface`
+    column that splits Genie Code / Genie One / Genie Agents. In
+    `system.billing.usage` the equivalent signal is `sku_name`. It's not yet
+    confirmed which distinct SKU strings Databricks emits per sub-surface —
+    the defaults below (`%GENIE_CODE%`, `%GENIE_ONE%`, `%GENIE_AGENT%`)
+    mirror the internal surface names but may need adjustment once we see
+    real customer data.
+ 2. **Free-tier attribution.** Customers don't have a direct `free_tier_usd`
+    column. Approximated from `usage_type`: `BILLABLE` → charged, everything
+    else (`NON_BILLABLE`, `RELATED`, promotional variants) → free-tier.
+
+Both mappings are centralized in `_SURFACE_CASE_SQL` and `_CHARGE_CLASS_CASE_SQL`
+so they can be updated in one place. The `/diagnostics` endpoint dumps the
+distinct `sku_name` × `usage_type` × `billing_origin_product` combinations
+actually present in the customer's data so field engineers can validate the
+mapping in each deployment.
+"""
+
+from __future__ import annotations
+
+import logging
+from datetime import date, timedelta
+from typing import Any
+
+from fastapi import APIRouter, Query
+
+from backend.db import (
+    bundle_cache_key,
+    delta_cache_get,
+    delta_cache_put,
+    execute_queries_parallel,
+    execute_query,
+)
+from backend import cache_ttls
+from backend import workspace_filter as wf
+
+router = APIRouter()
+logger = logging.getLogger(__name__)
+
+
+# ---------------------------------------------------------------------------
+# SKU mapping — centralized so it's easy to update once we see real data.
+# ---------------------------------------------------------------------------
+# "Any Genie" filter used to constrain the initial scan of system.billing.usage.
+# Broad by design — a false-positive here only means we do a bit more work in
+# the CASE expressions below, not that we surface non-Genie spend as Genie.
+_GENIE_INCLUSION_WHERE = (
+    "(u.sku_name ILIKE '%GENIE%' OR u.sku_name ILIKE '%AI_BI_GENIE%')"
+)
+
+# Genie sub-surface classification. The `ELSE 'other'` bucket is the safety net
+# — it catches SKUs that pass the inclusion filter but don't match any known
+# sub-surface pattern (e.g. a `AI_BI_GENIE` SKU with no further sub-brand).
+# Those still contribute to `total_usd` but not to any sub-surface breakdown.
+_SURFACE_CASE_SQL = """
+    CASE
+        WHEN sku_name ILIKE '%GENIE_CODE%'   OR sku_name ILIKE '%GENIE%CODE%'   THEN 'genie_code'
+        WHEN sku_name ILIKE '%GENIE_ONE%'    OR sku_name ILIKE '%GENIE%ONE%'    THEN 'genie_one'
+        WHEN sku_name ILIKE '%GENIE_AGENT%'  OR sku_name ILIKE '%GENIE%AGENT%'  THEN 'genie_agents'
+        ELSE 'other'
+    END
+"""
+
+# Free-tier attribution. `BILLABLE` is the only guaranteed-paid value; the
+# other observed usage_type values (`NON_BILLABLE`, `RELATED`) are treated as
+# free-tier / promotional. `INTERNAL_INTERPOLATION` is excluded from both
+# numerators entirely (it's a Databricks-side interpolation artifact, not
+# real spend).
+_CHARGE_CLASS_CASE_SQL = """
+    CASE
+        WHEN usage_type = 'BILLABLE' THEN 'charged'
+        WHEN usage_type IN ('NON_BILLABLE', 'RELATED') THEN 'free_tier'
+        ELSE 'other'
+    END
+"""
+
+
+# ---------------------------------------------------------------------------
+# SQL templates
+# ---------------------------------------------------------------------------
+
+# Per-workspace Genie breakdown. Analogous to the internal account_level CTE
+# in the source SQL, but keyed by workspace_id (customers don't have SFDC
+# account IDs; workspace is the finest available grain).
+_GENIE_BY_WORKSPACE_SQL = f"""
+WITH genie_usage AS (
+    SELECT
+        u.usage_date,
+        u.workspace_id,
+        u.sku_name,
+        u.usage_type,
+        u.usage_quantity * COALESCE(p.pricing.default, 0) AS spend
+    FROM system.billing.usage u
+    LEFT JOIN system.billing.list_prices p
+        ON u.sku_name = p.sku_name
+       AND u.cloud = p.cloud
+       AND p.price_end_time IS NULL
+    WHERE u.usage_date BETWEEN :start_date AND :end_date
+      AND u.usage_quantity > 0
+      AND {_GENIE_INCLUSION_WHERE}
+      {{ws_clause}}
+),
+priced AS (
+    SELECT
+        usage_date,
+        workspace_id,
+        spend,
+        {_SURFACE_CASE_SQL} AS surface,
+        {_CHARGE_CLASS_CASE_SQL} AS charge_class
+    FROM genie_usage
+)
+SELECT
+    workspace_id,
+    -- Overall
+    SUM(spend) AS total_usd,
+    SUM(CASE WHEN charge_class = 'charged'   THEN spend ELSE 0 END) AS charged_usd,
+    SUM(CASE WHEN charge_class = 'free_tier' THEN spend ELSE 0 END) AS free_tier_usd,
+    -- Genie Code
+    SUM(CASE WHEN surface = 'genie_code' THEN spend ELSE 0 END) AS total_usd__genie_code,
+    SUM(CASE WHEN surface = 'genie_code' AND charge_class = 'charged'   THEN spend ELSE 0 END) AS charged_usd__genie_code,
+    SUM(CASE WHEN surface = 'genie_code' AND charge_class = 'free_tier' THEN spend ELSE 0 END) AS free_tier_usd__genie_code,
+    -- Genie One
+    SUM(CASE WHEN surface = 'genie_one' THEN spend ELSE 0 END) AS total_usd__genie_one,
+    SUM(CASE WHEN surface = 'genie_one' AND charge_class = 'charged'   THEN spend ELSE 0 END) AS charged_usd__genie_one,
+    SUM(CASE WHEN surface = 'genie_one' AND charge_class = 'free_tier' THEN spend ELSE 0 END) AS free_tier_usd__genie_one,
+    -- Genie Agents
+    SUM(CASE WHEN surface = 'genie_agents' THEN spend ELSE 0 END) AS total_usd__genie_agents,
+    SUM(CASE WHEN surface = 'genie_agents' AND charge_class = 'charged'   THEN spend ELSE 0 END) AS charged_usd__genie_agents,
+    SUM(CASE WHEN surface = 'genie_agents' AND charge_class = 'free_tier' THEN spend ELSE 0 END) AS free_tier_usd__genie_agents,
+    -- Time bounds
+    MIN(CASE WHEN spend > 0 THEN usage_date END) AS earliest_date_with_billing,
+    MAX(CASE WHEN spend > 0 THEN usage_date END) AS latest_date_with_billing
+FROM priced
+GROUP BY workspace_id
+HAVING SUM(spend) > 0
+"""
+
+
+# Databricks-total denominator for the same window. Used to compute
+# `genie_pct_of_databricks_usd`. Scoped to the same workspace filter as the
+# Genie query so the ratio is apples-to-apples.
+_DATABRICKS_TOTAL_SQL = """
+SELECT COALESCE(SUM(u.usage_quantity * COALESCE(p.pricing.default, 0)), 0.0) AS databricks_total_usd
+FROM system.billing.usage u
+LEFT JOIN system.billing.list_prices p
+    ON u.sku_name = p.sku_name
+   AND u.cloud = p.cloud
+   AND p.price_end_time IS NULL
+WHERE u.usage_date BETWEEN :start_date AND :end_date
+  AND u.usage_quantity > 0
+  {ws_clause}
+"""
+
+
+# Timeseries — daily Genie spend by charge class, for the trend chart.
+_GENIE_TIMESERIES_SQL = f"""
+WITH genie_usage AS (
+    SELECT
+        u.usage_date,
+        u.workspace_id,
+        u.sku_name,
+        u.usage_type,
+        u.usage_quantity * COALESCE(p.pricing.default, 0) AS spend
+    FROM system.billing.usage u
+    LEFT JOIN system.billing.list_prices p
+        ON u.sku_name = p.sku_name
+       AND u.cloud = p.cloud
+       AND p.price_end_time IS NULL
+    WHERE u.usage_date BETWEEN :start_date AND :end_date
+      AND u.usage_quantity > 0
+      AND {_GENIE_INCLUSION_WHERE}
+      {{ws_clause}}
+)
+SELECT
+    usage_date,
+    SUM(spend) AS total_usd,
+    SUM(CASE WHEN {_CHARGE_CLASS_CASE_SQL} = 'charged'   THEN spend ELSE 0 END) AS charged_usd,
+    SUM(CASE WHEN {_CHARGE_CLASS_CASE_SQL} = 'free_tier' THEN spend ELSE 0 END) AS free_tier_usd,
+    SUM(CASE WHEN {_SURFACE_CASE_SQL} = 'genie_code'   THEN spend ELSE 0 END) AS genie_code_usd,
+    SUM(CASE WHEN {_SURFACE_CASE_SQL} = 'genie_one'    THEN spend ELSE 0 END) AS genie_one_usd,
+    SUM(CASE WHEN {_SURFACE_CASE_SQL} = 'genie_agents' THEN spend ELSE 0 END) AS genie_agents_usd
+FROM genie_usage
+GROUP BY usage_date
+ORDER BY usage_date
+"""
+
+
+# Diagnostics — dump the distinct SKU / usage_type / billing_origin_product
+# combos actually present in the customer's data so field engineers can
+# validate the sub-surface + free-tier mappings. Returned by the
+# /diagnostics endpoint.
+_GENIE_DIAGNOSTICS_SQL = """
+SELECT
+    u.sku_name,
+    u.usage_type,
+    u.billing_origin_product,
+    COUNT(*) AS row_count,
+    SUM(u.usage_quantity * COALESCE(p.pricing.default, 0)) AS total_usd,
+    MIN(u.usage_date) AS earliest_date,
+    MAX(u.usage_date) AS latest_date
+FROM system.billing.usage u
+LEFT JOIN system.billing.list_prices p
+    ON u.sku_name = p.sku_name
+   AND u.cloud = p.cloud
+   AND p.price_end_time IS NULL
+WHERE u.usage_date >= DATE_SUB(CURRENT_DATE(), 90)
+  AND (
+        u.sku_name ILIKE '%GENIE%'
+     OR u.sku_name ILIKE '%AI_BI%'
+     OR u.billing_origin_product ILIKE '%GENIE%'
+     OR u.billing_origin_product ILIKE '%AI_BI%'
+  )
+GROUP BY u.sku_name, u.usage_type, u.billing_origin_product
+ORDER BY total_usd DESC
+LIMIT 100
+"""
+
+
+def _defaults(start_date: str | None, end_date: str | None) -> tuple[str, str]:
+    if not end_date:
+        end_date = date.today().isoformat()
+    if not start_date:
+        start_date = (date.today() - timedelta(days=30)).isoformat()
+    return start_date, end_date
+
+
+def _try_div(numerator: float, denominator: float) -> float | None:
+    if not denominator:
+        return None
+    return round(numerator / denominator, 4)
+
+
+def _resolve_ws_name(ws_id: str, name_map: dict[str, str]) -> str:
+    return name_map.get(str(ws_id)) or str(ws_id)
+
+
+# ---------------------------------------------------------------------------
+# Endpoints
+# ---------------------------------------------------------------------------
+
+
+@router.get("/dashboard-bundle")
+async def get_genie_dashboard_bundle(
+    start_date: str = Query(default=None, description="Start date (YYYY-MM-DD)"),
+    end_date: str = Query(default=None, description="End date (YYYY-MM-DD)"),
+    workspace_ids: str | None = Query(default=None, description="Comma-separated workspace IDs to scope"),
+) -> dict[str, Any]:
+    """Return the payload for the static Genie cost dashboard tab.
+
+    Shape:
+      {
+        "summary": { total_usd, charged_usd, free_tier_usd, pct_free,
+                     databricks_total_usd, genie_pct_of_databricks_usd,
+                     <per-surface> totals },
+        "workspaces": [{ workspace_id, workspace_name, ...per-row metrics... }],
+        "timeseries": [{ usage_date, total_usd, charged_usd, free_tier_usd,
+                         genie_code_usd, genie_one_usd, genie_agents_usd }],
+        "surface_breakdown": [{ surface, total_usd, charged_usd, free_tier_usd }],
+      }
+    """
+    sd, ed = _defaults(start_date, end_date)
+    id_list = [i.strip() for i in workspace_ids.split(",") if i.strip()] if workspace_ids else None
+    dkey = bundle_cache_key("genie:dashboard-bundle", sd, ed, id_list)
+    if (cached := delta_cache_get(dkey)) is not None:
+        return cached
+
+    params = {"start_date": sd, "end_date": ed}
+    ws_clause_u = wf.build_ws_filter_clause(col="u.workspace_id", id_list=id_list)
+
+    by_ws_sql = _GENIE_BY_WORKSPACE_SQL.format(ws_clause=ws_clause_u)
+    dbx_total_sql = _DATABRICKS_TOTAL_SQL.format(ws_clause=ws_clause_u)
+    ts_sql = _GENIE_TIMESERIES_SQL.format(ws_clause=ws_clause_u)
+
+    def _q_ws() -> list[dict[str, Any]]:
+        return execute_query(by_ws_sql, params)
+
+    def _q_total() -> list[dict[str, Any]]:
+        return execute_query(dbx_total_sql, params)
+
+    def _q_ts() -> list[dict[str, Any]]:
+        return execute_query(ts_sql, params)
+
+    results = execute_queries_parallel([
+        ("by_workspace", _q_ws),
+        ("dbx_total", _q_total),
+        ("timeseries", _q_ts),
+    ], timeout=60.0)
+
+    ws_rows = results.get("by_workspace") or []
+    dbx_total_rows = results.get("dbx_total") or []
+    ts_rows = results.get("timeseries") or []
+
+    dbx_total = float((dbx_total_rows[0] if dbx_total_rows else {}).get("databricks_total_usd") or 0.0)
+
+    # Resolve workspace names (best-effort; system.access.workspaces_latest may
+    # not be granted in every deployment).
+    ws_name_map: dict[str, str] = {}
+    if ws_rows:
+        try:
+            name_rows = execute_query(
+                "SELECT workspace_id, workspace_name FROM system.access.workspaces_latest",
+                None,
+            )
+            for r in name_rows or []:
+                wid = r.get("workspace_id")
+                wname = r.get("workspace_name")
+                if wid and wname:
+                    ws_name_map[str(wid)] = str(wname)
+        except Exception as e:
+            logger.debug("workspace name resolution failed (non-fatal): %s", e)
+
+    workspaces: list[dict[str, Any]] = []
+    agg = {
+        "total_usd": 0.0,
+        "charged_usd": 0.0,
+        "free_tier_usd": 0.0,
+        "total_usd__genie_code": 0.0,
+        "charged_usd__genie_code": 0.0,
+        "free_tier_usd__genie_code": 0.0,
+        "total_usd__genie_one": 0.0,
+        "charged_usd__genie_one": 0.0,
+        "free_tier_usd__genie_one": 0.0,
+        "total_usd__genie_agents": 0.0,
+        "charged_usd__genie_agents": 0.0,
+        "free_tier_usd__genie_agents": 0.0,
+    }
+
+    for r in ws_rows:
+        row = {
+            "workspace_id": str(r.get("workspace_id") or ""),
+            "workspace_name": _resolve_ws_name(r.get("workspace_id") or "", ws_name_map),
+            "total_usd": float(r.get("total_usd") or 0.0),
+            "charged_usd": float(r.get("charged_usd") or 0.0),
+            "free_tier_usd": float(r.get("free_tier_usd") or 0.0),
+            "total_usd__genie_code": float(r.get("total_usd__genie_code") or 0.0),
+            "charged_usd__genie_code": float(r.get("charged_usd__genie_code") or 0.0),
+            "free_tier_usd__genie_code": float(r.get("free_tier_usd__genie_code") or 0.0),
+            "total_usd__genie_one": float(r.get("total_usd__genie_one") or 0.0),
+            "charged_usd__genie_one": float(r.get("charged_usd__genie_one") or 0.0),
+            "free_tier_usd__genie_one": float(r.get("free_tier_usd__genie_one") or 0.0),
+            "total_usd__genie_agents": float(r.get("total_usd__genie_agents") or 0.0),
+            "charged_usd__genie_agents": float(r.get("charged_usd__genie_agents") or 0.0),
+            "free_tier_usd__genie_agents": float(r.get("free_tier_usd__genie_agents") or 0.0),
+            "earliest_date_with_billing": str(r.get("earliest_date_with_billing")) if r.get("earliest_date_with_billing") else None,
+            "latest_date_with_billing": str(r.get("latest_date_with_billing")) if r.get("latest_date_with_billing") else None,
+        }
+        # Per-row derived pct_free (charged vs free-tier ratio for this workspace).
+        row["pct_free"] = _try_div(row["free_tier_usd"], row["charged_usd"] + row["free_tier_usd"])
+        row["pct_free__genie_code"] = _try_div(row["free_tier_usd__genie_code"], row["charged_usd__genie_code"] + row["free_tier_usd__genie_code"])
+        row["pct_free__genie_one"] = _try_div(row["free_tier_usd__genie_one"], row["charged_usd__genie_one"] + row["free_tier_usd__genie_one"])
+        row["pct_free__genie_agents"] = _try_div(row["free_tier_usd__genie_agents"], row["charged_usd__genie_agents"] + row["free_tier_usd__genie_agents"])
+        row["genie_pct_of_databricks_usd"] = _try_div(row["charged_usd"], dbx_total)
+        workspaces.append(row)
+
+        for k in agg:
+            agg[k] += row[k]
+
+    summary = {
+        **agg,
+        "workspace_count": len(workspaces),
+        "databricks_total_usd": dbx_total,
+        "pct_free": _try_div(agg["free_tier_usd"], agg["charged_usd"] + agg["free_tier_usd"]),
+        "pct_free__genie_code": _try_div(agg["free_tier_usd__genie_code"], agg["charged_usd__genie_code"] + agg["free_tier_usd__genie_code"]),
+        "pct_free__genie_one": _try_div(agg["free_tier_usd__genie_one"], agg["charged_usd__genie_one"] + agg["free_tier_usd__genie_one"]),
+        "pct_free__genie_agents": _try_div(agg["free_tier_usd__genie_agents"], agg["charged_usd__genie_agents"] + agg["free_tier_usd__genie_agents"]),
+        "genie_pct_of_databricks_usd": _try_div(agg["charged_usd"], dbx_total),
+        "start_date": sd,
+        "end_date": ed,
+    }
+
+    surface_breakdown = [
+        {
+            "surface": "Genie Code",
+            "total_usd": agg["total_usd__genie_code"],
+            "charged_usd": agg["charged_usd__genie_code"],
+            "free_tier_usd": agg["free_tier_usd__genie_code"],
+        },
+        {
+            "surface": "Genie One",
+            "total_usd": agg["total_usd__genie_one"],
+            "charged_usd": agg["charged_usd__genie_one"],
+            "free_tier_usd": agg["free_tier_usd__genie_one"],
+        },
+        {
+            "surface": "Genie Agents",
+            "total_usd": agg["total_usd__genie_agents"],
+            "charged_usd": agg["charged_usd__genie_agents"],
+            "free_tier_usd": agg["free_tier_usd__genie_agents"],
+        },
+    ]
+    # "Other" bucket surfaces the residual — total minus the three known sub-surfaces.
+    # When it's non-zero, that's the signal that the customer's SKU set doesn't
+    # match the default sub-surface patterns and the Diagnostics panel is worth
+    # opening to see the actual SKU strings.
+    other_total = agg["total_usd"] - sum(s["total_usd"] for s in surface_breakdown)
+    other_charged = agg["charged_usd"] - sum(s["charged_usd"] for s in surface_breakdown)
+    other_free = agg["free_tier_usd"] - sum(s["free_tier_usd"] for s in surface_breakdown)
+    if other_total > 0 or other_charged > 0 or other_free > 0:
+        surface_breakdown.append({
+            "surface": "Other Genie",
+            "total_usd": other_total,
+            "charged_usd": other_charged,
+            "free_tier_usd": other_free,
+        })
+
+    timeseries = [
+        {
+            "usage_date": str(r.get("usage_date")),
+            "total_usd": float(r.get("total_usd") or 0.0),
+            "charged_usd": float(r.get("charged_usd") or 0.0),
+            "free_tier_usd": float(r.get("free_tier_usd") or 0.0),
+            "genie_code_usd": float(r.get("genie_code_usd") or 0.0),
+            "genie_one_usd": float(r.get("genie_one_usd") or 0.0),
+            "genie_agents_usd": float(r.get("genie_agents_usd") or 0.0),
+        }
+        for r in ts_rows
+    ]
+
+    payload = {
+        "summary": summary,
+        "workspaces": sorted(workspaces, key=lambda w: w["total_usd"], reverse=True),
+        "timeseries": timeseries,
+        "surface_breakdown": surface_breakdown,
+    }
+    try:
+        delta_cache_put(dkey, "genie:dashboard-bundle", payload, ttl_seconds=cache_ttls.AIML_BUNDLE)
+    except Exception as e:
+        logger.debug("Delta cache write failed for genie bundle: %s", e)
+    return payload
+
+
+@router.get("/diagnostics")
+async def get_genie_diagnostics() -> dict[str, Any]:
+    """Dump the distinct (sku_name, usage_type, billing_origin_product) combinations
+    that pass the Genie inclusion filter, so field engineers can validate the
+    sub-surface + free-tier CASE mappings against real customer data.
+
+    Look for:
+      - Distinct SKU strings for Genie Code / Genie One / Genie Agents. If they
+        don't match the default ILIKE patterns, update `_SURFACE_CASE_SQL`.
+      - Distinct `usage_type` values. If any promotional/free-tier variant
+        exists beyond `NON_BILLABLE` and `RELATED`, add it to
+        `_CHARGE_CLASS_CASE_SQL`.
+    """
+    try:
+        rows = execute_query(_GENIE_DIAGNOSTICS_SQL, None)
+    except Exception as e:
+        logger.warning("Genie diagnostics query failed: %s", e)
+        return {"available": False, "error": str(e), "rows": []}
+
+    return {
+        "available": True,
+        "rows": [
+            {
+                "sku_name": r.get("sku_name"),
+                "usage_type": r.get("usage_type"),
+                "billing_origin_product": r.get("billing_origin_product"),
+                "row_count": int(r.get("row_count") or 0),
+                "total_usd": float(r.get("total_usd") or 0.0),
+                "earliest_date": str(r.get("earliest_date")) if r.get("earliest_date") else None,
+                "latest_date": str(r.get("latest_date")) if r.get("latest_date") else None,
+            }
+            for r in (rows or [])
+        ],
+        "note": (
+            "This dump surfaces distinct SKU / usage_type / billing_origin_product "
+            "combinations for any row matching 'GENIE' or 'AI_BI' in sku_name or "
+            "billing_origin_product over the last 90 days. Use it to validate the "
+            "sub-surface and free-tier mappings in genie_cost.py."
+        ),
+    }

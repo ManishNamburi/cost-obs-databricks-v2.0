@@ -17,7 +17,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.base import BaseHTTPMiddleware
 
-from backend.routers import ai_gateway, aiml, apps, aws_actual, azure_actual, gcp_actual, billing, dbsql, debug, health, permissions, settings, setup, tagging, use_cases, user, users_groups, warehouse_health
+from backend.routers import ai_gateway, aiml, apps, aws_actual, azure_actual, gcp_actual, billing, dbsql, debug, genie_cost, health, permissions, settings, setup, tagging, use_cases, user, users_groups, warehouse_health
 
 # Budget router is internal-only (excluded from external mirror). Import
 # defensively so builds without budget.py still start up.
@@ -953,6 +953,7 @@ app.include_router(permissions.router, prefix="/api/permissions", tags=["permiss
 app.include_router(settings.router, prefix="/api/settings", tags=["settings"])
 app.include_router(users_groups.router, prefix="/api/users-groups", tags=["users-groups"])
 app.include_router(warehouse_health.router, prefix="/api/sql/warehouse-health", tags=["warehouse-health"])
+app.include_router(genie_cost.router, prefix="/api/genie-cost", tags=["genie-cost"])
 app.include_router(debug.router, prefix="/api/debug", tags=["debug"])
 
 # Serve static files in production.
