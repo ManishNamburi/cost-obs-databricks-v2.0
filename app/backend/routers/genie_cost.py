@@ -58,24 +58,29 @@ _GENIE_INCLUSION_WHERE = (
     "(u.sku_name ILIKE '%GENIE%' OR u.sku_name ILIKE '%AI_BI_GENIE%')"
 )
 
-# Genie sub-surface classification. The `ELSE 'other'` bucket is the safety net
-# — it catches SKUs that pass the inclusion filter but don't match any known
-# sub-surface pattern (e.g. a `AI_BI_GENIE` SKU with no further sub-brand).
-# Those still contribute to `total_usd` but not to any sub-surface breakdown.
+# Genie sub-surface classification — provisional heuristic per V2.1_SPEC §5.1.
+# The `ELSE 'unknown'` bucket is intentional: any SKU that passes the Genie
+# inclusion filter but doesn't match one of the three known patterns still
+# contributes to `total_usd` and `charged_usd__genie_unknown` — never dropped
+# silently. If `charged_usd__genie_unknown > 0` in a customer deploy, the
+# Diagnostics endpoint reveals the SKU strings that need to be added to the
+# CASE mapping.
 _SURFACE_CASE_SQL = """
     CASE
-        WHEN sku_name ILIKE '%GENIE_CODE%'   OR sku_name ILIKE '%GENIE%CODE%'   THEN 'genie_code'
-        WHEN sku_name ILIKE '%GENIE_ONE%'    OR sku_name ILIKE '%GENIE%ONE%'    THEN 'genie_one'
-        WHEN sku_name ILIKE '%GENIE_AGENT%'  OR sku_name ILIKE '%GENIE%AGENT%'  THEN 'genie_agents'
-        ELSE 'other'
+        WHEN sku_name ILIKE '%GENIE_CODE%'   THEN 'genie_code'
+        WHEN sku_name ILIKE '%GENIE_ONE%'    THEN 'genie_one'
+        WHEN sku_name ILIKE '%GENIE_AGENTS%' THEN 'genie_agents'
+        ELSE 'unknown'
     END
 """
 
-# Free-tier attribution. `BILLABLE` is the only guaranteed-paid value; the
-# other observed usage_type values (`NON_BILLABLE`, `RELATED`) are treated as
-# free-tier / promotional. `INTERNAL_INTERPOLATION` is excluded from both
-# numerators entirely (it's a Databricks-side interpolation artifact, not
-# real spend).
+# Free-tier attribution per V2.1_SPEC §5.2 convention:
+#   BILLABLE            → charged
+#   NON_BILLABLE        → free_tier
+#   RELATED             → free_tier
+#   anything else       → excluded from Genie buckets AND tracked in
+#                         `other_usage_type_usd` diagnostic so new/unknown
+#                         values surface if Databricks starts emitting them.
 _CHARGE_CLASS_CASE_SQL = """
     CASE
         WHEN usage_type = 'BILLABLE' THEN 'charged'
@@ -125,6 +130,11 @@ SELECT
     SUM(spend) AS total_usd,
     SUM(CASE WHEN charge_class = 'charged'   THEN spend ELSE 0 END) AS charged_usd,
     SUM(CASE WHEN charge_class = 'free_tier' THEN spend ELSE 0 END) AS free_tier_usd,
+    -- Other usage_type diagnostic — surfaces spend under unknown usage_type
+    -- values (anything not BILLABLE / NON_BILLABLE / RELATED). If non-zero
+    -- in a customer deploy, run the /diagnostics endpoint to see which
+    -- usage_type strings Databricks is emitting.
+    SUM(CASE WHEN charge_class = 'other'     THEN spend ELSE 0 END) AS other_usage_type_usd,
     -- Genie Code
     SUM(CASE WHEN surface = 'genie_code' THEN spend ELSE 0 END) AS total_usd__genie_code,
     SUM(CASE WHEN surface = 'genie_code' AND charge_class = 'charged'   THEN spend ELSE 0 END) AS charged_usd__genie_code,
@@ -137,6 +147,11 @@ SELECT
     SUM(CASE WHEN surface = 'genie_agents' THEN spend ELSE 0 END) AS total_usd__genie_agents,
     SUM(CASE WHEN surface = 'genie_agents' AND charge_class = 'charged'   THEN spend ELSE 0 END) AS charged_usd__genie_agents,
     SUM(CASE WHEN surface = 'genie_agents' AND charge_class = 'free_tier' THEN spend ELSE 0 END) AS free_tier_usd__genie_agents,
+    -- Genie Unknown — passes the Genie inclusion filter but no sub-surface
+    -- pattern matches. Non-zero here means the SKU set needs mapping updates.
+    SUM(CASE WHEN surface = 'unknown' THEN spend ELSE 0 END) AS total_usd__genie_unknown,
+    SUM(CASE WHEN surface = 'unknown' AND charge_class = 'charged'   THEN spend ELSE 0 END) AS charged_usd__genie_unknown,
+    SUM(CASE WHEN surface = 'unknown' AND charge_class = 'free_tier' THEN spend ELSE 0 END) AS free_tier_usd__genie_unknown,
     -- Time bounds
     MIN(CASE WHEN spend > 0 THEN usage_date END) AS earliest_date_with_billing,
     MAX(CASE WHEN spend > 0 THEN usage_date END) AS latest_date_with_billing
@@ -324,6 +339,7 @@ async def get_genie_dashboard_bundle(
         "total_usd": 0.0,
         "charged_usd": 0.0,
         "free_tier_usd": 0.0,
+        "other_usage_type_usd": 0.0,
         "total_usd__genie_code": 0.0,
         "charged_usd__genie_code": 0.0,
         "free_tier_usd__genie_code": 0.0,
@@ -333,6 +349,9 @@ async def get_genie_dashboard_bundle(
         "total_usd__genie_agents": 0.0,
         "charged_usd__genie_agents": 0.0,
         "free_tier_usd__genie_agents": 0.0,
+        "total_usd__genie_unknown": 0.0,
+        "charged_usd__genie_unknown": 0.0,
+        "free_tier_usd__genie_unknown": 0.0,
     }
 
     for r in ws_rows:
@@ -342,6 +361,7 @@ async def get_genie_dashboard_bundle(
             "total_usd": float(r.get("total_usd") or 0.0),
             "charged_usd": float(r.get("charged_usd") or 0.0),
             "free_tier_usd": float(r.get("free_tier_usd") or 0.0),
+            "other_usage_type_usd": float(r.get("other_usage_type_usd") or 0.0),
             "total_usd__genie_code": float(r.get("total_usd__genie_code") or 0.0),
             "charged_usd__genie_code": float(r.get("charged_usd__genie_code") or 0.0),
             "free_tier_usd__genie_code": float(r.get("free_tier_usd__genie_code") or 0.0),
@@ -351,6 +371,9 @@ async def get_genie_dashboard_bundle(
             "total_usd__genie_agents": float(r.get("total_usd__genie_agents") or 0.0),
             "charged_usd__genie_agents": float(r.get("charged_usd__genie_agents") or 0.0),
             "free_tier_usd__genie_agents": float(r.get("free_tier_usd__genie_agents") or 0.0),
+            "total_usd__genie_unknown": float(r.get("total_usd__genie_unknown") or 0.0),
+            "charged_usd__genie_unknown": float(r.get("charged_usd__genie_unknown") or 0.0),
+            "free_tier_usd__genie_unknown": float(r.get("free_tier_usd__genie_unknown") or 0.0),
             "earliest_date_with_billing": str(r.get("earliest_date_with_billing")) if r.get("earliest_date_with_billing") else None,
             "latest_date_with_billing": str(r.get("latest_date_with_billing")) if r.get("latest_date_with_billing") else None,
         }
@@ -359,6 +382,7 @@ async def get_genie_dashboard_bundle(
         row["pct_free__genie_code"] = _try_div(row["free_tier_usd__genie_code"], row["charged_usd__genie_code"] + row["free_tier_usd__genie_code"])
         row["pct_free__genie_one"] = _try_div(row["free_tier_usd__genie_one"], row["charged_usd__genie_one"] + row["free_tier_usd__genie_one"])
         row["pct_free__genie_agents"] = _try_div(row["free_tier_usd__genie_agents"], row["charged_usd__genie_agents"] + row["free_tier_usd__genie_agents"])
+        row["pct_free__genie_unknown"] = _try_div(row["free_tier_usd__genie_unknown"], row["charged_usd__genie_unknown"] + row["free_tier_usd__genie_unknown"])
         row["genie_pct_of_databricks_usd"] = _try_div(row["charged_usd"], dbx_total)
         workspaces.append(row)
 
@@ -373,6 +397,7 @@ async def get_genie_dashboard_bundle(
         "pct_free__genie_code": _try_div(agg["free_tier_usd__genie_code"], agg["charged_usd__genie_code"] + agg["free_tier_usd__genie_code"]),
         "pct_free__genie_one": _try_div(agg["free_tier_usd__genie_one"], agg["charged_usd__genie_one"] + agg["free_tier_usd__genie_one"]),
         "pct_free__genie_agents": _try_div(agg["free_tier_usd__genie_agents"], agg["charged_usd__genie_agents"] + agg["free_tier_usd__genie_agents"]),
+        "pct_free__genie_unknown": _try_div(agg["free_tier_usd__genie_unknown"], agg["charged_usd__genie_unknown"] + agg["free_tier_usd__genie_unknown"]),
         "genie_pct_of_databricks_usd": _try_div(agg["charged_usd"], dbx_total),
         "start_date": sd,
         "end_date": ed,
@@ -398,19 +423,18 @@ async def get_genie_dashboard_bundle(
             "free_tier_usd": agg["free_tier_usd__genie_agents"],
         },
     ]
-    # "Other" bucket surfaces the residual — total minus the three known sub-surfaces.
-    # When it's non-zero, that's the signal that the customer's SKU set doesn't
-    # match the default sub-surface patterns and the Diagnostics panel is worth
-    # opening to see the actual SKU strings.
-    other_total = agg["total_usd"] - sum(s["total_usd"] for s in surface_breakdown)
-    other_charged = agg["charged_usd"] - sum(s["charged_usd"] for s in surface_breakdown)
-    other_free = agg["free_tier_usd"] - sum(s["free_tier_usd"] for s in surface_breakdown)
-    if other_total > 0 or other_charged > 0 or other_free > 0:
+    # "Genie Unknown" — Genie-inclusion-filter matches that don't hit any of
+    # the three known sub-surface patterns. Non-zero means the SKU mapping is
+    # out of date; run the Diagnostics endpoint to see the actual sku_name
+    # strings and update _SURFACE_CASE_SQL.
+    if (agg["total_usd__genie_unknown"] > 0
+            or agg["charged_usd__genie_unknown"] > 0
+            or agg["free_tier_usd__genie_unknown"] > 0):
         surface_breakdown.append({
-            "surface": "Other Genie",
-            "total_usd": other_total,
-            "charged_usd": other_charged,
-            "free_tier_usd": other_free,
+            "surface": "Genie Unknown",
+            "total_usd": agg["total_usd__genie_unknown"],
+            "charged_usd": agg["charged_usd__genie_unknown"],
+            "free_tier_usd": agg["free_tier_usd__genie_unknown"],
         })
 
     timeseries = [
