@@ -20,8 +20,6 @@ Built on FastAPI + React, deployed as a [Databricks App](https://docs.databricks
 
 Ports the v1 1.1 field-hardening pass into v2's `app/backend/` + `app/frontend/` package layout while retaining v2's bundle-based deployment, Lakebase state store, and AI Gateway feature set.
 
-**Service principal display names.** SP identities that previously rendered as `SP-<hex>` across the Users, SQL, AI/ML, Apps, and workspace tables now resolve to their SCIM `display_name` via `/api/user/service-principals`. Backend keys are lowercased and the frontend does a case-insensitive lookup, so billing UUIDs match regardless of case. On a fetch failure, the map re-tries every 5 minutes so recovery (e.g. after granting SCIM permission) no longer requires a pod restart.
-
 **Apps bundle materialized view.** New `daily_apps_summary` pre-aggregation at (usage_date, workspace_id, app_id, sku_name) grain filtered to `billing_origin_product = 'APPS'`. Powers all six APPS query slots (summary, per-app breakdown, timeseries, filtered averages, avg-cost-per-app, sku breakdown) via an MV fast path with automatic fallback to raw scans when the MV is unavailable.
 
 **Tagging bundle fast paths.** `daily_tag_summary` MV now backs the tag statistics KPIs and coverage summary. The tagging bundle previously timed out around 75–90 s on large accounts on cold-warehouse first loads; the MV path is sub-second once warm.
@@ -29,7 +27,6 @@ Ports the v1 1.1 field-hardening pass into v2's `app/backend/` + `app/frontend/`
 **Reliability**
 - **Concurrent MV rebuild lock.** All uvicorn workers now share `/tmp/cost-obs-mv-refresh.lock`. The startup refresh path previously fired `CREATE OR REPLACE TABLE AS SELECT` concurrently from every worker in the pod, producing `DELTA_METADATA_CHANGED` and `DELTA_CONCURRENT_APPEND` errors on the core MV tables. Startup and the nightly scheduler now mutex against each other on the same lock.
 - **No more `$0` lockouts.** When a critical Apps bundle query timed out on a cold warehouse, the resulting zero-value response was being cached for the full 30 min TTL — even after the warehouse warmed up, users saw `$0` until the cache expired. Timed-out or all-zero responses now short-cache to 60 s so the next request recovers automatically.
-- **Faster SP registry recovery.** SP-fetch failures previously cached an empty map for 24 h. Now uses 24 h on success + 5 min on failure via an `_sp_cache_ok` flag.
 - **Apps workspace-filter passthrough.** The Apps tab client-side workspace filter treated the "all workspaces selected" state as an active filter, which dropped registry apps that had no billing (empty `workspace_names`). Fixed to pass through when the selection equals `availableWorkspaces.length` or is empty, and to include apps without workspace data in partial-selection mode.
 
 **Performance**
@@ -53,7 +50,6 @@ If your app used `COST_OBS_WORKSPACES` or any other setting from 2.0, that's pre
 |---|---|---|
 | Apps tab | `daily_apps_summary` MV fast path (6 slots) | Sub-second cold loads once MV is warm |
 | Tagging tab | `daily_tag_summary` MV fast path | Fixes the 75–90 s timeout on large accounts |
-| Users / SQL / AI/ML / Apps | SP UUID → SCIM `display_name` resolution | Real names in every identity column |
 | Cache | 60 s TTL on degraded/empty Apps bundle | No more 30-min `$0` lockouts after a cold-warehouse timeout |
 | Reliability | Startup MV rebuild wraps `/tmp/cost-obs-mv-refresh.lock` | Kills `DELTA_METADATA_CHANGED` on pod restart |
 | Apps tab | Client-side workspace filter pass-through | Registry apps show when "all workspaces" is selected |
