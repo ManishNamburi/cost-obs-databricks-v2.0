@@ -9,8 +9,10 @@ import type {
   AIGatewayModelRow,
   AIGatewayRouteRow,
   AIGatewayTimeseriesRow,
+  AIMLDashboardBundle,
 } from "@/types/billing";
 import { formatCurrency } from "@/utils/formatters";
+import { AIMLCostCenter } from "@/components/AIMLCostCenter";
 
 // ── Number formatting helpers ─────────────────────────────────────────────────
 
@@ -282,42 +284,154 @@ function TopUsersTable({ rows }: { rows: Array<{ client_user: string; request_co
 
 // ── Main component ────────────────────────────────────────────────────────────
 
-type SubTab = "overview" | "models" | "routes" | "users";
+// V2.1: AI/ML content was merged into this tab (Option A). "cost" is the new
+// default sub-tab and shows the former AI/ML tab surface via AIMLCostCenter;
+// the AI Gateway analytics sub-tabs (overview/models/routes/users) require
+// AI_GATEWAY_USAGE_TABLE to be configured and gracefully degrade otherwise.
+type SubTab = "cost" | "overview" | "models" | "routes" | "users";
 
 interface AIGatewayViewProps {
   data: AIGatewayDashboardBundle | undefined;
   isLoading: boolean;
+  // AI/ML cost data — absorbed from the former AI/ML tab per V2.1_SPEC §4.3.
+  aimlData: AIMLDashboardBundle | undefined;
+  aimlLoading: boolean;
+  startDate?: string;
+  endDate?: string;
+  host?: string | null;
+  workspaceIds?: string[];
+  workspaceNameMap?: Record<string, string>;
 }
 
-export function AIGatewayView({ data, isLoading }: AIGatewayViewProps) {
-  const [subTab, setSubTab] = useState<SubTab>("overview");
+export function AIGatewayView({
+  data,
+  isLoading,
+  aimlData,
+  aimlLoading,
+  startDate,
+  endDate,
+  host,
+  workspaceIds,
+  workspaceNameMap,
+}: AIGatewayViewProps) {
+  const [subTab, setSubTab] = useState<SubTab>("cost");
   const [gatewaySearch, setGatewaySearch] = useState("");
 
-  if (isLoading) {
+  // The AI/ML "cost" sub-tab (default) doesn't need the AI Gateway derived
+  // table to be configured — it reads system.billing.usage directly. So
+  // handle the loading + not-configured states differently by sub-tab.
+  const gatewayConfigured = !!data?.configured;
+
+  // Derived values from the gateway payload — computed only when configured
+  // so the "cost" sub-tab still renders when the gateway isn't set up yet.
+  const s = data?.summary;
+  const models = data?.by_model ?? [];
+  const routes = data?.by_route ?? [];
+  const users = data?.top_users ?? [];
+  const timeseries: AIGatewayTimeseriesRow[] = data?.timeseries ?? [];
+
+  const SUB_TABS: { id: SubTab; label: string }[] = [
+    { id: "cost",     label: "Cost" },
+    { id: "overview", label: "Gateway Overview" },
+    { id: "models",   label: `Models${gatewayConfigured ? ` (${models.length})` : ""}` },
+    { id: "routes",   label: `Routes${gatewayConfigured ? ` (${routes.length})` : ""}` },
+    { id: "users",    label: "Top Users" },
+  ];
+
+  // Cost sub-tab: render AIMLCostCenter with the previously-standalone props.
+  // This is the entire former AI/ML tab surface, now living under AI Gateway.
+  if (subTab === "cost") {
     return (
-      <div className="rounded-lg bg-white p-8 border flex items-center justify-center gap-3" style={{ borderColor: "#E5E5E5" }}>
-        <div className="h-10 w-10 animate-spin rounded-full border-4 border-gray-200" style={{ borderTopColor: "#FF3621" }} />
-        <p className="text-sm text-gray-500">Loading AI Gateway data…</p>
+      <div className="animate-fade-in space-y-5">
+        <div className="flex items-center justify-between gap-3">
+          <div>
+            <h2 className="text-xl font-bold text-gray-900">AI Gateway</h2>
+            <p className="text-sm text-gray-500">
+              AI/ML product cost + governed model traffic
+            </p>
+          </div>
+          <div className="flex rounded-lg border border-gray-200 overflow-hidden text-xs font-medium">
+            {SUB_TABS.map(tab => (
+              <button
+                key={tab.id}
+                onClick={() => setSubTab(tab.id)}
+                className={`px-3 py-1.5 transition-colors ${subTab === tab.id ? "text-white" : "text-gray-600 hover:bg-gray-50"}`}
+                style={subTab === tab.id ? { backgroundColor: "#1B3139" } : {}}
+              >
+                {tab.label}
+              </button>
+            ))}
+          </div>
+        </div>
+        <AIMLCostCenter
+          data={aimlData}
+          isLoading={aimlLoading}
+          startDate={startDate}
+          endDate={endDate}
+          host={host}
+          workspaceIds={workspaceIds}
+          workspaceNameMap={workspaceNameMap}
+        />
       </div>
     );
   }
 
-  if (!data || !data.configured) {
-    return <NotConfiguredBanner message={data?.message} />;
+  // Gateway sub-tabs need the derived table. If it's loading or not configured,
+  // show the appropriate state with the sub-tab strip still visible so users
+  // can bounce back to Cost.
+  if (isLoading) {
+    return (
+      <div className="animate-fade-in space-y-5">
+        <div className="flex items-center justify-between gap-3">
+          <div>
+            <h2 className="text-xl font-bold text-gray-900">AI Gateway</h2>
+            <p className="text-sm text-gray-500">Governed model traffic</p>
+          </div>
+          <div className="flex rounded-lg border border-gray-200 overflow-hidden text-xs font-medium">
+            {SUB_TABS.map(tab => (
+              <button key={tab.id} onClick={() => setSubTab(tab.id)}
+                className={`px-3 py-1.5 transition-colors ${subTab === tab.id ? "text-white" : "text-gray-600 hover:bg-gray-50"}`}
+                style={subTab === tab.id ? { backgroundColor: "#1B3139" } : {}}
+              >{tab.label}</button>
+            ))}
+          </div>
+        </div>
+        <div className="rounded-lg bg-white p-8 border flex items-center justify-center gap-3" style={{ borderColor: "#E5E5E5" }}>
+          <div className="h-10 w-10 animate-spin rounded-full border-4 border-gray-200" style={{ borderTopColor: "#FF3621" }} />
+          <p className="text-sm text-gray-500">Loading AI Gateway data…</p>
+        </div>
+      </div>
+    );
   }
 
-  const s = data.summary!;
-  const models = data.by_model ?? [];
-  const routes = data.by_route ?? [];
-  const users = data.top_users ?? [];
-  const timeseries = data.timeseries ?? [];
+  if (!gatewayConfigured) {
+    return (
+      <div className="animate-fade-in space-y-5">
+        <div className="flex items-center justify-between gap-3">
+          <div>
+            <h2 className="text-xl font-bold text-gray-900">AI Gateway</h2>
+            <p className="text-sm text-gray-500">Governed model traffic</p>
+          </div>
+          <div className="flex rounded-lg border border-gray-200 overflow-hidden text-xs font-medium">
+            {SUB_TABS.map(tab => (
+              <button key={tab.id} onClick={() => setSubTab(tab.id)}
+                className={`px-3 py-1.5 transition-colors ${subTab === tab.id ? "text-white" : "text-gray-600 hover:bg-gray-50"}`}
+                style={subTab === tab.id ? { backgroundColor: "#1B3139" } : {}}
+              >{tab.label}</button>
+            ))}
+          </div>
+        </div>
+        <NotConfiguredBanner message={data?.message} />
+      </div>
+    );
+  }
 
-  const SUB_TABS: { id: SubTab; label: string }[] = [
-    { id: "overview", label: "Overview" },
-    { id: "models", label: `Models (${models.length})` },
-    { id: "routes", label: `Routes (${routes.length})` },
-    { id: "users", label: "Top Users" },
-  ];
+  // After the early returns above, data is guaranteed defined AND configured
+  // AND has a summary. TypeScript can't infer that from the gatewayConfigured
+  // boolean, so we widen with non-null assertions here rather than sprinkle
+  // them through the JSX below.
+  const d = data!;
+  const gs = s!;
 
   return (
     <div className="animate-fade-in space-y-5">
@@ -327,8 +441,8 @@ export function AIGatewayView({ data, isLoading }: AIGatewayViewProps) {
           <h2 className="text-xl font-bold text-gray-900">AI Gateway</h2>
           <p className="text-sm text-gray-500">
             Request volume, token consumption, and cost attribution
-            {data.table && (
-              <span className="ml-2 text-xs text-gray-500">← {data.table}</span>
+            {d.table && (
+              <span className="ml-2 text-xs text-gray-500">← {d.table}</span>
             )}
           </p>
         </div>
@@ -349,25 +463,25 @@ export function AIGatewayView({ data, isLoading }: AIGatewayViewProps) {
 
       {/* KPI cards */}
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 lg:grid-cols-6">
-        <KpiCard label="Total Requests" value={fmtRequests(s.total_requests)} />
-        <KpiCard label="Total Tokens" value={fmtTokens(s.total_tokens)} sub={`${fmtTokens(s.total_input_tokens)} in / ${fmtTokens(s.total_output_tokens)} out`} />
-        <KpiCard label="Models" value={String(s.model_count)} />
-        <KpiCard label="Routes" value={String(s.route_count)} />
-        <KpiCard label="Avg Latency" value={fmtLatency(s.avg_latency_ms)} />
+        <KpiCard label="Total Requests" value={fmtRequests(gs.total_requests)} />
+        <KpiCard label="Total Tokens" value={fmtTokens(gs.total_tokens)} sub={`${fmtTokens(gs.total_input_tokens)} in / ${fmtTokens(gs.total_output_tokens)} out`} />
+        <KpiCard label="Models" value={String(gs.model_count)} />
+        <KpiCard label="Routes" value={String(gs.route_count)} />
+        <KpiCard label="Avg Latency" value={fmtLatency(gs.avg_latency_ms)} />
         <KpiCard
           label="Error Rate"
-          value={`${s.error_rate_pct.toFixed(1)}%`}
-          sub={`${fmtRequests(s.error_count)} errors`}
+          value={`${gs.error_rate_pct.toFixed(1)}%`}
+          sub={`${fmtRequests(gs.error_count)} errors`}
         />
       </div>
 
       {/* Cost summary */}
-      {s.total_estimated_cost_usd > 0 && (
+      {gs.total_estimated_cost_usd > 0 && (
         <div className="rounded-lg border px-4 py-3 flex items-center gap-3 text-sm" style={{ borderColor: "#E5E5E5", background: "rgba(255,54,33,0.03)" }}>
           <svg className="h-4 w-4 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" style={{ color: "#FF3621" }}>
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
           </svg>
-          <span className="font-medium text-gray-900">{formatCurrency(s.total_estimated_cost_usd)}</span>
+          <span className="font-medium text-gray-900">{formatCurrency(gs.total_estimated_cost_usd)}</span>
           <span className="text-gray-500">estimated total cost (token-based estimate for external models; billing-correlated for Databricks 1P models)</span>
         </div>
       )}

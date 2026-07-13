@@ -28,7 +28,9 @@ function lazyWithRetry<T>(factory: () => Promise<T>): Promise<T> {
 const InteractiveBreakdown = lazy(() => lazyWithRetry(() => import("@/components/InteractiveBreakdown").then(m => ({ default: m.InteractiveBreakdown }))));
 const CloudCostsView = lazy(() => lazyWithRetry(() => import("@/components/CloudCostsView").then(m => ({ default: m.CloudCostsView }))));
 const PlatformKPIsView = lazy(() => lazyWithRetry(() => import("@/components/PlatformKPIsView").then(m => ({ default: m.PlatformKPIsView }))));
-const AIMLCostCenter = lazy(() => lazyWithRetry(() => import("@/components/AIMLCostCenter").then(m => ({ default: m.AIMLCostCenter }))));
+// AIMLCostCenter is no longer a top-level tab component; it is imported and
+// rendered as the "Cost" sub-tab inside AIGatewayView (V2.1_SPEC §4.3). Kept
+// in the preload list so its chunk is warmed before the user opens the tab.
 const AIGatewayView = lazy(() => lazyWithRetry(() => import("@/components/AIGatewayView").then(m => ({ default: m.AIGatewayView }))));
 const GenieCostView = lazy(() => lazyWithRetry(() => import("@/components/GenieCostView").then(m => ({ default: m.GenieCostView }))));
 const AppsCostCenter = lazy(() => lazyWithRetry(() => import("@/components/AppsCostCenter").then(m => ({ default: m.AppsCostCenter }))));
@@ -100,7 +102,9 @@ function useKeepAlive() {
   }, []);
 }
 
-type ViewTab = "dbu" | "sql" | "infra" | "optimizer" | "kpis" | "aiml" | "ai-gateway" | "genie" | "apps" | "tagging" | "use-cases" | "users-groups";
+// AI/ML content is now under the AI Gateway tab as the default "Cost" sub-tab
+// (V2.1_SPEC §4.3). "aiml" is no longer a top-level tab value.
+type ViewTab = "dbu" | "sql" | "infra" | "optimizer" | "kpis" | "ai-gateway" | "genie" | "apps" | "tagging" | "use-cases" | "users-groups";
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -1034,21 +1038,7 @@ function Dashboard() {
                 SQL
               </button>
               )}
-              {tabVisibility.aiml && (
-              <button
-                onClick={() => setActiveTab("aiml")}
-                className={`whitespace-nowrap border-b-2 px-1 py-3 text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-gray-400 ${
-                  activeTab === "aiml"
-                    ? "border-[#FF3621] text-[#FF3621]"
-                    : "border-transparent text-gray-500 hover:border-gray-300 hover:text-gray-700"
-                }`}
-              >
-                <svg className="mr-2 -mt-0.5 inline h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
-                </svg>
-                AI/ML
-              </button>
-              )}
+              {/* AI/ML tab removed — content merged into AI Gateway per V2.1_SPEC §4.3 */}
               {tabVisibility["ai-gateway"] && (
               <button
                 onClick={() => setActiveTab("ai-gateway")}
@@ -1303,23 +1293,18 @@ function Dashboard() {
             workspaceNameMap={workspaceNameMap}
           />
           </TabErrorBoundary>
-        ) : activeTab === "aiml" ? (
-          <TabErrorBoundary tabName="AI/ML">
-          <AIMLCostCenter
-            data={aimlData}
-            isLoading={aimlLoading}
-            startDate={dateRange.startDate}
-            endDate={dateRange.endDate}
-            host={accountInfo?.host}
-            workspaceIds={_wsIds}
-            workspaceNameMap={workspaceNameMap}
-          />
-          </TabErrorBoundary>
         ) : activeTab === "ai-gateway" ? (
           <TabErrorBoundary tabName="AI Gateway">
           <AIGatewayView
             data={aiGatewayData}
             isLoading={aiGatewayLoading}
+            aimlData={aimlData}
+            aimlLoading={aimlLoading}
+            startDate={dateRange.startDate}
+            endDate={dateRange.endDate}
+            host={accountInfo?.host}
+            workspaceIds={_wsIds}
+            workspaceNameMap={workspaceNameMap}
           />
           </TabErrorBoundary>
         ) : activeTab === "genie" ? (

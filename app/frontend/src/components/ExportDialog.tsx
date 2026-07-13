@@ -39,7 +39,7 @@ const sectionToTab: Record<keyof ExportSections, keyof TabVisibility | null> = {
   pipelines: "dbu",
   interactive: "dbu",
   query360: "sql",
-  aiml: "aiml",
+  aiml: "ai-gateway",
   apps: "apps",
   tagging: "tagging",
   users: "users-groups",
