@@ -16,6 +16,7 @@ resources:
               DATABRICKS_WAREHOUSE_ID: ${var.warehouse_id}
               COST_OBS_CATALOG: ${var.catalog}
               COST_OBS_SCHEMA: ${var.schema}
+              DEPLOYMENT_MODE: ${var.deployment_mode}
           environment_key: default
 
         - task_key: bootstrap_lakebase
@@ -45,6 +46,7 @@ resources:
               DATABRICKS_WAREHOUSE_ID: ${var.warehouse_id}
               COST_OBS_CATALOG: ${var.catalog}
               COST_OBS_SCHEMA: ${var.schema}
+              DEPLOYMENT_MODE: ${var.deployment_mode}
           environment_key: default
 
         - task_key: seed_genie
@@ -59,6 +61,7 @@ resources:
               DATABRICKS_WAREHOUSE_ID: ${var.warehouse_id}
               COST_OBS_CATALOG: ${var.catalog}
               COST_OBS_SCHEMA: ${var.schema}
+              DEPLOYMENT_MODE: ${var.deployment_mode}
           environment_key: default
 
         - task_key: setup_usage_policy
@@ -73,6 +76,7 @@ resources:
               DATABRICKS_WAREHOUSE_ID: ${var.warehouse_id}
               COST_OBS_CATALOG: ${var.catalog}
               COST_OBS_SCHEMA: ${var.schema}
+              DEPLOYMENT_MODE: ${var.deployment_mode}
           environment_key: default
 
         - task_key: verify
@@ -88,6 +92,7 @@ resources:
               DATABRICKS_WAREHOUSE_ID: ${var.warehouse_id}
               COST_OBS_CATALOG: ${var.catalog}
               COST_OBS_SCHEMA: ${var.schema}
+              DEPLOYMENT_MODE: ${var.deployment_mode}
           environment_key: default
 
       environments:

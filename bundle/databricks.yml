@@ -46,6 +46,14 @@ variables:
       Not injected automatically by the Apps runtime — set this explicitly.
       Find it in the Databricks account console under your user menu.
     default: ""
+  deployment_mode:
+    description: >
+      Setup-job behaviour when the target workspace may already have a cost-obs
+      deployment. "auto" (default) probes for existing MVs and setup_state rows
+      to decide between fresh install and 1.1 -> 2.1 migration.  Override to
+      "fresh" (skip migration; treat catalog as empty) or "migrate" (force
+      migration; fail if prior state is absent) for explicit control.
+    default: auto
 
 sync:
   paths:

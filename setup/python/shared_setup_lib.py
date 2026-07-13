@@ -152,6 +152,75 @@ def _mark_step_done(conn: psycopg.Connection, step: str, metadata: dict | None =
 # Task implementations
 # ---------------------------------------------------------------------------
 
+def _probe_existing_deployment(w: WorkspaceClient) -> dict:
+    """Return signals used to distinguish a fresh deploy from a 1.1 upgrade.
+
+    Fresh: no `daily_usage_summary` MV in the target schema, no legacy DBFS state.
+    Migration: MV exists (customer already ran 1.1) or a prior setup_state row
+    is present in Lakebase.
+    """
+    catalog = os.environ["COST_OBS_CATALOG"]
+    schema = os.environ["COST_OBS_SCHEMA"]
+    wh_id = os.environ["DATABRICKS_WAREHOUSE_ID"]
+
+    signals: dict = {"has_v1_mv": False, "has_prior_setup_state": False}
+
+    try:
+        resp = w.statement_execution.execute_statement(
+            warehouse_id=wh_id,
+            statement=(
+                f"SELECT COUNT(*) FROM system.information_schema.tables "
+                f"WHERE table_catalog = '{catalog}' "
+                f"AND table_schema = '{schema}' "
+                f"AND table_name = 'daily_usage_summary'"
+            ),
+            wait_timeout="30s",
+        )
+        rows = (resp.result.data_array or []) if resp.result else []
+        signals["has_v1_mv"] = bool(rows) and int(rows[0][0]) > 0
+    except Exception as exc:
+        print(f"[detect_deployment_mode] MV probe failed (assuming absent): {exc}")
+
+    try:
+        with pg_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "SELECT to_regclass('public.cost_obs_setup_state') IS NOT NULL"
+                )
+                if cur.fetchone()[0]:
+                    cur.execute("SELECT COUNT(*) FROM cost_obs_setup_state")
+                    signals["has_prior_setup_state"] = int(cur.fetchone()[0]) > 0
+    except Exception as exc:
+        print(f"[detect_deployment_mode] setup_state probe failed (assuming absent): {exc}")
+
+    return signals
+
+
+def detect_deployment_mode() -> str:
+    """Resolve `DEPLOYMENT_MODE` to a concrete "fresh" or "migrate" value.
+
+    Reads the bundle-variable-driven env var, then probes real state when set
+    to "auto" (default). The resolved value is written back into the env so
+    downstream setup tasks in the same job invocation see it consistently.
+    """
+    raw = (os.environ.get("DEPLOYMENT_MODE") or "auto").strip().lower()
+    if raw in ("fresh", "migrate"):
+        os.environ["DEPLOYMENT_MODE"] = raw
+        print(f"[detect_deployment_mode] Operator override: {raw}")
+        return raw
+    if raw != "auto":
+        print(
+            f"[detect_deployment_mode] Unknown DEPLOYMENT_MODE={raw!r}; treating as 'auto'."
+        )
+
+    signals = _probe_existing_deployment(_get_workspace_client())
+    is_migration = signals["has_v1_mv"] or signals["has_prior_setup_state"]
+    mode = "migrate" if is_migration else "fresh"
+    os.environ["DEPLOYMENT_MODE"] = mode
+    print(f"[detect_deployment_mode] Detected mode={mode} (signals={signals})")
+    return mode
+
+
 def validate() -> None:
     """Check env vars, UC permissions, and warehouse connectivity."""
     # PGHOST/PGDATABASE/PGUSER are derived from the SDK if missing (job task path)
@@ -173,6 +242,16 @@ def validate() -> None:
             cur.execute("SELECT version()")
             version = cur.fetchone()[0]
             print(f"[validate] Lakebase connected — {version}")
+
+    # Decide fresh install vs 1.1 migration and propagate to downstream tasks
+    mode = detect_deployment_mode()
+    if mode == "migrate":
+        print(
+            "[validate] Migration mode: existing 1.1 state detected. "
+            "MV rebuild will be skipped; app state migrated to Lakebase."
+        )
+    else:
+        print("[validate] Fresh install mode: no prior cost-obs state detected.")
 
     print("[validate] All prerequisites satisfied.")
 
