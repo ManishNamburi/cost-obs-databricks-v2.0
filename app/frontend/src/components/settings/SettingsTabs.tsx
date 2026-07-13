@@ -12,6 +12,7 @@ const TAB_LABELS: Record<keyof TabVisibility, { label: string; color: string }> 
   kpis: { label: "Platform KPIs & Trends", color: "#FF3621" },
   infra: { label: "Cloud Costs", color: "#FF3621" },
   optimizer: { label: "Optimize", color: "#FF3621" },
+  conversational: { label: "Ask Genie (conversational surface)", color: "#FF3621" },
 };
 
 interface SettingsTabsProps {

@@ -43,6 +43,7 @@ const OptimizeMethodologyPanel = lazy(() => lazyWithRetry(() => import("@/compon
 const UseCases = lazy(() => lazyWithRetry(() => import("@/pages/UseCases")));
 const UsersGroups = lazy(() => lazyWithRetry(() => import("@/pages/UsersGroups")));
 // BudgetView removed from active app (internal-only; excluded from external mirror)
+const ConversationalDrawer = lazy(() => lazyWithRetry(() => import("@/components/ConversationalDrawer").then(m => ({ default: m.ConversationalDrawer }))));
 
 // Preload all lazy chunks during browser idle time so tab switches are instant.
 // React.lazy caches the promise, so these import() calls prime the module cache
@@ -211,6 +212,7 @@ function Dashboard() {
   const [activeTab, setActiveTab] = useState<ViewTab>("dbu");
   const [showExportDialog, setShowExportDialog] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
+  const [showConversational, setShowConversational] = useState(false);
   const [selectedWorkspaceIds, setSelectedWorkspaceIds] = useState<string[]>([]);
   const [tabVisibility, setTabVisibility] = useState<TabVisibility>(loadTabVisibility);
   const [setupCheckPending, setSetupCheckPending] = useState<boolean>(
@@ -941,6 +943,18 @@ function Dashboard() {
                     {user.role === "admin" ? "Admin" : "Consumer"}
                   </span>
                 )}
+                {tabVisibility.conversational && (
+                  <button
+                    onClick={() => setShowConversational(true)}
+                    className="inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-medium text-white opacity-75 transition-opacity hover:opacity-100 hover:bg-white/10 border border-white/20"
+                    title="Ask Genie"
+                  >
+                    <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
+                    </svg>
+                    Ask Genie
+                  </button>
+                )}
                 <button
                   onClick={() => setShowSettings(true)}
                   className="rounded-md p-1.5 text-white opacity-75 transition-opacity hover:opacity-100 hover:bg-white/10"
@@ -1400,6 +1414,13 @@ function Dashboard() {
         }}
         onSettingsChange={setAppSettings}
       />
+
+      <Suspense fallback={null}>
+        <ConversationalDrawer
+          open={showConversational && tabVisibility.conversational}
+          onClose={() => setShowConversational(false)}
+        />
+      </Suspense>
     </div>
     </SpNameMapContext.Provider>
   );

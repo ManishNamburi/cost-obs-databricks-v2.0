@@ -18,6 +18,7 @@ export interface TabVisibility {
   tagging: boolean;
   "use-cases": boolean;
   "users-groups": boolean;
+  conversational: boolean;
 }
 
 const DEFAULT_VISIBILITY: TabVisibility = {
@@ -32,6 +33,7 @@ const DEFAULT_VISIBILITY: TabVisibility = {
   tagging: true,
   "use-cases": false,
   "users-groups": true,
+  conversational: true,
 };
 
 const STORAGE_KEY = "coc-tab-visibility";
