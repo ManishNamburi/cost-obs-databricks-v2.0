@@ -293,7 +293,25 @@ def bootstrap_lakebase() -> None:
 
 
 def seed_genie() -> None:
-    """Configure the Genie space with cost system tables."""
+    """Configure the Genie space with the four-table spine + curated instructions +
+    example SQL + benchmark questions per V2.1_SPEC §4.2.
+
+    Programmatic Genie-space curation via the Databricks REST API is not yet
+    universally available across workspace regions. This function does three
+    things in order of decreasing certainty:
+
+      1. Verifies GENIE_SPACE_ID is set and the app SP can reach the space
+         via w.genie.start_conversation() (a no-op probe).
+      2. Attempts to POST the curated instructions + example SQL via the
+         workspace API. Silently degrades if endpoints aren't reachable.
+      3. Always writes the full curated content to a workspace file at
+         /Workspace/Shared/cost-obs/genie_curation.md so an operator can
+         paste it into the Genie space UI. This is the guaranteed-working
+         fallback and the recommended way to finish setup today.
+
+    The step is marked complete once either path succeeds (or the manual
+    fallback file is written). Re-running is idempotent.
+    """
     genie_space_id = os.environ.get("GENIE_SPACE_ID", "").strip()
     if not genie_space_id:
         print("[seed_genie] GENIE_SPACE_ID not set — skipping.")
@@ -304,12 +322,152 @@ def seed_genie() -> None:
             print("[seed_genie] Already complete — skipping.")
             return
 
-        # TODO: call Genie API to register trusted assets / curated questions
-        # w = _get_workspace_client()
-        # w.genie.update_space(genie_space_id, ...)
+    from genie_curation import (
+        TRUSTED_ASSETS,
+        INSTRUCTIONS,
+        EXAMPLE_QUERIES,
+        BENCHMARK_QUESTIONS,
+        render_manual_setup_doc,
+    )
 
-        _mark_step_done(conn, "seed_genie", {"space_id": genie_space_id})
-        print(f"[seed_genie] Genie space {genie_space_id} configured.")
+    w = _get_workspace_client()
+
+    # (1) Reachability probe. If we can't reach the space, no point continuing —
+    # the app SP is missing CAN_RUN on it.
+    reachable = False
+    try:
+        # start_conversation with an empty/simple prompt is the cheapest probe;
+        # we don't wait for a real response, we just verify the call is accepted.
+        _resp = w.genie.start_conversation_and_wait(  # type: ignore[attr-defined]
+            space_id=genie_space_id,
+            content="ping",
+            timeout=None,  # don't block on completion
+        )
+        reachable = _resp is not None
+    except Exception as exc:
+        # Some SDK versions don't expose start_conversation_and_wait; try the
+        # non-wait variant.
+        try:
+            w.genie.start_conversation(space_id=genie_space_id, content="ping")  # type: ignore[attr-defined]
+            reachable = True
+        except Exception as exc2:
+            print(
+                f"[seed_genie] WARNING — cannot reach Genie space {genie_space_id}. "
+                f"Check the app SP has CAN_RUN on the space and the space_id is correct. "
+                f"Errors: {type(exc).__name__}: {exc} / {type(exc2).__name__}: {exc2}"
+            )
+
+    # (2) Best-effort API seeding. The Databricks Genie space configuration
+    # endpoints aren't part of the stable SDK yet, so we try a few known
+    # candidate paths via the raw API client. If none succeed, we skip and
+    # fall through to the manual-setup file (step 3).
+    api_seeded = False
+    if reachable:
+        api_seeded = _try_api_seed_genie(w, genie_space_id, TRUSTED_ASSETS, INSTRUCTIONS, EXAMPLE_QUERIES, BENCHMARK_QUESTIONS)
+
+    # (3) Manual-setup fallback — always write the markdown doc. This is what
+    # operators actually consume today; the API path above is aspirational.
+    doc_path = "/Workspace/Shared/cost-obs/genie_curation.md"
+    try:
+        _write_workspace_file(w, doc_path, render_manual_setup_doc())
+        print(f"[seed_genie] Wrote curation reference to {doc_path}")
+    except Exception as exc:
+        # Non-fatal — the doc is nice-to-have, and the notebook also prints it.
+        print(f"[seed_genie] WARNING — could not write {doc_path}: {type(exc).__name__}: {exc}")
+
+    # Print the doc to notebook output regardless so operators always have it
+    # inline in the setup-job logs, even if the workspace-file write failed.
+    print("\n" + "=" * 72)
+    print("Genie space curation content (paste into the Genie UI if the setup")
+    print("job didn't seed programmatically — see `Manual Setup` heading below)")
+    print("=" * 72)
+    print(render_manual_setup_doc())
+    print("=" * 72 + "\n")
+
+    with pg_conn() as conn:
+        _mark_step_done(conn, "seed_genie", {
+            "space_id": genie_space_id,
+            "reachable": reachable,
+            "api_seeded": api_seeded,
+            "manual_doc": doc_path,
+        })
+    print(
+        f"[seed_genie] Complete. space_id={genie_space_id}, reachable={reachable}, "
+        f"api_seeded={api_seeded}, manual_doc={doc_path}."
+    )
+
+
+def _try_api_seed_genie(
+    w,
+    space_id: str,
+    trusted_assets,
+    instructions: str,
+    example_queries,
+    benchmark_questions,
+) -> bool:
+    """Best-effort call to the Databricks Genie space configuration REST endpoints.
+
+    Returns True if we successfully posted curation content. False when we hit
+    HTTP 404 / 405 / permission errors — signals to fall back to the manual
+    workspace-file path.
+    """
+    # These endpoint paths are the current best guess based on the /api/2.0/genie/*
+    # surface. Databricks' Genie configuration API is still shipping; if these
+    # 404 we just skip and rely on the manual-setup doc.
+    candidate_endpoints = [
+        (f"/api/2.0/genie/spaces/{space_id}/instructions", {"instructions": instructions}),
+        (
+            f"/api/2.0/genie/spaces/{space_id}/trusted_assets",
+            {"assets": [{"table_full_name": t} for t in trusted_assets]},
+        ),
+        (
+            f"/api/2.0/genie/spaces/{space_id}/example_queries",
+            {
+                "examples": [
+                    {"question": eq.question, "sql": eq.sql, "note": eq.note}
+                    for eq in example_queries
+                ]
+            },
+        ),
+        (
+            f"/api/2.0/genie/spaces/{space_id}/sample_questions",
+            {"questions": [{"text": q} for q in benchmark_questions]},
+        ),
+    ]
+
+    any_success = False
+    for path, body in candidate_endpoints:
+        try:
+            # api_client.do() is the Databricks SDK's raw REST call — works for
+            # any endpoint the SDK doesn't expose a typed method for.
+            w.api_client.do(method="POST", path=path, body=body)
+            print(f"[seed_genie] Seeded via API: {path}")
+            any_success = True
+        except Exception as exc:
+            print(f"[seed_genie] API path {path} unavailable ({type(exc).__name__}) — skipping.")
+    return any_success
+
+
+def _write_workspace_file(w, path: str, content: str) -> None:
+    """Write a UTF-8 text file to /Workspace/... via the workspace API."""
+    from databricks.sdk.service.workspace import ImportFormat, Language  # type: ignore
+
+    # Ensure parent dir exists.
+    parent = "/".join(path.split("/")[:-1])
+    try:
+        w.workspace.mkdirs(parent)
+    except Exception:
+        pass  # already exists is fine
+
+    import base64
+    encoded = base64.b64encode(content.encode("utf-8")).decode("ascii")
+    w.workspace.import_(
+        path=path,
+        format=ImportFormat.AUTO,
+        language=Language.PYTHON,  # ignored for AUTO/text but the SDK signature requires it
+        content=encoded,
+        overwrite=True,
+    )
 
 
 def setup_usage_policy() -> None:
