@@ -5,6 +5,7 @@ const TAB_LABELS: Record<keyof TabVisibility, { label: string; color: string }> 
   sql: { label: "SQL", color: "#FF3621" },
   aiml: { label: "AI/ML", color: "#FF3621" },
   "ai-gateway": { label: "AI Gateway", color: "#FF3621" },
+  genie: { label: "Genie", color: "#FF3621" },
   apps: { label: "Apps", color: "#FF3621" },
   tagging: { label: "Tagging", color: "#FF3621" },
   "use-cases": { label: "Use Cases", color: "#FF3621" },

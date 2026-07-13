@@ -30,6 +30,7 @@ const CloudCostsView = lazy(() => lazyWithRetry(() => import("@/components/Cloud
 const PlatformKPIsView = lazy(() => lazyWithRetry(() => import("@/components/PlatformKPIsView").then(m => ({ default: m.PlatformKPIsView }))));
 const AIMLCostCenter = lazy(() => lazyWithRetry(() => import("@/components/AIMLCostCenter").then(m => ({ default: m.AIMLCostCenter }))));
 const AIGatewayView = lazy(() => lazyWithRetry(() => import("@/components/AIGatewayView").then(m => ({ default: m.AIGatewayView }))));
+const GenieCostView = lazy(() => lazyWithRetry(() => import("@/components/GenieCostView").then(m => ({ default: m.GenieCostView }))));
 const AppsCostCenter = lazy(() => lazyWithRetry(() => import("@/components/AppsCostCenter").then(m => ({ default: m.AppsCostCenter }))));
 const TaggingHub = lazy(() => lazyWithRetry(() => import("@/components/TaggingHub").then(m => ({ default: m.TaggingHub }))));
 const SQLWarehousing360 = lazy(() => lazyWithRetry(() => import("@/components/SQLWarehousing360").then(m => ({ default: m.SQLWarehousing360 }))));
@@ -50,6 +51,7 @@ function preloadTabChunks() {
   import("@/components/PlatformKPIsView");
   import("@/components/AIMLCostCenter");
   import("@/components/AIGatewayView");
+  import("@/components/GenieCostView");
   import("@/components/AppsCostCenter");
   import("@/components/TaggingHub");
   import("@/components/SQLWarehousing360");
@@ -70,6 +72,7 @@ import {
   useDefaultDateRange,
   useAIMLDashboardBundle,
   useAIGatewayDashboardBundle,
+  useGenieCostDashboardBundle,
   useAppsDashboardBundle,
   useTaggingDashboardBundle,
   useDBSQLQueryCosts,
@@ -97,7 +100,7 @@ function useKeepAlive() {
   }, []);
 }
 
-type ViewTab = "dbu" | "sql" | "infra" | "optimizer" | "kpis" | "aiml" | "ai-gateway" | "apps" | "tagging" | "use-cases" | "users-groups";
+type ViewTab = "dbu" | "sql" | "infra" | "optimizer" | "kpis" | "aiml" | "ai-gateway" | "genie" | "apps" | "tagging" | "use-cases" | "users-groups";
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -457,6 +460,7 @@ function Dashboard() {
 
   const { data: aimlData, isLoading: aimlLoading } = useAIMLDashboardBundle(dateRange, _wsIds, warehouseReady);
   const { data: aiGatewayData, isLoading: aiGatewayLoading } = useAIGatewayDashboardBundle(dateRange, _wsIds, activeTab === "ai-gateway");
+  const { data: genieCostData, isLoading: genieCostLoading } = useGenieCostDashboardBundle(dateRange, _wsIds, activeTab === "genie");
   const { data: appsData, isLoading: appsLoading } = useAppsDashboardBundle(dateRange, _wsIds, warehouseReady);
   const { data: taggingData, isLoading: taggingLoading } = useTaggingDashboardBundle(dateRange, _wsIds, warehouseReady);
 
@@ -1060,6 +1064,21 @@ function Dashboard() {
                 AI Gateway
               </button>
               )}
+              {tabVisibility.genie && (
+              <button
+                onClick={() => setActiveTab("genie")}
+                className={`whitespace-nowrap border-b-2 px-1 py-3 text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-gray-400 ${
+                  activeTab === "genie"
+                    ? "border-[#FF3621] text-[#FF3621]"
+                    : "border-transparent text-gray-500 hover:border-gray-300 hover:text-gray-700"
+                }`}
+              >
+                <svg className="mr-2 -mt-0.5 inline h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
+                </svg>
+                Genie
+              </button>
+              )}
               {tabVisibility.apps && (
               <button
                 onClick={() => setActiveTab("apps")}
@@ -1301,6 +1320,13 @@ function Dashboard() {
           <AIGatewayView
             data={aiGatewayData}
             isLoading={aiGatewayLoading}
+          />
+          </TabErrorBoundary>
+        ) : activeTab === "genie" ? (
+          <TabErrorBoundary tabName="Genie">
+          <GenieCostView
+            data={genieCostData}
+            isLoading={genieCostLoading}
           />
           </TabErrorBoundary>
         ) : activeTab === "apps" ? (

@@ -19,6 +19,8 @@ import type {
   DateRange,
   AIMLDashboardBundle,
   AIGatewayDashboardBundle,
+  GenieCostDashboardBundle,
+  GenieCostDiagnosticsResponse,
   AppsDashboardBundle,
   TaggingDashboardBundle,
   DBSQLDashboardBundle,
@@ -405,6 +407,34 @@ export function useAIGatewayDashboardBundle(dateRange?: DateRange, workspaceIds?
     queryKey: ["ai-gateway", "dashboard-bundle", dateRange, workspaceIds?.join(",") ?? null],
     queryFn: () => fetchJson(buildUrlWithWs("/api/ai-gateway/dashboard-bundle", dateRange, workspaceIds)),
     staleTime: 5 * 60 * 1000,
+    enabled,
+  });
+}
+
+/**
+ * Genie Cost dashboard bundle — customer-facing static Genie cost view.
+ * Backed by /api/genie-cost/dashboard-bundle. See V2.1_SPEC §4.1.
+ */
+export function useGenieCostDashboardBundle(dateRange?: DateRange, workspaceIds?: string[], enabled: boolean = true) {
+  return useQuery<GenieCostDashboardBundle>({
+    queryKey: ["genie-cost", "dashboard-bundle", dateRange, workspaceIds?.join(",") ?? null],
+    queryFn: () => fetchJson(buildUrlWithWs("/api/genie-cost/dashboard-bundle", dateRange, workspaceIds)),
+    staleTime: 5 * 60 * 1000,
+    enabled,
+  });
+}
+
+/**
+ * Genie Cost diagnostics — dumps distinct sku_name × usage_type × billing_origin_product
+ * combinations so operators can validate the sub-surface + free-tier CASE mappings
+ * against real customer data.
+ * `enabled` should be gated on the diagnostics panel being open.
+ */
+export function useGenieCostDiagnostics(enabled: boolean = false) {
+  return useQuery<GenieCostDiagnosticsResponse>({
+    queryKey: ["genie-cost", "diagnostics"],
+    queryFn: () => fetchJson("/api/genie-cost/diagnostics"),
+    staleTime: 60 * 60 * 1000,
     enabled,
   });
 }

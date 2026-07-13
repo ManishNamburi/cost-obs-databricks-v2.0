@@ -518,6 +518,118 @@ export interface AIGatewayDashboardBundle {
   timeseries?: AIGatewayTimeseriesRow[];
 }
 
+// Genie Cost Tab Types
+// Backed by /api/genie-cost/dashboard-bundle. Sub-surface columns
+// (genie_code / genie_one / genie_agents) come from provisional
+// sku_name pattern matching (see V2.1_SPEC §5.1). The `genie_unknown`
+// row surfaces spend that passes the Genie inclusion filter but doesn't
+// match any known sub-surface pattern — non-zero means the mapping is
+// out of date and the Diagnostics endpoint should be consulted.
+export interface GenieCostSummary {
+  total_usd: number;
+  charged_usd: number;
+  free_tier_usd: number;
+  // Spend under any usage_type value that isn't BILLABLE / NON_BILLABLE
+  // / RELATED. Non-zero here means new usage_type values need to be
+  // added to _CHARGE_CLASS_CASE_SQL.
+  other_usage_type_usd: number;
+  // Per-sub-surface (Genie Code / One / Agents / Unknown) totals.
+  total_usd__genie_code: number;
+  charged_usd__genie_code: number;
+  free_tier_usd__genie_code: number;
+  total_usd__genie_one: number;
+  charged_usd__genie_one: number;
+  free_tier_usd__genie_one: number;
+  total_usd__genie_agents: number;
+  charged_usd__genie_agents: number;
+  free_tier_usd__genie_agents: number;
+  total_usd__genie_unknown: number;
+  charged_usd__genie_unknown: number;
+  free_tier_usd__genie_unknown: number;
+  // Derived ratios (null when denominator is zero — treat as "n/a").
+  pct_free: number | null;
+  pct_free__genie_code: number | null;
+  pct_free__genie_one: number | null;
+  pct_free__genie_agents: number | null;
+  pct_free__genie_unknown: number | null;
+  // Denominator for the "Genie as % of Databricks" KPI.
+  databricks_total_usd: number;
+  genie_pct_of_databricks_usd: number | null;
+  workspace_count: number;
+  start_date: string;
+  end_date: string;
+}
+
+export interface GenieCostWorkspaceRow {
+  workspace_id: string;
+  workspace_name: string;
+  total_usd: number;
+  charged_usd: number;
+  free_tier_usd: number;
+  other_usage_type_usd: number;
+  total_usd__genie_code: number;
+  charged_usd__genie_code: number;
+  free_tier_usd__genie_code: number;
+  total_usd__genie_one: number;
+  charged_usd__genie_one: number;
+  free_tier_usd__genie_one: number;
+  total_usd__genie_agents: number;
+  charged_usd__genie_agents: number;
+  free_tier_usd__genie_agents: number;
+  total_usd__genie_unknown: number;
+  charged_usd__genie_unknown: number;
+  free_tier_usd__genie_unknown: number;
+  pct_free: number | null;
+  pct_free__genie_code: number | null;
+  pct_free__genie_one: number | null;
+  pct_free__genie_agents: number | null;
+  pct_free__genie_unknown: number | null;
+  genie_pct_of_databricks_usd: number | null;
+  earliest_date_with_billing: string | null;
+  latest_date_with_billing: string | null;
+}
+
+export interface GenieCostSurfaceRow {
+  surface: string;
+  total_usd: number;
+  charged_usd: number;
+  free_tier_usd: number;
+}
+
+export interface GenieCostTimeseriesRow {
+  usage_date: string;
+  total_usd: number;
+  charged_usd: number;
+  free_tier_usd: number;
+  genie_code_usd: number;
+  genie_one_usd: number;
+  genie_agents_usd: number;
+}
+
+export interface GenieCostDashboardBundle {
+  summary: GenieCostSummary;
+  workspaces: GenieCostWorkspaceRow[];
+  timeseries: GenieCostTimeseriesRow[];
+  surface_breakdown: GenieCostSurfaceRow[];
+}
+
+export interface GenieCostDiagnosticsRow {
+  sku_name: string;
+  usage_type: string;
+  billing_origin_product: string;
+  row_count: number;
+  total_usd: number;
+  earliest_date: string | null;
+  latest_date: string | null;
+}
+
+export interface GenieCostDiagnosticsResponse {
+  available: boolean;
+  error?: string;
+  rows: GenieCostDiagnosticsRow[];
+  note?: string;
+}
+
 // Apps Tab Types
 export interface AppsSummary {
   total_dbus: number;
