@@ -12,3 +12,17 @@ targets:
       warehouse_id: dd43ee29fedd958d
       lakebase_project_name: cost-obs-dogfood
       lakebase_endpoint_name: projects/cost-obs-dogfood/branches/production/endpoints/primary
+    resources:
+      postgres_projects:
+        cost_obs_db:
+          project_id: ${var.lakebase_project_name}
+          pg_version: 16
+      postgres_branches:
+        cost_obs_main:
+          branch_id: production
+          parent: projects/${var.lakebase_project_name}
+      postgres_endpoints:
+        cost_obs_endpoint:
+          endpoint_id: primary
+          endpoint_type: ENDPOINT_TYPE_READ_WRITE
+          parent: projects/${var.lakebase_project_name}/branches/production

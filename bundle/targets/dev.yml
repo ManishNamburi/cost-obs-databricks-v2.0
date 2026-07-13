@@ -9,4 +9,22 @@ targets:
       catalog: main
       schema: cost_obs_dev
       lakebase_project_name: cost-obs-db-dev
-      lakebase_endpoint_name: cost-obs-endpoint-dev
+      lakebase_endpoint_name: projects/cost-obs-db-dev/branches/production/endpoints/primary
+    # Lakebase (Autoscaling) — defined per-target because the TF provider
+    # (v1.117.0) panics when CAN_USE grants are inherited from a base
+    # resource file. Grants themselves are applied by the setup job at
+    # runtime, not declared here.
+    resources:
+      postgres_projects:
+        cost_obs_db:
+          project_id: ${var.lakebase_project_name}
+          pg_version: 16
+      postgres_branches:
+        cost_obs_main:
+          branch_id: production
+          parent: projects/${var.lakebase_project_name}
+      postgres_endpoints:
+        cost_obs_endpoint:
+          endpoint_id: primary
+          endpoint_type: ENDPOINT_TYPE_READ_WRITE
+          parent: projects/${var.lakebase_project_name}/branches/production

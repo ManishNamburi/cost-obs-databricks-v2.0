@@ -56,5 +56,6 @@ resources:
         - name: genie-space
           description: Genie space for cross-app cost Q&A — seeded by setup job
           genie_space:
-            id: ${var.genie_space_id}
+            name: cost-obs-genie
+            space_id: ${var.genie_space_id}
             permission: CAN_RUN
