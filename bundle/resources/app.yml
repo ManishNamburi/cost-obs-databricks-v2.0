@@ -45,17 +45,12 @@ resources:
             database: projects/${var.lakebase_project_name}/branches/production/databases/databricks-postgres
             permission: CAN_CONNECT_AND_CREATE
 
-        # Genie space binding — the app SP gets CAN_RUN on the space so
-        # genie_service can start conversations on behalf of the app. The
-        # space itself is provisioned separately (bundle deploy sets the
-        # ID via ${var.genie_space_id}; the space is created either by the
-        # customer via UI, or in future by a first-class DAB resource once
-        # Databricks exposes one). If genie_space_id is empty, the app runs
-        # fine — the Genie tab and conversational surface both gate on the
-        # ID being present.
-        - name: genie-space
-          description: Genie space for cross-app cost Q&A — seeded by setup job
-          genie_space:
-            name: cost-obs-genie
-            space_id: ${var.genie_space_id}
-            permission: CAN_RUN
+        # NOTE: the Genie space is intentionally NOT declared as an app resource
+        # binding here. genie_space_id is empty by default (the space is created
+        # by the customer, often after the first deploy), and a binding with an
+        # empty space_id is emitted verbatim to the Apps API — which rejects it.
+        # Instead, the app reads GENIE_SPACE_ID from the env var above, and the
+        # setup job's seed_genie task grants the app SP CAN_RUN on the space at
+        # runtime when a space_id is configured (best-effort; falls back to a
+        # documented manual grant). This matches the Lakebase pattern where
+        # grants that Terraform can't issue at plan time live in the setup job.

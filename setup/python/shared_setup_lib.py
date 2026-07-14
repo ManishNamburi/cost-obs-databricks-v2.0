@@ -401,40 +401,40 @@ def seed_genie() -> None:
 
     w = _get_workspace_client()
 
-    # (1) Reachability probe. If we can't reach the space, no point continuing —
-    # the app SP is missing CAN_RUN on it.
+    # (1) Reachability probe — a read-only GET on the space. This does NOT
+    # create a throwaway conversation (the old probe did) and doesn't depend on
+    # any SDK waiter/timeout semantics; a 200 means the space exists and the
+    # setup identity can see it.
     reachable = False
     try:
-        # start_conversation with an empty/simple prompt is the cheapest probe;
-        # we don't wait for a real response, we just verify the call is accepted.
-        _resp = w.genie.start_conversation_and_wait(  # type: ignore[attr-defined]
-            space_id=genie_space_id,
-            content="ping",
-            timeout=None,  # don't block on completion
-        )
-        reachable = _resp is not None
+        w.api_client.do("GET", f"/api/2.0/genie/spaces/{genie_space_id}")
+        reachable = True
     except Exception as exc:
-        # Some SDK versions don't expose start_conversation_and_wait; try the
-        # non-wait variant.
-        try:
-            w.genie.start_conversation(space_id=genie_space_id, content="ping")  # type: ignore[attr-defined]
-            reachable = True
-        except Exception as exc2:
-            print(
-                f"[seed_genie] WARNING — cannot reach Genie space {genie_space_id}. "
-                f"Check the app SP has CAN_RUN on the space and the space_id is correct. "
-                f"Errors: {type(exc).__name__}: {exc} / {type(exc2).__name__}: {exc2}"
-            )
+        print(
+            f"[seed_genie] WARNING — cannot reach Genie space {genie_space_id}. "
+            f"Check the space_id is correct and the setup identity can view it. "
+            f"Error: {type(exc).__name__}: {exc}"
+        )
 
-    # (2) Best-effort API seeding. The Databricks Genie space configuration
+    # (2) Grant the app SP CAN_RUN on the space at runtime. The app-resource
+    # binding was removed from the DAB (an empty space_id breaks deploy), so
+    # this is where the app SP gets access — needed for SP-auth deployments
+    # where conversational calls run as the SP rather than the end user.
+    # Best-effort: the Genie permissions API is not yet stable, so on failure
+    # we log a clear manual instruction and continue.
+    sp_granted = False
+    if reachable:
+        sp_granted = _grant_app_sp_can_run_genie(w, genie_space_id)
+
+    # (3) Best-effort API seeding. The Databricks Genie space configuration
     # endpoints aren't part of the stable SDK yet, so we try a few known
     # candidate paths via the raw API client. If none succeed, we skip and
-    # fall through to the manual-setup file (step 3).
+    # fall through to the manual-setup file (step 4).
     api_seeded = False
     if reachable:
         api_seeded = _try_api_seed_genie(w, genie_space_id, TRUSTED_ASSETS, INSTRUCTIONS, EXAMPLE_QUERIES, BENCHMARK_QUESTIONS)
 
-    # (3) Manual-setup fallback — always write the markdown doc. This is what
+    # (4) Manual-setup fallback — always write the markdown doc. This is what
     # operators actually consume today; the API path above is aspirational.
     doc_path = "/Workspace/Shared/cost-obs/genie_curation.md"
     try:
@@ -453,17 +453,67 @@ def seed_genie() -> None:
     print(render_manual_setup_doc())
     print("=" * 72 + "\n")
 
+    if not sp_granted:
+        print(
+            "[seed_genie] ACTION — could not grant the app service principal "
+            "CAN_RUN on the Genie space programmatically. If this is an SP-auth "
+            "deployment, open the Genie space → Share, and grant the app's "
+            "service principal 'Can run' so conversational queries work when no "
+            "end-user token is present."
+        )
+
     with pg_conn() as conn:
         _mark_step_done(conn, "seed_genie", {
             "space_id": genie_space_id,
             "reachable": reachable,
+            "sp_granted": sp_granted,
             "api_seeded": api_seeded,
             "manual_doc": doc_path,
         })
     print(
         f"[seed_genie] Complete. space_id={genie_space_id}, reachable={reachable}, "
-        f"api_seeded={api_seeded}, manual_doc={doc_path}."
+        f"sp_granted={sp_granted}, api_seeded={api_seeded}, manual_doc={doc_path}."
     )
+
+
+def _grant_app_sp_can_run_genie(w, space_id: str) -> bool:
+    """Best-effort: grant the app service principal CAN_RUN on the Genie space.
+
+    The app-resource binding was removed from the DAB (an empty space_id breaks
+    deploy), so the SP's access is issued here at runtime instead. Resolves the
+    app SP's client_id (application id) and PATCHes the workspace permissions
+    for the space. The Genie permissions object type is not yet stable in the
+    public API, so we try known candidate paths and return False if none apply —
+    the caller then prints a manual-grant instruction.
+
+    PATCH (not PUT) is used so we add the app SP without clobbering existing ACLs.
+    """
+    client_id = os.environ.get("DATABRICKS_CLIENT_ID", "").strip()
+    if not client_id:
+        app_name = os.environ.get("APP_NAME", "").strip()
+        if not app_name:
+            print("[seed_genie] Skipping SP grant — neither DATABRICKS_CLIENT_ID nor APP_NAME is set.")
+            return False
+        try:
+            app = w.api_client.do("GET", f"/api/2.0/apps/{app_name}")
+            client_id = (app.get("service_principal_client_id") or "").strip()
+        except Exception as exc:
+            print(f"[seed_genie] Skipping SP grant — could not look up app '{app_name}': {type(exc).__name__}: {exc}")
+            return False
+    if not client_id:
+        print("[seed_genie] Skipping SP grant — could not resolve app service principal client id.")
+        return False
+
+    acl = {"access_control_list": [{"service_principal_name": client_id, "permission_level": "CAN_RUN"}]}
+    for object_type in ("genie", "dashboards"):
+        path = f"/api/2.0/permissions/{object_type}/{space_id}"
+        try:
+            w.api_client.do("PATCH", path, body=acl)
+            print(f"[seed_genie] Granted app SP {client_id} CAN_RUN on Genie space via {path}.")
+            return True
+        except Exception as exc:
+            print(f"[seed_genie] Permissions path {path} unavailable ({type(exc).__name__}) — trying next.")
+    return False
 
 
 def _try_api_seed_genie(

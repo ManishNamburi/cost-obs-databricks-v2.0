@@ -62,6 +62,11 @@ resources:
               COST_OBS_CATALOG: ${var.catalog}
               COST_OBS_SCHEMA: ${var.schema}
               DEPLOYMENT_MODE: ${var.deployment_mode}
+              # GENIE_SPACE_ID gates seed_genie — without it the task no-ops.
+              GENIE_SPACE_ID: ${var.genie_space_id}
+              # APP_NAME lets seed_genie resolve the app SP's client_id to grant
+              # it CAN_RUN on the Genie space at runtime (binding is not in the DAB).
+              APP_NAME: ${var.app_name}
           environment_key: default
 
         - task_key: setup_usage_policy

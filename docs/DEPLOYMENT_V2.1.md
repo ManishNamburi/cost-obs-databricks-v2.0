@@ -67,22 +67,35 @@ databricks bundle run cost_obs_setup -t <target>
 1. The Databricks App (`cost-observability`).
 2. The Lakebase project + `production` branch + `primary` endpoint (via
    `postgres_projects` / `postgres_branches` / `postgres_endpoints`).
-3. The `sql-warehouse`, `lakebase`, and `genie-space` resource bindings
-   on the app.
+3. The `sql-warehouse` and `lakebase` resource bindings on the app.
+   (The Genie space is **not** an app-resource binding — see the note
+   below — but `GENIE_SPACE_ID` is injected as an app env var from the
+   `genie_space_id` variable.)
 4. The `cost_obs_setup` job (six tasks: validate → bootstrap_lakebase →
    migrate_delta → seed_genie → setup_usage_policy → verify).
 
 `bundle run cost_obs_setup` then runs the setup job. In fresh mode:
 
-- `validate` detects no prior state, sets `DEPLOYMENT_MODE=fresh`.
+- `validate` detects no prior state (mode resolves to `fresh`).
 - `bootstrap_lakebase` provisions the OAuth role, grants, ALTER DEFAULT
   PRIVILEGES, and the `setup_state` table.
 - `migrate_delta` is a no-op (nothing to migrate).
-- `seed_genie` writes curation to the configured Genie space (skipped if
-  `genie_space_id` is empty).
+- `seed_genie` grants the app service principal `CAN_RUN` on the Genie
+  space and writes curation to it (skipped entirely if `genie_space_id`
+  is empty).
 - `setup_usage_policy` provisions the serverless usage policy for
   attribution.
 - `verify` runs the smoke checks and writes the final `setup_state` row.
+
+> **Why the Genie space isn't a DAB app-resource binding.** `genie_space_id`
+> is empty by default (the space is usually created after the first deploy),
+> and a binding with an empty `space_id` is emitted verbatim to the Apps API,
+> which rejects it — breaking `bundle deploy` for anyone not using Genie.
+> Instead, the app reads `GENIE_SPACE_ID` from its env var, and `seed_genie`
+> grants the app SP `CAN_RUN` on the space at runtime when an ID is set
+> (best-effort; if the Genie permissions API isn't available it logs a
+> manual-grant instruction). This mirrors the Lakebase pattern where grants
+> Terraform can't issue at plan time live in the setup job.
 
 The materialized views (`daily_usage_summary`, `daily_product_breakdown`,
 etc.) build on first app boot when the app connects to the warehouse.
@@ -107,14 +120,15 @@ databricks bundle run cost_obs_setup -t <target>
 
 Same commands as fresh, but the setup job takes a different code path:
 
-- `validate` finds `daily_usage_summary` in the target schema (or a prior
-  `setup_state` row) and sets `DEPLOYMENT_MODE=migrate`.
+- `validate` finds `daily_usage_summary` in the target schema and resolves
+  the mode to `migrate`.
 - `bootstrap_lakebase` provisions the OAuth role and grants against the
   newly-created Lakebase branch — the existing MVs are untouched.
 - `migrate_delta` copies the 1.1 app state (permissions, alerts, config,
   workspace_config) from Delta / DBFS into Lakebase. Idempotent: safe to
   re-run.
-- `seed_genie` seeds curation on the space in `genie_space_id`.
+- `seed_genie` grants the app SP `CAN_RUN` and seeds curation on the space
+  in `genie_space_id`.
 - `setup_usage_policy` no-ops if the policy already exists.
 - `verify` writes the final `setup_state` marker.
 
