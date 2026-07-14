@@ -17,16 +17,23 @@ resources:
             value: ${var.catalog}
           - name: COST_OBS_SCHEMA
             value: ${var.schema}
-          - name: COST_OBS_WORKSPACES
-            value: ${var.workspace_scope}
-          - name: GENIE_SPACE_ID
-            value: ${var.genie_space_id}
-          - name: AI_GATEWAY_USAGE_TABLE
-            value: ${var.ai_gateway_usage_table}
-          - name: DATABRICKS_ACCOUNT_ID
-            value: ${var.databricks_account_id}
           - name: ENDPOINT_NAME
             value: ${var.lakebase_endpoint_name}
+          # DATABRICKS_WAREHOUSE_ID is NOT auto-injected by the sql-warehouse
+          # binding — it must be sourced explicitly. The bundle's config.env
+          # overrides app/app.yaml, so app/app.yaml's valueFrom is ignored and
+          # this entry is required or the app reports "No warehouse configured"
+          # (breaks the setup wizard + all warehouse-based GRANT/CREATE ops).
+          - name: DATABRICKS_WAREHOUSE_ID
+            value_from: sql-warehouse
+          # Optional env vars — GENIE_SPACE_ID, AI_GATEWAY_USAGE_TABLE,
+          # DATABRICKS_ACCOUNT_ID, COST_OBS_WORKSPACES — are intentionally NOT
+          # declared here. When their bundle variable is empty (the default),
+          # DAB emits an env entry with no `value`, which the Apps API rejects:
+          # "Must specify environment variable source using either value or valueFrom".
+          # The app treats all four as optional (absent = disabled / auto-detect /
+          # all workspaces). To set one, add it to that specific target's app
+          # config.env, or set it in the Apps UI after deploy.
       # Resource bindings — Databricks injects env vars automatically:
       # sql-warehouse → DATABRICKS_WAREHOUSE_ID
       # lakebase      → PGHOST, PGPORT, PGDATABASE, PGUSER, PGSSLMODE
@@ -40,9 +47,15 @@ resources:
 
         - name: lakebase
           description: Lakebase Autoscaling project — injects PGHOST/PGUSER/PGDATABASE/PGPORT/PGSSLMODE
+          # Creating a Lakebase project auto-provisions a default "production"
+          # branch + "primary" endpoint, so the DAB manages only the project
+          # (bundle/targets/*.yml). Reference the project's .id here so Terraform
+          # orders the app AFTER the project (and thus its default branch) exists
+          # — otherwise the app create 404s ("Postgres branch … does not exist").
+          # .id resolves to the full name "projects/<slug>", so no extra prefix.
           postgres:
-            branch: projects/${var.lakebase_project_name}/branches/production
-            database: projects/${var.lakebase_project_name}/branches/production/databases/databricks-postgres
+            branch: ${resources.postgres_projects.cost_obs_db.id}/branches/production
+            database: ${resources.postgres_projects.cost_obs_db.id}/branches/production/databases/databricks-postgres
             permission: CAN_CONNECT_AND_CREATE
 
         # NOTE: the Genie space is intentionally NOT declared as an app resource

@@ -21,7 +21,10 @@ export default defineConfig({
     },
   },
   build: {
-    outDir: "../../static",
+    // Build into app/static so the deployed app/ tree is self-contained:
+    // backend/app.py serves StaticFiles from `dirname(__file__)/../static`
+    // (= app/static), and DAB uploads only source_code_path (app/).
+    outDir: "../static",
     emptyOutDir: true,
     // Code splitting for optimized bundle loading
     rollupOptions: {

@@ -59,4 +59,8 @@ sync:
   paths:
     - .
     - ../setup
+    # app/ is a sibling of bundle/, so it must be synced explicitly for the
+    # app resource's source_code_path (../../app -> .../files/app) to exist.
+    # Without this the app deploy fails: "Invalid source code path … does not exist".
+    - ../app
 

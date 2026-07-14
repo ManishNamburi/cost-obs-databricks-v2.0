@@ -1,0 +1,21 @@
+targets:
+  cmegdemos:
+    mode: development
+    workspace:
+      host: https://fevm-cmegdemos.cloud.databricks.com
+      profile: "cmeg demo"
+      root_path: /Workspace/Users/sam.mathews@databricks.com/.bundle/${bundle.name}/${bundle.target}
+    variables:
+      # Distinct from the existing cost-obs-demo2 app + its cmegdemos_catalog.cost_obs
+      # schema so this 2.1 test deploy does not collide with the default app.
+      app_name: cost-obs-2-1
+      catalog: cmegdemos_catalog
+      schema: cost_obs_2_1
+      warehouse_id: 9cd919d96b11bf1c
+      lakebase_project_name: cost-obs-db-v21
+      lakebase_endpoint_name: projects/cost-obs-db-v21/branches/production/endpoints/primary
+    resources:
+      postgres_projects:
+        cost_obs_db:
+          project_id: ${var.lakebase_project_name}
+          pg_version: 16
