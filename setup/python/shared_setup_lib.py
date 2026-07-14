@@ -155,15 +155,18 @@ def _mark_step_done(conn: psycopg.Connection, step: str, metadata: dict | None =
 def _probe_existing_deployment(w: WorkspaceClient) -> dict:
     """Return signals used to distinguish a fresh deploy from a 1.1 upgrade.
 
-    Fresh: no `daily_usage_summary` MV in the target schema, no legacy DBFS state.
-    Migration: MV exists (customer already ran 1.1) or a prior setup_state row
-    is present in Lakebase.
+    The reliable discriminator is whether a prior cost-obs deployment already
+    built its materialized views in the target schema — `daily_usage_summary`
+    is created by the 1.x app and persists. We deliberately do NOT key off the
+    Lakebase `setup_state` table: it is a v2-only artifact that gets populated
+    by earlier tasks *during the current run*, so its presence indicates
+    "v2 setup has run before", not "a 1.1 deployment exists".
     """
     catalog = os.environ["COST_OBS_CATALOG"]
     schema = os.environ["COST_OBS_SCHEMA"]
     wh_id = os.environ["DATABRICKS_WAREHOUSE_ID"]
 
-    signals: dict = {"has_v1_mv": False, "has_prior_setup_state": False}
+    signals: dict = {"has_v1_mv": False}
 
     try:
         resp = w.statement_execution.execute_statement(
@@ -181,18 +184,6 @@ def _probe_existing_deployment(w: WorkspaceClient) -> dict:
     except Exception as exc:
         print(f"[detect_deployment_mode] MV probe failed (assuming absent): {exc}")
 
-    try:
-        with pg_conn() as conn:
-            with conn.cursor() as cur:
-                cur.execute(
-                    "SELECT to_regclass('public.cost_obs_setup_state') IS NOT NULL"
-                )
-                if cur.fetchone()[0]:
-                    cur.execute("SELECT COUNT(*) FROM cost_obs_setup_state")
-                    signals["has_prior_setup_state"] = int(cur.fetchone()[0]) > 0
-    except Exception as exc:
-        print(f"[detect_deployment_mode] setup_state probe failed (assuming absent): {exc}")
-
     return signals
 
 
@@ -200,12 +191,12 @@ def detect_deployment_mode() -> str:
     """Resolve `DEPLOYMENT_MODE` to a concrete "fresh" or "migrate" value.
 
     Reads the bundle-variable-driven env var, then probes real state when set
-    to "auto" (default). The resolved value is written back into the env so
-    downstream setup tasks in the same job invocation see it consistently.
+    to "auto" (default). Each setup task calls this independently — the probe
+    is idempotent and does not rely on the resolved value propagating across
+    task processes (base_parameters carry the raw "auto"/"fresh"/"migrate").
     """
     raw = (os.environ.get("DEPLOYMENT_MODE") or "auto").strip().lower()
     if raw in ("fresh", "migrate"):
-        os.environ["DEPLOYMENT_MODE"] = raw
         print(f"[detect_deployment_mode] Operator override: {raw}")
         return raw
     if raw != "auto":
@@ -214,9 +205,7 @@ def detect_deployment_mode() -> str:
         )
 
     signals = _probe_existing_deployment(_get_workspace_client())
-    is_migration = signals["has_v1_mv"] or signals["has_prior_setup_state"]
-    mode = "migrate" if is_migration else "fresh"
-    os.environ["DEPLOYMENT_MODE"] = mode
+    mode = "migrate" if signals["has_v1_mv"] else "fresh"
     print(f"[detect_deployment_mode] Detected mode={mode} (signals={signals})")
     return mode
 
@@ -243,7 +232,8 @@ def validate() -> None:
             version = cur.fetchone()[0]
             print(f"[validate] Lakebase connected — {version}")
 
-    # Decide fresh install vs 1.1 migration and propagate to downstream tasks
+    # Decide fresh install vs 1.1 migration (for logging here; each downstream
+    # task re-probes independently since env vars don't cross task processes).
     mode = detect_deployment_mode()
     if mode == "migrate":
         print(
