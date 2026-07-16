@@ -95,3 +95,28 @@ CREATE TABLE IF NOT EXISTS workspace_cache (
     region        TEXT,
     cached_at     TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+
+-- ── Cloud cost connections (replaces UC app_cloud_connections) ────────────────
+-- Provider-specific credentials/config live in the JSONB `config` column.
+
+CREATE TABLE IF NOT EXISTS cloud_connections (
+    id            TEXT        PRIMARY KEY,
+    name          TEXT,
+    provider      TEXT,                     -- 'azure' | 'aws' | 'gcp'
+    created_at    TEXT,
+    config        JSONB       NOT NULL DEFAULT '{}',
+    updated_at    TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+-- ── Response cache (L2; replaces the warehouse-backed app_response_cache) ─────
+-- payload is gzip + base64 of the JSON bundle; TTL enforced via expires_at.
+
+CREATE TABLE IF NOT EXISTS response_cache (
+    cache_key     TEXT        PRIMARY KEY,
+    endpoint      TEXT,
+    payload       TEXT,
+    expires_at    TIMESTAMPTZ,
+    created_at    TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS response_cache_endpoint_idx ON response_cache (endpoint);

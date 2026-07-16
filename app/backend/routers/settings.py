@@ -184,41 +184,79 @@ def _ensure_workspace_filter_table() -> None:
 
 
 def save_workspace_filter_to_table(workspace_ids: list) -> None:
-    """Persist workspace filter pool to the app Delta config table."""
+    """Persist the workspace filter pool.
+
+    Phase A (Lakebase migration): Lakebase `app_config` is the primary store;
+    the UC Delta table is kept as a best-effort dual-write so a rollback to the
+    warehouse-only path (or a non-Lakebase deploy) doesn't lose state.
+    """
     import json as _json
-    from backend.db import execute_write
-    _ensure_workspace_filter_table()
-    table = _config_table("app_workspace_filter")
-    execute_write(f"DELETE FROM {table}", None)
-    execute_write(
-        f"INSERT INTO {table} (workspace_ids_json, updated_at) "
-        f"VALUES (:ws_json, current_timestamp())",
-        {"ws_json": _json.dumps(workspace_ids)},
-    )
-    logger.info("Workspace filter pool saved to Delta: %d ids", len(workspace_ids))
+    ids = list(workspace_ids)
+
+    # Primary: Lakebase app_config KV
+    try:
+        from backend.db import lb_set_config, lakebase_available
+        if lakebase_available():
+            lb_set_config("workspace_filter", {"workspace_ids": ids})
+            logger.info("Workspace filter pool saved to Lakebase: %d ids", len(ids))
+    except Exception as e:
+        logger.warning("Could not save workspace filter to Lakebase (non-fatal): %s", e)
+
+    # Dual-write: UC Delta table (rollback safety / warehouse-only deploys)
+    try:
+        from backend.db import execute_write
+        _ensure_workspace_filter_table()
+        table = _config_table("app_workspace_filter")
+        execute_write(f"DELETE FROM {table}", None)
+        execute_write(
+            f"INSERT INTO {table} (workspace_ids_json, updated_at) "
+            f"VALUES (:ws_json, current_timestamp())",
+            {"ws_json": _json.dumps(ids)},
+        )
+    except Exception as e:
+        logger.debug("UC dual-write of workspace filter skipped/failed (non-fatal): %s", e)
 
 
 def restore_workspace_filter_from_delta() -> None:
-    """Read saved workspace filter pool from Delta and write to .settings file. Called at startup."""
+    """Restore the workspace filter pool to the .settings file at startup.
+
+    Reads Lakebase `app_config` first (Phase A primary), then falls back to the
+    UC Delta table for pre-migration / warehouse-only deployments.
+    """
     import json as _json
+    workspace_ids = None
+
+    # Primary: Lakebase
     try:
-        from backend.db import execute_query
-        table = _config_table("app_workspace_filter")
-        rows = execute_query(f"SELECT workspace_ids_json FROM {table} LIMIT 1", None, no_cache=True)
-        if not rows or not rows[0].get("workspace_ids_json"):
-            return
-        workspace_ids = _json.loads(rows[0]["workspace_ids_json"])
-        settings_dir = os.path.join(os.path.dirname(__file__), "..", "..", ".settings")
-        settings_path = os.path.join(settings_dir, "workspace_filter.json")
-        os.makedirs(settings_dir, exist_ok=True)
-        with open(settings_path, "w") as f:
-            _json.dump({"workspace_ids": workspace_ids}, f)
-        logger.info("Restored workspace filter pool from Delta: %d ids", len(workspace_ids))
+        from backend.db import lb_get_config
+        cfg = lb_get_config("workspace_filter")
+        if isinstance(cfg, dict) and cfg.get("workspace_ids"):
+            workspace_ids = cfg["workspace_ids"]
     except Exception as e:
-        if _table_missing(e):
-            logger.debug("Could not restore workspace filter from Delta (not yet created): %s", e)
-        else:
-            logger.warning(f"Could not restore workspace filter from Delta (non-fatal): {e}")
+        logger.debug("Lakebase workspace-filter read failed, will try UC: %s", e)
+
+    # Fallback: UC Delta table
+    if workspace_ids is None:
+        try:
+            from backend.db import execute_query
+            table = _config_table("app_workspace_filter")
+            rows = execute_query(f"SELECT workspace_ids_json FROM {table} LIMIT 1", None, no_cache=True)
+            if rows and rows[0].get("workspace_ids_json"):
+                workspace_ids = _json.loads(rows[0]["workspace_ids_json"])
+        except Exception as e:
+            if _table_missing(e):
+                logger.debug("Workspace filter not in UC yet (non-fatal): %s", e)
+            else:
+                logger.warning(f"Could not restore workspace filter from UC (non-fatal): {e}")
+
+    if not workspace_ids:
+        return
+    settings_dir = os.path.join(os.path.dirname(__file__), "..", "..", ".settings")
+    settings_path = os.path.join(settings_dir, "workspace_filter.json")
+    os.makedirs(settings_dir, exist_ok=True)
+    with open(settings_path, "w") as f:
+        _json.dump({"workspace_ids": workspace_ids}, f)
+    logger.info("Restored workspace filter pool: %d ids", len(workspace_ids))
 
 
 # ── Refresh log persistence (survives deploys via Delta) ──────────────────────
@@ -231,40 +269,71 @@ def _ensure_refresh_log_table() -> None:
 
 
 def save_refresh_log_to_delta(log_data: dict) -> None:
-    """Persist mv_refresh_log.json content to Delta so it survives redeployments."""
+    """Persist the MV refresh log. Lakebase primary (app_config KV), UC dual-write."""
     import json as _json
-    from backend.db import execute_write
-    _ensure_refresh_log_table()
-    table = _config_table("app_refresh_log")
-    execute_write(f"DELETE FROM {table}", None)
-    execute_write(
-        f"INSERT INTO {table} (log_json, updated_at) VALUES (:log_json, current_timestamp())",
-        {"log_json": _json.dumps(log_data)},
-    )
-    logger.info("Refresh log saved to Delta (status=%s)", log_data.get("status"))
+
+    # Primary: Lakebase app_config KV
+    try:
+        from backend.db import lb_set_config, lakebase_available
+        if lakebase_available():
+            lb_set_config("refresh_log", log_data)
+            logger.info("Refresh log saved to Lakebase (status=%s)", log_data.get("status"))
+    except Exception as e:
+        logger.warning("Could not save refresh log to Lakebase (non-fatal): %s", e)
+
+    # Dual-write: UC Delta table
+    try:
+        from backend.db import execute_write
+        _ensure_refresh_log_table()
+        table = _config_table("app_refresh_log")
+        execute_write(f"DELETE FROM {table}", None)
+        execute_write(
+            f"INSERT INTO {table} (log_json, updated_at) VALUES (:log_json, current_timestamp())",
+            {"log_json": _json.dumps(log_data)},
+        )
+    except Exception as e:
+        logger.debug("UC dual-write of refresh log skipped/failed (non-fatal): %s", e)
 
 
 def restore_refresh_log_from_delta() -> None:
-    """Read saved refresh log from Delta and write to .settings file. Called at startup."""
+    """Restore the MV refresh log to the .settings file at startup.
+
+    Reads Lakebase `app_config` first, falls back to the UC Delta table.
+    """
     import json as _json
+    log_data = None
+
+    # Primary: Lakebase
     try:
-        from backend.db import execute_query
-        table = _config_table("app_refresh_log")
-        rows = execute_query(f"SELECT log_json FROM {table} LIMIT 1", None, no_cache=True)
-        if not rows or not rows[0].get("log_json"):
-            return
-        log_data = _json.loads(rows[0]["log_json"])
-        log_dir = os.path.join(os.path.dirname(__file__), "..", "..", ".settings")
-        log_path = os.path.join(log_dir, "mv_refresh_log.json")
-        os.makedirs(log_dir, exist_ok=True)
-        with open(log_path, "w") as f:
-            _json.dump(log_data, f)
-        logger.info("Restored refresh log from Delta (last_refresh=%s)", log_data.get("last_refresh_utc"))
+        from backend.db import lb_get_config
+        cfg = lb_get_config("refresh_log")
+        if isinstance(cfg, dict) and cfg:
+            log_data = cfg
     except Exception as e:
-        if _table_missing(e):
-            logger.debug("Could not restore refresh log from Delta (not yet created): %s", e)
-        else:
-            logger.warning(f"Could not restore refresh log from Delta (non-fatal): {e}")
+        logger.debug("Lakebase refresh-log read failed, will try UC: %s", e)
+
+    # Fallback: UC Delta table
+    if log_data is None:
+        try:
+            from backend.db import execute_query
+            table = _config_table("app_refresh_log")
+            rows = execute_query(f"SELECT log_json FROM {table} LIMIT 1", None, no_cache=True)
+            if rows and rows[0].get("log_json"):
+                log_data = _json.loads(rows[0]["log_json"])
+        except Exception as e:
+            if _table_missing(e):
+                logger.debug("Refresh log not in UC yet (non-fatal): %s", e)
+            else:
+                logger.warning(f"Could not restore refresh log from UC (non-fatal): {e}")
+
+    if not log_data:
+        return
+    log_dir = os.path.join(os.path.dirname(__file__), "..", "..", ".settings")
+    log_path = os.path.join(log_dir, "mv_refresh_log.json")
+    os.makedirs(log_dir, exist_ok=True)
+    with open(log_path, "w") as f:
+        _json.dump(log_data, f)
+    logger.info("Restored refresh log (last_refresh=%s)", log_data.get("last_refresh_utc"))
 
 
 class CloudConnectionCreate(BaseModel):
@@ -285,7 +354,40 @@ class CloudConnectionCreate(BaseModel):
     service_account_key: Optional[str] = None
 
 
+_CONN_TOP_LEVEL = {"id", "name", "provider", "created_at"}
+
+
+def _ensure_connections_table_lb() -> None:
+    """Create the Lakebase cloud_connections table if missing (lazy, idempotent)."""
+    from backend.db import lakebase_execute
+    lakebase_execute(
+        "CREATE TABLE IF NOT EXISTS cloud_connections ("
+        "id TEXT PRIMARY KEY, name TEXT, provider TEXT, created_at TEXT, "
+        "config JSONB NOT NULL DEFAULT '{}', updated_at TIMESTAMPTZ NOT NULL DEFAULT now())"
+    )
+
+
 def _load_connections_from_table() -> list[dict]:
+    # Primary: Lakebase
+    try:
+        from backend.db import lakebase_available, lakebase_query
+        if lakebase_available():
+            _ensure_connections_table_lb()
+            rows = lakebase_query(
+                "SELECT id, name, provider, created_at, config FROM cloud_connections ORDER BY created_at"
+            )
+            result = []
+            for r in rows:
+                conn = {"id": r["id"], "name": r["name"], "provider": r["provider"], "created_at": r["created_at"]}
+                cfg = r.get("config")
+                if isinstance(cfg, dict):
+                    conn.update(cfg)
+                result.append(conn)
+            return result
+    except Exception as e:
+        logger.debug("Lakebase connections read failed, will try UC: %s", e)
+
+    # Fallback: UC Delta table
     from backend.db import execute_query
     _ensure_connections_table()
     table = _config_table("app_cloud_connections")
@@ -313,51 +415,106 @@ def _load_connections_from_table() -> list[dict]:
 
 
 def _save_all_connections_to_table(connections: list[dict]) -> None:
-    from backend.db import execute_write
-    _ensure_connections_table()
-    table = _config_table("app_cloud_connections")
-    execute_write(f"DELETE FROM {table}", None)
-    _top_level = {"id", "name", "provider", "created_at"}
-    for conn in connections:
-        config = {k: v for k, v in conn.items() if k not in _top_level}
+    # Primary: Lakebase
+    try:
+        from backend.db import lakebase_available, lakebase_execute
+        if lakebase_available():
+            import psycopg.types.json as _pj
+            _ensure_connections_table_lb()
+            lakebase_execute("DELETE FROM cloud_connections")
+            for conn in connections:
+                config = {k: v for k, v in conn.items() if k not in _CONN_TOP_LEVEL}
+                lakebase_execute(
+                    "INSERT INTO cloud_connections (id, name, provider, created_at, config) "
+                    "VALUES (%s, %s, %s, %s, %s)",
+                    (conn.get("id", ""), conn.get("name", ""), conn.get("provider", ""),
+                     conn.get("created_at", ""), _pj.Jsonb(config)),
+                )
+    except Exception as e:
+        logger.warning("Could not save connections to Lakebase (non-fatal): %s", e)
+
+    # Dual-write: UC Delta table
+    try:
+        from backend.db import execute_write
+        _ensure_connections_table()
+        table = _config_table("app_cloud_connections")
+        execute_write(f"DELETE FROM {table}", None)
+        for conn in connections:
+            config = {k: v for k, v in conn.items() if k not in _CONN_TOP_LEVEL}
+            execute_write(
+                f"INSERT INTO {table} (id, name, provider, created_at, config_json, updated_at) "
+                f"VALUES (:id, :name, :provider, :created_at, :config_json, current_timestamp())",
+                {
+                    "id": conn.get("id", ""),
+                    "name": conn.get("name", ""),
+                    "provider": conn.get("provider", ""),
+                    "created_at": conn.get("created_at", ""),
+                    "config_json": json.dumps(config),
+                },
+            )
+    except Exception as e:
+        logger.debug("UC dual-write of connections skipped/failed (non-fatal): %s", e)
+
+
+def _upsert_connection_to_table(conn: dict) -> None:
+    config = {k: v for k, v in conn.items() if k not in _CONN_TOP_LEVEL}
+
+    # Primary: Lakebase (ON CONFLICT upsert)
+    try:
+        from backend.db import lakebase_available, lakebase_execute
+        if lakebase_available():
+            import psycopg.types.json as _pj
+            _ensure_connections_table_lb()
+            lakebase_execute(
+                "INSERT INTO cloud_connections (id, name, provider, created_at, config) "
+                "VALUES (%s, %s, %s, %s, %s) "
+                "ON CONFLICT (id) DO UPDATE SET name = EXCLUDED.name, provider = EXCLUDED.provider, "
+                "created_at = EXCLUDED.created_at, config = EXCLUDED.config, updated_at = now()",
+                (conn["id"], conn.get("name", ""), conn.get("provider", ""),
+                 conn.get("created_at", ""), _pj.Jsonb(config)),
+            )
+    except Exception as e:
+        logger.warning("Could not upsert connection to Lakebase (non-fatal): %s", e)
+
+    # Dual-write: UC Delta table
+    try:
+        from backend.db import execute_write
+        _ensure_connections_table()
+        table = _config_table("app_cloud_connections")
+        execute_write(f"DELETE FROM {table} WHERE id = :id", {"id": conn["id"]})
         execute_write(
             f"INSERT INTO {table} (id, name, provider, created_at, config_json, updated_at) "
             f"VALUES (:id, :name, :provider, :created_at, :config_json, current_timestamp())",
             {
-                "id": conn.get("id", ""),
+                "id": conn["id"],
                 "name": conn.get("name", ""),
                 "provider": conn.get("provider", ""),
                 "created_at": conn.get("created_at", ""),
                 "config_json": json.dumps(config),
             },
         )
-
-
-def _upsert_connection_to_table(conn: dict) -> None:
-    from backend.db import execute_write
-    _ensure_connections_table()
-    table = _config_table("app_cloud_connections")
-    _top_level = {"id", "name", "provider", "created_at"}
-    config = {k: v for k, v in conn.items() if k not in _top_level}
-    execute_write(f"DELETE FROM {table} WHERE id = :id", {"id": conn["id"]})
-    execute_write(
-        f"INSERT INTO {table} (id, name, provider, created_at, config_json, updated_at) "
-        f"VALUES (:id, :name, :provider, :created_at, :config_json, current_timestamp())",
-        {
-            "id": conn["id"],
-            "name": conn.get("name", ""),
-            "provider": conn.get("provider", ""),
-            "created_at": conn.get("created_at", ""),
-            "config_json": json.dumps(config),
-        },
-    )
+    except Exception as e:
+        logger.debug("UC dual-write of connection upsert skipped/failed (non-fatal): %s", e)
 
 
 def _delete_connection_from_table(connection_id: str) -> None:
-    from backend.db import execute_write
-    _ensure_connections_table()
-    table = _config_table("app_cloud_connections")
-    execute_write(f"DELETE FROM {table} WHERE id = :id", {"id": connection_id})
+    # Primary: Lakebase
+    try:
+        from backend.db import lakebase_available, lakebase_execute
+        if lakebase_available():
+            _ensure_connections_table_lb()
+            lakebase_execute("DELETE FROM cloud_connections WHERE id = %s", (connection_id,))
+    except Exception as e:
+        logger.warning("Could not delete connection from Lakebase (non-fatal): %s", e)
+
+    # Dual-write: UC Delta table
+    try:
+        from backend.db import execute_write
+        _ensure_connections_table()
+        table = _config_table("app_cloud_connections")
+        execute_write(f"DELETE FROM {table} WHERE id = :id", {"id": connection_id})
+    except Exception as e:
+        logger.debug("UC dual-write of connection delete skipped/failed (non-fatal): %s", e)
 
 
 def _load_connections() -> list[dict]:
@@ -1159,7 +1316,14 @@ class WebhookSettings(BaseModel):
 
 
 def _load_webhook_settings() -> dict:
-    """Load webhook settings from Delta table, falling back to local file."""
+    """Load webhook settings — Lakebase first, then UC Delta, then local file."""
+    try:
+        from backend.db import lb_get_config
+        cfg = lb_get_config("webhook_settings")
+        if isinstance(cfg, dict) and cfg.get("slack_webhook_url"):
+            return {"slack_webhook_url": cfg.get("slack_webhook_url") or ""}
+    except Exception as e:
+        logger.debug("Lakebase webhook read failed, will try UC: %s", e)
     try:
         from backend.db import execute_query
         table = _config_table("app_webhook_settings")
@@ -1190,15 +1354,25 @@ def _load_webhook_settings() -> dict:
 
 
 def _save_webhook_to_table(settings: dict) -> None:
-    from backend.db import execute_write
-    _ensure_webhook_table()
-    table = _config_table("app_webhook_settings")
-    execute_write(f"DELETE FROM {table}", None)
-    execute_write(
-        f"INSERT INTO {table} (slack_webhook_url, updated_at) "
-        f"VALUES (:url, current_timestamp())",
-        {"url": settings.get("slack_webhook_url") or ""},
-    )
+    """Persist webhook settings. Lakebase app_config primary; UC Delta dual-write."""
+    try:
+        from backend.db import lb_set_config, lakebase_available
+        if lakebase_available():
+            lb_set_config("webhook_settings", {"slack_webhook_url": settings.get("slack_webhook_url") or ""})
+    except Exception as e:
+        logger.warning("Could not save webhook settings to Lakebase (non-fatal): %s", e)
+    try:
+        from backend.db import execute_write
+        _ensure_webhook_table()
+        table = _config_table("app_webhook_settings")
+        execute_write(f"DELETE FROM {table}", None)
+        execute_write(
+            f"INSERT INTO {table} (slack_webhook_url, updated_at) "
+            f"VALUES (:url, current_timestamp())",
+            {"url": settings.get("slack_webhook_url") or ""},
+        )
+    except Exception as e:
+        logger.debug("UC dual-write of webhook settings skipped/failed (non-fatal): %s", e)
 
 
 def _save_webhook_settings(settings: dict) -> None:
@@ -1319,7 +1493,20 @@ def _ensure_permissions_table() -> None:
 
 
 def _load_user_permissions() -> dict:
-    """Load permissions from Delta table, then local file."""
+    """Load permissions — Lakebase first, then UC Delta table, then local file."""
+    # Primary: Lakebase user_permissions
+    try:
+        from backend.db import lakebase_available, lakebase_query
+        if lakebase_available():
+            rows = lakebase_query(
+                "SELECT subject_id, role FROM user_permissions WHERE subject_type = 'user'"
+            )
+            admins = [r["subject_id"] for r in rows if r.get("role") == "admin"]
+            consumers = [r["subject_id"] for r in rows if r.get("role") == "consumer"]
+            if admins or consumers:
+                return {"admins": admins, "consumers": consumers}
+    except Exception as e:
+        logger.debug("Lakebase permissions read failed, will try UC: %s", e)
     try:
         from backend.db import execute_query
         _ensure_permissions_table()
@@ -1348,23 +1535,49 @@ def _load_user_permissions() -> dict:
 
 
 def _save_user_permissions_to_table(admins: list[str], consumers: list[str]) -> None:
-    """Write permissions to Delta table (replaces all rows)."""
-    from backend.db import execute_write, clear_query_cache
-    # Ensure the table exists before writing. If this raises, the SP lacks
-    # CREATE TABLE permission — propagate so the caller gets a clear error.
-    _ensure_permissions_table()
-    table = _permissions_table()
-    execute_write(f"DELETE FROM {table}", None)
-    rows = [("admin", e) for e in admins] + [("consumer", e) for e in consumers]
-    if rows:
-        for role, email in rows:
+    """Write permissions (replaces all user rows). Lakebase primary; UC dual-write.
+
+    Security-sensitive: if NEITHER store succeeds we raise, so an admin change
+    is never silently lost.
+    """
+    from backend.db import execute_write, clear_query_cache, lakebase_available, lakebase_execute
+    pairs = [("admin", e) for e in admins] + [("consumer", e) for e in consumers]
+
+    # Primary: Lakebase user_permissions (subject_id = email, subject_type = 'user')
+    lb_ok = False
+    if lakebase_available():
+        try:
+            lakebase_execute("DELETE FROM user_permissions WHERE subject_type = 'user'")
+            for role, email in pairs:
+                lakebase_execute(
+                    "INSERT INTO user_permissions (subject_id, subject_type, role) "
+                    "VALUES (%s, 'user', %s) "
+                    "ON CONFLICT (subject_id) DO UPDATE "
+                    "  SET role = EXCLUDED.role, subject_type = 'user', granted_at = now()",
+                    (email, role),
+                )
+            lb_ok = True
+        except Exception as e:
+            logger.warning("Could not save permissions to Lakebase: %s", e)
+
+    # UC Delta: best-effort dual-write when Lakebase succeeded, otherwise the
+    # primary store (propagate errors so a total failure surfaces).
+    try:
+        _ensure_permissions_table()
+        table = _permissions_table()
+        execute_write(f"DELETE FROM {table}", None)
+        for role, email in pairs:
             execute_write(
                 f"INSERT INTO {table} (role, email) VALUES (:role, :email)",
                 {"role": role, "email": email},
             )
-    # Invalidate cached permission reads so the change is visible immediately
+    except Exception as e:
+        if lb_ok:
+            logger.debug("UC dual-write of permissions failed (non-fatal, Lakebase is primary): %s", e)
+        else:
+            raise
     clear_query_cache("perms")
-    logger.info(f"Saved user permissions to Delta table ({len(admins)} admins, {len(consumers)} consumers)")
+    logger.info(f"Saved user permissions ({len(admins)} admins, {len(consumers)} consumers; lakebase={lb_ok})")
 
 
 @router.get("/user-permissions")
@@ -1416,18 +1629,36 @@ _SCHEDULE_DEFAULTS: dict = {"enabled": True, "frequency": "nightly", "hour_utc":
 
 
 def _save_schedule_to_table(settings: dict) -> None:
-    from backend.db import execute_write
-    _ensure_schedule_table()
-    table = _config_table("app_schedule_settings")
-    execute_write(f"DELETE FROM {table}", None)
-    execute_write(
-        f"INSERT INTO {table} (settings_json, updated_at) VALUES (:s, current_timestamp())",
-        {"s": json.dumps(settings)},
-    )
+    """Persist schedule settings. Lakebase app_config primary; UC Delta dual-write."""
+    try:
+        from backend.db import lb_set_config, lakebase_available
+        if lakebase_available():
+            lb_set_config("schedule_settings", settings)
+    except Exception as e:
+        logger.warning("Could not save schedule settings to Lakebase (non-fatal): %s", e)
+    try:
+        from backend.db import execute_write
+        _ensure_schedule_table()
+        table = _config_table("app_schedule_settings")
+        execute_write(f"DELETE FROM {table}", None)
+        execute_write(
+            f"INSERT INTO {table} (settings_json, updated_at) VALUES (:s, current_timestamp())",
+            {"s": json.dumps(settings)},
+        )
+    except Exception as e:
+        logger.debug("UC dual-write of schedule settings skipped/failed (non-fatal): %s", e)
 
 
 def load_schedule_settings() -> dict:
-    """Load schedule settings — Delta first (survives redeploys), file fallback."""
+    """Load schedule settings — Lakebase first, then UC Delta, then file fallback."""
+    # Primary: Lakebase
+    try:
+        from backend.db import lb_get_config
+        cfg = lb_get_config("schedule_settings")
+        if isinstance(cfg, dict) and cfg:
+            return {**_SCHEDULE_DEFAULTS, **cfg}
+    except Exception as e:
+        logger.debug("Lakebase schedule read failed, will try UC: %s", e)
     try:
         from backend.db import execute_query
         table = _config_table("app_schedule_settings")
@@ -1504,7 +1735,14 @@ _ALERT_THRESHOLD_DEFAULTS: dict = {
 
 
 def _load_alert_thresholds() -> dict:
-    """Load alert thresholds — Delta first, file fallback, then hardcoded defaults."""
+    """Load alert thresholds — Lakebase first, then UC Delta, file, then defaults."""
+    try:
+        from backend.db import lb_get_config
+        cfg = lb_get_config("alert_thresholds")
+        if isinstance(cfg, dict) and cfg:
+            return {**_ALERT_THRESHOLD_DEFAULTS, **cfg}
+    except Exception as e:
+        logger.debug("Lakebase alert-thresholds read failed, will try UC: %s", e)
     try:
         from backend.db import execute_query
         table = _config_table("app_alert_thresholds")
@@ -1534,6 +1772,12 @@ def _load_alert_thresholds() -> dict:
 
 
 def _save_alert_thresholds(settings: dict) -> None:
+    try:
+        from backend.db import lb_set_config, lakebase_available
+        if lakebase_available():
+            lb_set_config("alert_thresholds", settings)
+    except Exception as e:
+        logger.warning("Could not save alert thresholds to Lakebase (non-fatal): %s", e)
     try:
         from backend.db import execute_write
         _ensure_alert_thresholds_table()
@@ -1653,18 +1897,36 @@ async def get_account_prices() -> dict[str, Any]:
 # ── Pricing Mode ──────────────────────────────────────────────────────────────
 
 def _save_pricing_to_table(settings: dict) -> None:
-    from backend.db import execute_write
-    _ensure_pricing_table()
-    table = _config_table("app_pricing_settings")
-    execute_write(f"DELETE FROM {table}", None)
-    execute_write(
-        f"INSERT INTO {table} (settings_json, updated_at) VALUES (:s, current_timestamp())",
-        {"s": json.dumps(settings)},
-    )
+    """Persist pricing settings. Lakebase app_config primary; UC Delta dual-write."""
+    try:
+        from backend.db import lb_set_config, lakebase_available
+        if lakebase_available():
+            lb_set_config("pricing_settings", settings)
+    except Exception as e:
+        logger.warning("Could not save pricing settings to Lakebase (non-fatal): %s", e)
+    try:
+        from backend.db import execute_write
+        _ensure_pricing_table()
+        table = _config_table("app_pricing_settings")
+        execute_write(f"DELETE FROM {table}", None)
+        execute_write(
+            f"INSERT INTO {table} (settings_json, updated_at) VALUES (:s, current_timestamp())",
+            {"s": json.dumps(settings)},
+        )
+    except Exception as e:
+        logger.debug("UC dual-write of pricing settings skipped/failed (non-fatal): %s", e)
 
 
 def _load_pricing_settings() -> dict:
-    """Load pricing settings — Delta first (survives redeploys), file fallback."""
+    """Load pricing settings — Lakebase first, then UC Delta, then file fallback."""
+    # Primary: Lakebase
+    try:
+        from backend.db import lb_get_config
+        cfg = lb_get_config("pricing_settings")
+        if isinstance(cfg, dict) and cfg:
+            return cfg
+    except Exception as e:
+        logger.debug("Lakebase pricing read failed, will try UC: %s", e)
     try:
         from backend.db import execute_query
         table = _config_table("app_pricing_settings")

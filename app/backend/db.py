@@ -490,8 +490,17 @@ def bundle_cache_key(endpoint: str, start_date: str, end_date: str, workspace_id
 _delta_l1: TTLCache = TTLCache(maxsize=50, ttl=300)
 
 
+def _ensure_response_cache_table_lb() -> None:
+    """Create the Lakebase response_cache table if missing (lazy, idempotent)."""
+    lakebase_execute(
+        "CREATE TABLE IF NOT EXISTS response_cache ("
+        "cache_key TEXT PRIMARY KEY, endpoint TEXT, payload TEXT, "
+        "expires_at TIMESTAMPTZ, created_at TIMESTAMPTZ NOT NULL DEFAULT now())"
+    )
+
+
 def delta_cache_get(key: str) -> dict | None:
-    """Read a bundle payload from the Delta response cache. Returns None on miss/error.
+    """Read a bundle payload from the L2 response cache. Returns None on miss/error.
 
     On the asyncio event loop: returns None immediately on L1 miss — never blocks.
     On daemon/sync threads: runs the SQL check with a 5-second timeout.
@@ -517,6 +526,13 @@ def delta_cache_get(key: str) -> dict | None:
         ctx = contextvars.copy_context()
 
         def _run():
+            # L2 primary: Lakebase response_cache (fast KV); warehouse fallback.
+            if lakebase_available():
+                rows = lakebase_query(
+                    "SELECT payload FROM response_cache WHERE cache_key = %s AND expires_at > now() LIMIT 1",
+                    (key,),
+                )
+                return [{"payload_json": rows[0]["payload"]}] if rows else []
             tok = _user_token.set("")
             try:
                 return execute_query(
@@ -561,13 +577,31 @@ def delta_cache_put(key: str, endpoint: str, payload: dict, ttl_seconds: int = 6
     _delta_l1[key] = payload  # L1 update is always immediate
 
     def _write(_key=key, _endpoint=endpoint, _payload=payload, _ttl=ttl_seconds):
+        import gzip, base64 as _b64
+        compressed = _b64.b64encode(gzip.compress(json.dumps(_payload).encode())).decode("ascii")
+
+        # L2 primary: Lakebase response_cache (fast upsert); warehouse fallback.
+        if lakebase_available():
+            try:
+                _ensure_response_cache_table_lb()
+                lakebase_execute(
+                    "INSERT INTO response_cache (cache_key, endpoint, payload, expires_at) "
+                    "VALUES (%s, %s, %s, now() + make_interval(secs => %s)) "
+                    "ON CONFLICT (cache_key) DO UPDATE "
+                    "  SET endpoint = EXCLUDED.endpoint, payload = EXCLUDED.payload, expires_at = EXCLUDED.expires_at",
+                    (_key, _endpoint, compressed, float(_ttl)),
+                )
+                lakebase_execute("DELETE FROM response_cache WHERE expires_at < now()")
+            except Exception as e:
+                logger.debug("Lakebase cache write failed (non-fatal): %s", e)
+            return
+
+        # Fallback: warehouse Delta table
         if not _ensure_response_cache_table():
             return
         cat, sch = get_catalog_schema()
         if not cat or not sch:
             return
-        import gzip, base64 as _b64
-        compressed = _b64.b64encode(gzip.compress(json.dumps(_payload).encode())).decode("ascii")
         merge_sql = f"""MERGE INTO `{cat}`.`{sch}`.`app_response_cache` AS tgt
             USING (SELECT
                 :key      AS cache_key,
@@ -608,7 +642,17 @@ def delta_cache_invalidate(pattern: str | None = None) -> None:
     # clearing is impossible — always clear the full L1 cache. It holds at most
     # 50 entries with a 5-min TTL so a full clear has negligible cost.
     _delta_l1.clear()
-    # Clear Delta (remote)
+    # L2 primary: Lakebase response_cache
+    if lakebase_available():
+        try:
+            if pattern:
+                lakebase_execute("DELETE FROM response_cache WHERE endpoint LIKE %s", (f"{pattern}%",))
+            else:
+                lakebase_execute("DELETE FROM response_cache")
+        except Exception as e:
+            logger.debug("Lakebase cache invalidation failed (non-fatal): %s", e)
+        return
+    # Fallback: warehouse Delta table
     try:
         cat, sch = get_catalog_schema()
         if not cat or not sch:
@@ -703,7 +747,21 @@ def get_account_client() -> AccountClient:
 
     account_id = os.getenv("DATABRICKS_ACCOUNT_ID", "").strip()
     if not account_id:
-        raise ValueError("DATABRICKS_ACCOUNT_ID is not set — set it explicitly in the app env / bundle variable")
+        # Fall back to auto-detecting the account ID from system.billing.usage so the
+        # client works without a manually-set env var (the env var still takes precedence).
+        try:
+            rows = execute_query(
+                "SELECT DISTINCT account_id FROM system.billing.usage "
+                "WHERE usage_date >= CURRENT_DATE - 7 AND account_id IS NOT NULL LIMIT 1"
+            )
+            account_id = str(rows[0].get("account_id", "")).strip() if rows else ""
+        except Exception as e:
+            logger.debug("Could not auto-detect account_id from billing: %s", e)
+    if not account_id:
+        raise ValueError(
+            "DATABRICKS_ACCOUNT_ID is not set and could not be auto-detected from "
+            "system.billing.usage — set it explicitly in the app env / bundle variable"
+        )
 
     accounts_host = os.getenv("DATABRICKS_ACCOUNT_HOST", "").strip()
     if not accounts_host:
@@ -1343,6 +1401,40 @@ def lb_write_build_state(state: dict) -> None:
                 )
     except Exception as e:
         logger.debug("lb_write_build_state failed (non-fatal): %s", e)
+
+
+# ── General-purpose Lakebase query/execute primitives ─────────────────────────
+# The Postgres counterparts of execute_query() for app-state tables that aren't
+# a simple KV (alerts, tagging_rules, user_permissions, workspace_cache, …).
+# Use %s / %(name)s psycopg placeholders — NOT the warehouse connector style.
+# Both RAISE (RuntimeError from get_pg_conn) when Lakebase is unavailable so the
+# caller can fall back to the UC/warehouse path during the migration.
+
+def lakebase_available() -> bool:
+    """Cheap check: is a Lakebase pool configured (PGHOST set + psycopg present)?"""
+    return _get_lakebase_pool() is not None
+
+
+def lakebase_query(sql: str, params: "tuple | dict | None" = None) -> list[dict[str, Any]]:
+    """Run a SELECT against Lakebase and return rows as a list of dicts."""
+    with get_pg_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(sql, params)
+            if cur.description is None:
+                return []
+            cols = [d[0] for d in cur.description]
+            return [dict(zip(cols, row)) for row in cur.fetchall()]
+
+
+def lakebase_execute(sql: str, params: "tuple | dict | None" = None) -> int:
+    """Run a write (INSERT/UPDATE/DELETE/DDL) against Lakebase; return rowcount.
+
+    Commit/rollback is handled by get_pg_conn().
+    """
+    with get_pg_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(sql, params)
+            return cur.rowcount
 
 
 def read_setup_complete() -> bool:

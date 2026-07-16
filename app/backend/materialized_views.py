@@ -13,8 +13,11 @@ Tables created:
 These tables should be refreshed daily via a scheduled job.
 """
 
+import fcntl
 import logging
+import threading
 from collections.abc import Callable
+from contextlib import contextmanager
 from datetime import date, timedelta
 
 from backend.db import execute_query, get_catalog_schema, get_connection
@@ -1458,7 +1461,49 @@ def _update_refresh_state(catalog: str, schema: str, table_name: str, refresh_co
         logger.warning("Could not update refresh state for %s (non-fatal): %s", table_name, e)
 
 
+_MV_WRITE_LOCK = threading.Lock()
+_MV_LOCK_PATH = "/tmp/cost-obs-mv-refresh.lock"
+
+
+@contextmanager
+def _mv_write_guard():
+    """Serialize ALL MV create/refresh writers — in-process (threading.Lock) and
+    cross-worker (flock on a shared /tmp file).
+
+    Delta enforces no primary key, so concurrent CREATE OR REPLACE / MERGE runs
+    across the uvicorn workers + nightly scheduler + on-demand + wizard paths
+    otherwise race and leave duplicate (usage_date, workspace_id) rows. Blocking
+    LOCK_EX means a second writer waits its turn instead of racing; flock
+    auto-releases if the holding process dies.
+    """
+    with _MV_WRITE_LOCK:
+        lf = open(_MV_LOCK_PATH, "w")
+        try:
+            fcntl.flock(lf, fcntl.LOCK_EX)
+            yield
+        finally:
+            try:
+                fcntl.flock(lf, fcntl.LOCK_UN)
+            finally:
+                lf.close()
+
+
 def create_materialized_views(catalog: str | None = None, schema: str | None = None, lookback_days: int = 180, on_table_event: "Callable[[str, str], None] | None" = None, force_full_rebuild: bool = False) -> dict:
+    """Serialized entry point for ALL MV refresh/rebuild paths.
+
+    The actual work lives in _create_materialized_views_impl; this wrapper holds
+    the single write guard so no two refreshes ever run concurrently. That is
+    what keeps (usage_date, workspace_id) unique — previously only the startup
+    path was locked, so the nightly/on-demand/wizard paths raced and produced
+    duplicate rows.
+    """
+    with _mv_write_guard():
+        return _create_materialized_views_impl(
+            catalog, schema, lookback_days, on_table_event, force_full_rebuild
+        )
+
+
+def _create_materialized_views_impl(catalog: str | None = None, schema: str | None = None, lookback_days: int = 180, on_table_event: "Callable[[str, str], None] | None" = None, force_full_rebuild: bool = False) -> dict:
     """Create all materialized view tables.
 
     Args:

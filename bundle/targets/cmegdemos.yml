@@ -19,3 +19,9 @@ targets:
         cost_obs_db:
           project_id: ${var.lakebase_project_name}
           pg_version: 16
+      # NOTE: managed postgres_synced_tables were evaluated here but require a UC
+      # catalog registered over the Lakebase DB (CREATE CATALOG on the metastore
+      # = metastore admin), which neither this workspace's deployer nor a typical
+      # customer app SP has. Phase B therefore uses an APP-MANAGED direct load
+      # (warehouse computes aggregates -> app writes to Lakebase via psycopg,
+      # using the Phase A primitives) instead of managed synced tables.
