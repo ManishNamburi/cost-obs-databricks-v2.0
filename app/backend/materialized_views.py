@@ -1465,6 +1465,48 @@ _MV_WRITE_LOCK = threading.Lock()
 _MV_LOCK_PATH = "/tmp/cost-obs-mv-refresh.lock"
 
 
+# Tables too large to INSERT OVERWRITE on every refresh. dbsql_cost_per_query is
+# per-query granular (tens of millions of rows) and isn't a dashboard aggregate.
+_DEDUP_SKIP: frozenset[str] = frozenset({"dbsql_cost_per_query"})
+
+
+def _dedup_delta_table(catalog: str, schema: str, table_name: str, pk_cols: list[str]) -> int:
+    """Remove duplicate rows on the table's unique key, keeping one per key.
+
+    Delta enforces no primary key, so a concurrency race (or legacy rows from before
+    the write guard) can leave duplicate rows that inflate SUM aggregations on the
+    dashboard. Detect via GROUP BY … HAVING COUNT(*) > 1 (which counts NULL-key groups
+    correctly, unlike COUNT(DISTINCT)); if any exist, rewrite the table keeping one row
+    per key via ROW_NUMBER. Returns the number of duplicated keys removed (0 = clean, no
+    rewrite). No-op for tables without a key or in _DEDUP_SKIP.
+    """
+    if not pk_cols or table_name in _DEDUP_SKIP:
+        return 0
+    fq = f"`{catalog}`.`{schema}`.`{table_name}`"
+    partition = ", ".join(f"`{c}`" for c in pk_cols)
+    try:
+        chk = execute_query(
+            f"SELECT COUNT(*) AS dup_keys FROM "
+            f"(SELECT 1 FROM {fq} GROUP BY {partition} HAVING COUNT(*) > 1)",
+            no_cache=True,
+        )
+        dup_keys = int((chk[0].get("dup_keys") if chk else 0) or 0)
+        if dup_keys <= 0:
+            return 0
+        logger.warning("Deduping %s: %d duplicated keys found — rewriting", table_name, dup_keys)
+        execute_query(
+            f"INSERT OVERWRITE TABLE {fq} SELECT * EXCEPT(_dedup_rn) FROM ("
+            f"  SELECT *, ROW_NUMBER() OVER (PARTITION BY {partition} ORDER BY {partition}) AS _dedup_rn "
+            f"  FROM {fq}"
+            f") WHERE _dedup_rn = 1",
+            no_cache=True,
+        )
+        return dup_keys
+    except Exception as e:
+        logger.warning("Dedup of %s failed (non-fatal): %s", table_name, e)
+        return 0
+
+
 @contextmanager
 def _mv_write_guard():
     """Serialize ALL MV create/refresh writers — in-process (threading.Lock) and
@@ -1498,9 +1540,24 @@ def create_materialized_views(catalog: str | None = None, schema: str | None = N
     duplicate rows.
     """
     with _mv_write_guard():
-        return _create_materialized_views_impl(
+        result = _create_materialized_views_impl(
             catalog, schema, lookback_days, on_table_event, force_full_rebuild
         )
+        # Phase B: app-managed direct load of the fresh aggregates into Lakebase,
+        # under the SAME write guard so it can never overlap a rebuild. Best-effort
+        # and no-op when Lakebase is absent — a warehouse-only deploy is unaffected,
+        # and a sync failure must never fail the (successful) Delta build.
+        if not (isinstance(result, dict) and result.get("error")):
+            try:
+                from backend.lakebase_sync import sync_all_aggregates
+                sync_summary = sync_all_aggregates(catalog, schema, full=force_full_rebuild)
+                if isinstance(result, dict):
+                    result["lakebase_sync"] = sync_summary
+            except Exception as e:
+                logger.warning("Lakebase aggregate sync failed (non-fatal): %s", e)
+                if isinstance(result, dict):
+                    result["lakebase_sync"] = {"skipped": True, "error": str(e)}
+        return result
 
 
 def _create_materialized_views_impl(catalog: str | None = None, schema: str | None = None, lookback_days: int = 180, on_table_event: "Callable[[str, str], None] | None" = None, force_full_rebuild: bool = False) -> dict:
@@ -1705,6 +1762,10 @@ def _create_materialized_views_impl(catalog: str | None = None, schema: str | No
                             reprocess_start=str(reprocess_start),
                             billing_lookback_days=lookback_days,
                         ), no_cache=True)
+                        # Self-heal duplicate rows the incremental MERGE path can leave
+                        # (Delta has no PK enforcement). Full rebuilds are dup-free by
+                        # construction (GROUP BY), so this only matters on the MERGE path.
+                        _dedup_delta_table(catalog, schema, table_name, cfg.get("pk") or [])
                         new_count = state["refresh_count"] + 1
                         _update_refresh_state(catalog, schema, table_name, new_count)
 

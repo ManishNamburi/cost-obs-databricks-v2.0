@@ -2295,7 +2295,7 @@ async def save_workspace_filter(request: Request) -> dict:
     user_email = request.headers.get("X-Forwarded-Email", os.getenv("USER", ""))
     logger.info("save-workspace-filter: request from %s", user_email or "(unknown)")
 
-    role = _get_user_role(user_email)
+    role = await _get_user_role(user_email)
     logger.info("save-workspace-filter: user role=%s (%.1fms)", role, (_time.monotonic() - t0) * 1000)
     if role != "admin":
         raise HTTPException(status_code=403, detail="Admin access required to modify the workspace filter pool")

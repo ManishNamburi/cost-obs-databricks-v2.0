@@ -343,7 +343,7 @@ export function AIGatewayView({
   if (subTab === "cost") {
     return (
       <div className="animate-fade-in space-y-5">
-        <div className="flex items-center justify-between gap-3">
+        <div className="flex items-center justify-between gap-3 pr-12">
           <div>
             <h2 className="text-xl font-bold text-gray-900">AI Gateway</h2>
             <p className="text-sm text-gray-500">
@@ -371,6 +371,7 @@ export function AIGatewayView({
           host={host}
           workspaceIds={workspaceIds}
           workspaceNameMap={workspaceNameMap}
+          embedded
         />
       </div>
     );
@@ -382,7 +383,7 @@ export function AIGatewayView({
   if (isLoading) {
     return (
       <div className="animate-fade-in space-y-5">
-        <div className="flex items-center justify-between gap-3">
+        <div className="flex items-center justify-between gap-3 pr-12">
           <div>
             <h2 className="text-xl font-bold text-gray-900">AI Gateway</h2>
             <p className="text-sm text-gray-500">Governed model traffic</p>
@@ -407,7 +408,7 @@ export function AIGatewayView({
   if (!gatewayConfigured) {
     return (
       <div className="animate-fade-in space-y-5">
-        <div className="flex items-center justify-between gap-3">
+        <div className="flex items-center justify-between gap-3 pr-12">
           <div>
             <h2 className="text-xl font-bold text-gray-900">AI Gateway</h2>
             <p className="text-sm text-gray-500">Governed model traffic</p>
@@ -436,7 +437,7 @@ export function AIGatewayView({
   return (
     <div className="animate-fade-in space-y-5">
       {/* Header */}
-      <div className="flex items-center justify-between gap-3">
+      <div className="flex items-center justify-between gap-3 pr-12">
         <div>
           <h2 className="text-xl font-bold text-gray-900">AI Gateway</h2>
           <p className="text-sm text-gray-500">

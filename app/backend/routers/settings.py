@@ -947,7 +947,22 @@ async def _get_tables_status_inner(request: Request):
     except (FileNotFoundError, KeyError, ValueError, OSError):
         pass
 
-    result = {"catalog": catalog, "schema": schema, "tables": results, "auth_error": auth_error, "refresh_status": refresh_status}
+    # Phase B: Lakebase aggregate-sync watermark. Surfaced SEPARATELY from the
+    # Delta build time (refresh_status) above — the two drift independently, so a
+    # single freshness number would hide a stalled build behind a fresh sync (§9).
+    # Empty list when Lakebase is absent or nothing has synced yet.
+    lakebase_sync_status: list = []
+    try:
+        from backend.lakebase_sync import get_sync_status
+        lakebase_sync_status = await asyncio.to_thread(get_sync_status)
+    except Exception as e:
+        logger.debug("Lakebase sync-status read failed (non-fatal): %s", e)
+
+    result = {
+        "catalog": catalog, "schema": schema, "tables": results,
+        "auth_error": auth_error, "refresh_status": refresh_status,
+        "lakebase_sync_status": lakebase_sync_status,
+    }
     _tables_cache = result
     _tables_cache_ts = time.time()
     return result

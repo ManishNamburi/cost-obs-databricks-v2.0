@@ -1194,6 +1194,23 @@ try:
     import psycopg
     import psycopg_pool
     _PSYCOPG_AVAILABLE = True
+
+    class _OAuthLakebaseConnection(psycopg.Connection):
+        """psycopg3 connection that mints a fresh Lakebase OAuth token per connect.
+
+        Injecting credentials via a custom connection_class (rather than
+        overriding ConnectionPool._connect) lets psycopg_pool run its normal
+        connection lifecycle — otherwise the pool's own bookkeeping (e.g.
+        `_created_at`) is never set and getconn() raises AttributeError.
+        """
+
+        @classmethod
+        def connect(cls, conninfo: str = "", **kwargs):  # type: ignore[override]
+            w = get_workspace_client()
+            endpoint = os.environ.get("ENDPOINT_NAME", "")
+            cred = w.postgres.generate_database_credential(endpoint=endpoint)
+            kwargs["password"] = cred.token
+            return super().connect(conninfo, **kwargs)
 except ImportError:
     _PSYCOPG_AVAILABLE = False
     logger.debug("psycopg/psycopg_pool not installed — Lakebase disabled")
@@ -1217,14 +1234,6 @@ def _lakebase_conninfo() -> str:
     )
 
 
-def _make_lakebase_connection(conninfo: str) -> "psycopg.Connection":
-    """Open a psycopg3 connection using a fresh OAuth token from the SDK."""
-    w = get_workspace_client()
-    endpoint = os.environ.get("ENDPOINT_NAME", "")
-    cred = w.postgres.generate_database_credential(endpoint=endpoint)
-    return psycopg.connect(conninfo, password=cred.token, autocommit=False)
-
-
 def _get_lakebase_pool() -> "psycopg_pool.ConnectionPool | None":
     """Return the singleton Lakebase pool, initialising it on first call.
 
@@ -1242,19 +1251,29 @@ def _get_lakebase_pool() -> "psycopg_pool.ConnectionPool | None":
     with _lakebase_pool_lock:
         if _lakebase_pool is not None:
             return _lakebase_pool
+        # Explicitly SET search_path on every pooled connection. The conninfo
+        # `options=-c search_path=...` is not reliably applied (observed: unqualified
+        # DDL fails with "no schema has been selected"), so we set it here where it
+        # always takes. Falls back to public so unqualified reads still resolve.
+        _pg_schema = os.environ.get("COST_OBS_SCHEMA", "cost_obs")
+
+        def _configure_conn(conn) -> None:
+            with conn.cursor() as cur:
+                cur.execute(f'SET search_path TO "{_pg_schema}", public')
+            conn.commit()
+
         try:
+            # Inject OAuth credentials via a custom connection_class (see
+            # _OAuthLakebaseConnection). This preserves psycopg_pool's connection
+            # lifecycle — overriding pool._connect bypasses it and breaks getconn().
             pool = psycopg_pool.ConnectionPool(
                 conninfo=conninfo,
-                kwargs={},
                 min_size=1,
                 max_size=10,
                 open=False,
-                connection_class=psycopg.Connection,
-                # Use the OAuth factory — called once per NEW physical connection.
-                configure=None,
+                connection_class=_OAuthLakebaseConnection,
+                configure=_configure_conn,
             )
-            # Override the pool's connect method to inject OAuth credentials.
-            pool._connect = lambda: _make_lakebase_connection(conninfo)  # type: ignore[attr-defined]
             pool.open(wait=False)
             _lakebase_pool = pool
             logger.info("Lakebase connection pool initialised (min=1 max=10)")

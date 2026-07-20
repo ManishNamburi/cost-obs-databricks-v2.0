@@ -323,7 +323,7 @@ export function GenieCostView({ data, isLoading }: GenieCostViewProps) {
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-between">
+      <div className="flex items-center justify-between pr-12">
         <h1 className="text-2xl font-bold text-gray-900">Genie</h1>
         {summary && (
           <p className="text-xs text-gray-500">

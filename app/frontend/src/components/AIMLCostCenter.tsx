@@ -49,6 +49,9 @@ interface AIMLCostCenterProps {
   host?: string | null;
   workspaceIds?: string[];
   workspaceNameMap?: Record<string, string>;
+  /** When rendered inside the AI Gateway "Cost" sub-tab, the parent already shows
+   *  the page title — hide this component's own "AI/ML" header to avoid a duplicate. */
+  embedded?: boolean;
 }
 
 // Stable category-to-color mapping for consistent colors across pie + timeseries
@@ -102,7 +105,7 @@ function getClusterUrl(host: string | null | undefined, clusterId: string, works
   return buildUrl(host, `/compute/interactive${wsParam}`);
 }
 
-export function AIMLCostCenter({ data, isLoading, startDate, endDate, host, workspaceIds, workspaceNameMap }: AIMLCostCenterProps) {
+export function AIMLCostCenter({ data, isLoading, startDate, endDate, host, workspaceIds, workspaceNameMap, embedded = false }: AIMLCostCenterProps) {
   const spNameMap = useSpNameMap();
   const [endpointsPage, setEndpointsPage] = useState(1);
   const [modelsPage, setModelsPage] = useState(1);
@@ -407,7 +410,8 @@ export function AIMLCostCenter({ data, isLoading, startDate, endDate, host, work
 
   return (
     <div className="animate-fade-in space-y-6">
-      {/* Header */}
+      {/* Header — hidden when embedded (the AI Gateway view already shows the title) */}
+      {!embedded && (
       <div className="flex items-center gap-3">
         <div className="rounded-lg p-2" style={{ backgroundColor: '#FF3621' }}>
           <svg className="h-6 w-6 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -426,6 +430,7 @@ export function AIMLCostCenter({ data, isLoading, startDate, endDate, host, work
           </div>
         </div>
       </div>
+      )}
 
       {/* Info Banner */}
       <div className="rounded-lg border border-orange-200 bg-orange-50 p-4">
@@ -850,7 +855,7 @@ export function AIMLCostCenter({ data, isLoading, startDate, endDate, host, work
               <div className="relative" ref={modelsTypeDropdownRef}>
                 <button
                   onClick={() => setModelsTypeDropdownOpen((o) => !o)}
-                  className={`flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-sm font-medium transition-colors ${isPartialTypes ? "border-[#FF3621] text-[#FF3621]" : "border-gray-300 text-gray-700 hover:bg-gray-50"}`}
+                  className={`flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-medium transition-colors ${isPartialTypes ? "border-[#FF3621] text-[#FF3621]" : "border-gray-300 text-gray-700 hover:bg-gray-50"}`}
                 >
                   <span className="max-w-[140px] truncate">
                     {modelsTypeFilters.length === 1
@@ -1154,7 +1159,7 @@ export function AIMLCostCenter({ data, isLoading, startDate, endDate, host, work
                       <button
                         type="button"
                         onClick={() => setAgentTypeDropdownOpen((o) => !o)}
-                        className={`flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-sm font-medium transition-colors ${isPartialAgentTypes ? "border-[#FF3621] text-[#FF3621]" : "border-gray-200 bg-white text-gray-700 hover:bg-gray-50"}`}
+                        className={`flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-medium transition-colors ${isPartialAgentTypes ? "border-[#FF3621] text-[#FF3621]" : "border-gray-200 bg-white text-gray-700 hover:bg-gray-50"}`}
                       >
                         {agentTypeFilter.length === 1
                           ? agentTypeFilter[0]

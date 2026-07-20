@@ -1,5 +1,6 @@
 """Debugger endpoint — parallel health checks for common deployment issues."""
 
+import asyncio
 import logging
 import os
 import time as _time
@@ -719,7 +720,7 @@ async def rebuild_mvs(background_tasks: BackgroundTasks, request: Request) -> di
     """Trigger a full MV rebuild in the background. Admin only."""
     from backend.routers.user import _get_user_role
     user_email = request.headers.get("X-Forwarded-Email", os.getenv("USER", ""))
-    if _get_user_role(user_email) != "admin":
+    if await _get_user_role(user_email) != "admin":
         raise HTTPException(status_code=403, detail="Admin access required to rebuild materialized views")
 
     from backend.db import _user_token as _db_user_token, get_catalog_schema
@@ -761,3 +762,94 @@ async def rebuild_mvs(background_tasks: BackgroundTasks, request: Request) -> di
 
     background_tasks.add_task(_do_rebuild)
     return {"status": "started", "message": "MV rebuild started in background — re-run diagnostics in a few minutes to verify"}
+
+
+@router.post("/parity-check")
+async def parity_check(request: Request, start_date: str = "", end_date: str = "") -> dict:
+    """Run the Phase B dual-read parity check (Delta vs Lakebase) on demand.
+
+    Admin only. Explicit operator trigger, so it runs regardless of the ambient
+    COST_OBS_PARITY_CHECK flag. Defaults to the last 30 days. Shadow-only — this
+    changes nothing about what the app serves; it records a verdict in parity_log
+    for the §13 burn-in that gates reader cutover.
+    """
+    from datetime import date, timedelta
+
+    from backend.routers.user import _get_user_role
+    user_email = request.headers.get("X-Forwarded-Email", os.getenv("USER", ""))
+    if await _get_user_role(user_email) != "admin":
+        raise HTTPException(status_code=403, detail="Admin access required to run parity checks")
+
+    end_date = end_date or date.today().isoformat()
+    start_date = start_date or (date.today() - timedelta(days=30)).isoformat()
+
+    from backend.lakebase_parity import check_daily_usage_totals
+    report = await asyncio.to_thread(check_daily_usage_totals, start_date, end_date, force=True)
+    return {"start_date": start_date, "end_date": end_date, "report": report}
+
+
+@router.get("/parity-status")
+async def parity_status() -> dict:
+    """Return recent parity_log verdicts (most recent first). Empty when Lakebase
+    is unavailable or no checks have run."""
+    from backend.lakebase_parity import get_parity_status
+    rows = await asyncio.to_thread(get_parity_status)
+    return {"checks": rows}
+
+
+@router.get("/lakebase-info")
+async def lakebase_info() -> dict:
+    """Diagnose the Lakebase connection: role, database, search_path, schemas +
+    ownership, and whether the app SP can create in its target schema."""
+    def _probe() -> dict:
+        from backend.db import get_pg_conn
+        out: dict = {}
+        with get_pg_conn() as conn, conn.cursor() as cur:
+            cur.execute("SELECT current_user, current_database(), current_setting('search_path')")
+            r = cur.fetchone()
+            out["current_user"], out["current_database"], out["search_path"] = r[0], r[1], r[2]
+            cur.execute(
+                "SELECT nspname, pg_get_userbyid(nspowner) AS owner, "
+                "has_schema_privilege(current_user, nspname, 'CREATE') AS can_create, "
+                "has_schema_privilege(current_user, nspname, 'USAGE') AS can_use "
+                "FROM pg_namespace WHERE nspname NOT LIKE 'pg_%' AND nspname <> 'information_schema' "
+                "ORDER BY nspname"
+            )
+            out["schemas"] = [
+                {"schema": s, "owner": o, "can_create": c, "can_use": u}
+                for s, o, c, u in cur.fetchall()
+            ]
+            cur.execute("SELECT has_database_privilege(current_user, current_database(), 'CREATE') AS db_create")
+            out["can_create_in_database"] = cur.fetchone()[0]
+        return out
+    try:
+        return await asyncio.to_thread(_probe)
+    except Exception as e:
+        return {"error": str(e)}
+
+
+@router.post("/sync-lakebase")
+async def sync_lakebase(request: Request, background_tasks: BackgroundTasks, full: bool = False) -> dict:
+    """Run the Phase B app-managed sync of the daily_* aggregates into Lakebase.
+
+    Admin only. Runs in the BACKGROUND and returns immediately — a full backfill of
+    millions of rows exceeds the Databricks Apps 300s HTTP limit, so we never block the
+    request on it. Poll GET /api/settings/tables (lakebase_sync_status) for progress.
+    The Delta aggregates are read as-is (no rebuild) and range-replaced into Lakebase.
+    """
+    from backend.routers.user import _get_user_role
+    user_email = request.headers.get("X-Forwarded-Email", os.getenv("USER", ""))
+    if await _get_user_role(user_email) != "admin":
+        raise HTTPException(status_code=403, detail="Admin access required to sync Lakebase")
+
+    def _run_sync() -> None:
+        from backend.lakebase_sync import sync_all_aggregates
+        try:
+            res = sync_all_aggregates(None, None, full=full)
+            logger.info("debug sync-lakebase done: ok=%s/%s (full=%s)", res.get("ok"), res.get("total"), full)
+        except Exception as exc:
+            logger.error("debug sync-lakebase failed: %s", exc)
+
+    background_tasks.add_task(_run_sync)
+    return {"status": "started", "full": full,
+            "message": "Lakebase sync started in background — poll GET /api/settings/tables (lakebase_sync_status)"}

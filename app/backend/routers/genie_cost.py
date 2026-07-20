@@ -54,8 +54,13 @@ logger = logging.getLogger(__name__)
 # "Any Genie" filter used to constrain the initial scan of system.billing.usage.
 # Broad by design — a false-positive here only means we do a bit more work in
 # the CASE expressions below, not that we surface non-Genie spend as Genie.
+# billing_origin_product = 'GENIE' is the reliable signal: real Genie spend is
+# token-billed serverless inference (sku_name like ENTERPRISE_SERVERLESS_REAL_TIME_
+# INFERENCE_*) which does NOT contain 'GENIE' — the sku_name patterns alone missed
+# all of it. Validated against cmegdemos billing via the Diagnostics endpoint.
 _GENIE_INCLUSION_WHERE = (
-    "(u.sku_name ILIKE '%GENIE%' OR u.sku_name ILIKE '%AI_BI_GENIE%')"
+    "(u.billing_origin_product = 'GENIE' "
+    "OR u.sku_name ILIKE '%GENIE%' OR u.sku_name ILIKE '%AI_BI_GENIE%')"
 )
 
 # Genie sub-surface classification — provisional heuristic per V2.1_SPEC §5.1.
@@ -74,8 +79,12 @@ _SURFACE_CASE_SQL = """
     END
 """
 
-# Free-tier attribution per V2.1_SPEC §5.2 convention:
-#   BILLABLE            → charged
+# Free-tier attribution per V2.1_SPEC §5.2 convention, refined after validating
+# against real billing (Diagnostics endpoint): Genie serverless inference bills as
+# usage_type = 'TOKEN' (metered token consumption) — that is charged spend, so it
+# joins BILLABLE. Without this, all Genie token spend fell into 'other' and the
+# dashboard showed $0.
+#   BILLABLE, TOKEN     → charged
 #   NON_BILLABLE        → free_tier
 #   RELATED             → free_tier
 #   anything else       → excluded from Genie buckets AND tracked in
@@ -83,7 +92,7 @@ _SURFACE_CASE_SQL = """
 #                         values surface if Databricks starts emitting them.
 _CHARGE_CLASS_CASE_SQL = """
     CASE
-        WHEN usage_type = 'BILLABLE' THEN 'charged'
+        WHEN usage_type IN ('BILLABLE', 'TOKEN') THEN 'charged'
         WHEN usage_type IN ('NON_BILLABLE', 'RELATED') THEN 'free_tier'
         ELSE 'other'
     END

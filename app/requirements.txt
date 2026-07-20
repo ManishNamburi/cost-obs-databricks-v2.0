@@ -132,3 +132,7 @@ watchfiles==1.1.1
     # via uvicorn
 websockets==12.0
     # via uvicorn
+psycopg[binary,pool]>=3.2.0,<4.0.0
+    # via cost-observability-control (pyproject.toml) — Lakebase OAuth pool.
+    # NOTE: requirements.txt had drifted from pyproject.toml (psycopg was declared
+    # there but never compiled in), so Lakebase silently no-op'd in deploys.
