@@ -13,8 +13,7 @@ import type { ProductBreakdownResponse, WorkspaceBreakdown } from "@/types/billi
 import { formatCurrencyCompact as formatCurrency } from "@/utils/formatters";
 import { VirtualizedList } from "./VirtualizedList";
 
-// Hoisted formatters — inline lambdas create a new ref every render and churn
-// Recharts' internal prop diffing, which contributes to LabelList flicker.
+// Hoisted formatters — see SKUBreakdown for rationale.
 const fmtCurrency = (v: unknown) => formatCurrency(v as number);
 const fmtTooltip = (value: number | undefined) => formatCurrency(value ?? 0);
 const fmtTooltipLabel = (label: unknown) => `Product: ${label}`;
@@ -25,17 +24,17 @@ const LABEL_STYLE = { fontSize: 11, fill: "#6b7280" } as const;
 interface WsRowProps {
   wsId: string;
   wsName: string;
-  active: boolean;
-  onSelect: (id: string) => void;
+  selected: boolean;
+  onToggle: (id: string) => void;
 }
-const WsRow = memo(function WsRow({ wsId, wsName, active, onSelect }: WsRowProps) {
+const WsRow = memo(function WsRow({ wsId, wsName, selected, onToggle }: WsRowProps) {
   return (
     <button
-      onClick={() => onSelect(wsId)}
+      onClick={() => onToggle(wsId)}
       className="flex w-full items-center gap-2 px-3 py-2.5 text-left text-xs hover:bg-gray-50"
     >
-      <div className={`flex h-4 w-4 shrink-0 items-center justify-center rounded border ${active ? "border-orange-500 bg-orange-500" : "border-gray-300"}`}>
-        {active && <svg className="h-3 w-3 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" /></svg>}
+      <div className={`flex h-4 w-4 shrink-0 items-center justify-center rounded border ${selected ? "border-orange-500 bg-orange-500" : "border-gray-300"}`}>
+        {selected && <svg className="h-3 w-3 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" /></svg>}
       </div>
       <span className="truncate text-gray-700">{wsName}</span>
     </button>
@@ -72,35 +71,89 @@ const COLOR_ROTATION = [
 ];
 
 export const ProductBreakdown = memo(function ProductBreakdown({ data, isLoading, workspaces, dateRange, workspaceNameMap }: ProductBreakdownProps) {
-  const [selectedWorkspace, setSelectedWorkspace] = useState<string>("all");
+  const allWsIds = useMemo(
+    () => (workspaces ?? []).map((w) => String(w.workspace_id)),
+    [workspaces],
+  );
+  const [selectedWorkspaces, setSelectedWorkspaces] = useState<string[]>([]);
+  const wsFilterInitialized = useRef(false);
   const [filteredData, setFilteredData] = useState<ProductBreakdownResponse | undefined>(undefined);
   const [filterLoading, setFilterLoading] = useState(false);
   const [dropdownOpen, setDropdownOpen] = useState(false);
   const [wsSearch, setWsSearch] = useState("");
   const dropdownRef = useRef<HTMLDivElement>(null);
 
+  // Seed with all workspaces on first data load
   useEffect(() => {
-    if (selectedWorkspace === "all") {
+    if (wsFilterInitialized.current) return;
+    if (allWsIds.length > 0) {
+      setSelectedWorkspaces(allWsIds);
+      wsFilterInitialized.current = true;
+    }
+  }, [allWsIds]);
+
+  const isAll = selectedWorkspaces.length === allWsIds.length && allWsIds.length > 0;
+  const isPartial = selectedWorkspaces.length > 0 && selectedWorkspaces.length < allWsIds.length;
+  const isEmpty = selectedWorkspaces.length === 0;
+
+  const wsKey = useMemo(() => [...selectedWorkspaces].sort().join(','), [selectedWorkspaces]);
+
+  useEffect(() => {
+    if (isAll || isEmpty) {
       setFilteredData(undefined);
       return;
     }
 
+    let cancelled = false;
     setFilterLoading(true);
-    const params = new URLSearchParams();
-    if (dateRange?.startDate) params.set("start_date", dateRange.startDate);
-    if (dateRange?.endDate) params.set("end_date", dateRange.endDate);
-    params.set("workspace_id", selectedWorkspace);
 
-    fetch(`/api/billing/by-product?${params}`)
-      .then((res) => res.json())
-      .then((json) => {
-        setFilteredData(json);
-        setFilterLoading(false);
-      })
-      .catch(() => {
-        setFilterLoading(false);
-      });
-  }, [selectedWorkspace, dateRange?.startDate, dateRange?.endDate]);
+    const fetchOne = (wsId: string) => {
+      const params = new URLSearchParams();
+      if (dateRange?.startDate) params.set("start_date", dateRange.startDate);
+      if (dateRange?.endDate) params.set("end_date", dateRange.endDate);
+      params.set("workspace_id", wsId);
+      return fetch(`/api/billing/by-product?${params}`).then((r) => r.json());
+    };
+
+    if (selectedWorkspaces.length === 1) {
+      fetchOne(selectedWorkspaces[0])
+        .then((json) => { if (!cancelled) { setFilteredData(json); setFilterLoading(false); } })
+        .catch(() => { if (!cancelled) setFilterLoading(false); });
+    } else {
+      // Merge per-workspace results by product category
+      Promise.all(selectedWorkspaces.map(fetchOne))
+        .then((results: ProductBreakdownResponse[]) => {
+          if (cancelled) return;
+          const merged: Record<string, { total_spend: number; total_dbus: number; workspace_count: number }> = {};
+          for (const r of results) {
+            for (const p of r.products || []) {
+              const key = p.category;
+              if (!merged[key]) merged[key] = { total_spend: 0, total_dbus: 0, workspace_count: 0 };
+              merged[key].total_spend += p.total_spend || 0;
+              merged[key].total_dbus += p.total_dbus || 0;
+              merged[key].workspace_count += p.workspace_count || 0;
+            }
+          }
+          const total = Object.values(merged).reduce((s, x) => s + x.total_spend, 0);
+          setFilteredData({
+            products: Object.entries(merged).map(([category, v]) => ({
+              category,
+              total_spend: v.total_spend,
+              total_dbus: v.total_dbus,
+              workspace_count: v.workspace_count,
+              percentage: total > 0 ? (v.total_spend / total) * 100 : 0,
+            })).sort((a, b) => b.total_spend - a.total_spend),
+            total_spend: total,
+            start_date: "",
+            end_date: "",
+          } as ProductBreakdownResponse);
+          setFilterLoading(false);
+        })
+        .catch(() => { if (!cancelled) setFilterLoading(false); });
+    }
+
+    return () => { cancelled = true; };
+  }, [wsKey, dateRange?.startDate, dateRange?.endDate, isAll, isEmpty, selectedWorkspaces]);
 
   // Close dropdown on outside click; reset search on close so reopening starts fresh
   useEffect(() => {
@@ -117,19 +170,24 @@ export const ProductBreakdown = memo(function ProductBreakdown({ data, isLoading
     return () => document.removeEventListener("mousedown", handleClick);
   }, [dropdownOpen]);
 
-  const displayData = selectedWorkspace === "all" ? data : filteredData;
+  const displayData = isEmpty
+    ? ({ products: [], total_spend: 0, start_date: "", end_date: "" } as ProductBreakdownResponse)
+    : isAll
+    ? data
+    : filteredData;
   const showLoading = isLoading || filterLoading;
 
   const selectedWorkspaceName = useMemo(() => {
-    if (selectedWorkspace === "all" || !workspaces) return null;
-    const ws = workspaces.find((w) => String(w.workspace_id) === selectedWorkspace);
-    return workspaceNameMap?.[selectedWorkspace] || (ws ? (ws.workspace_name || String(ws.workspace_id)) : selectedWorkspace);
-  }, [selectedWorkspace, workspaces, workspaceNameMap]);
+    if (selectedWorkspaces.length !== 1 || !workspaces) return null;
+    const wsId = selectedWorkspaces[0];
+    const ws = workspaces.find((w) => String(w.workspace_id) === wsId);
+    return workspaceNameMap?.[wsId] || (ws ? (ws.workspace_name || String(ws.workspace_id)) : wsId);
+  }, [selectedWorkspaces, workspaces, workspaceNameMap]);
 
-  const selectWs = useCallback((wsId: string) => {
-    setSelectedWorkspace((prev) => (prev === wsId ? "all" : wsId));
-    setDropdownOpen(false);
+  const toggleWs = useCallback((wsId: string) => {
+    setSelectedWorkspaces((prev) => (prev.includes(wsId) ? prev.filter((x) => x !== wsId) : [...prev, wsId]));
   }, []);
+  const selectedSet = useMemo(() => new Set(selectedWorkspaces), [selectedWorkspaces]);
   const wsItems = useMemo(
     () => (workspaces || []).map((ws) => {
       const wsId = String(ws.workspace_id);
@@ -147,25 +205,26 @@ export const ProductBreakdown = memo(function ProductBreakdown({ data, isLoading
     <div className="relative" ref={dropdownRef}>
       <button
         onClick={() => setDropdownOpen(!dropdownOpen)}
-        className={`flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-sm font-medium transition-colors ${selectedWorkspace !== "all" ? "border-[#FF3621] text-[#FF3621]" : "border-gray-300 text-gray-700 hover:bg-gray-50"}`}
+        className={`flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-medium transition-colors ${isPartial ? "border-[#FF3621] text-[#FF3621]" : "border-gray-300 text-gray-700 hover:bg-gray-50"}`}
       >
-        {selectedWorkspace !== "all" ? (selectedWorkspaceName || selectedWorkspace) : "Workspace"}
-        {selectedWorkspace !== "all" && (
-          <button onClick={(e) => { e.stopPropagation(); setSelectedWorkspace("all"); }} className="ml-0.5 flex h-3.5 w-3.5 shrink-0 items-center justify-center rounded-full bg-orange-100 text-orange-600 hover:bg-orange-200">
-            <svg className="h-2 w-2" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M6 18L18 6M6 6l12 12" /></svg>
-          </button>
-        )}
-        <svg className={`h-4 w-4 transition-transform ${dropdownOpen ? "rotate-180" : ""}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-          <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
+        {selectedWorkspaceName
+          ? selectedWorkspaceName
+          : isPartial
+          ? `${selectedWorkspaces.length} workspaces`
+          : "Workspace"}
+        <svg className={`h-3 w-3 transition-transform ${dropdownOpen ? "rotate-180" : ""}`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
         </svg>
       </button>
       {dropdownOpen && (
-        <div className="absolute right-0 top-full z-[9999] mt-1 min-w-[220px] rounded-lg border border-gray-200 bg-white shadow-lg">
+        <div className="absolute right-0 top-full z-[9999] mt-1 w-72 rounded-lg border border-gray-200 bg-white shadow-lg">
           <div className="sticky top-0 flex items-center justify-between border-b border-gray-100 bg-white px-3 py-2">
             <span className="text-[10px] font-semibold uppercase tracking-wider text-gray-500">Workspace</span>
-            {selectedWorkspace !== "all" && (
-              <button onClick={(e) => { e.stopPropagation(); setSelectedWorkspace("all"); setDropdownOpen(false); }} className="text-xs text-gray-500 hover:text-gray-800">Clear</button>
-            )}
+            <div className="flex items-center gap-2 text-xs">
+              <button onClick={(e) => { e.stopPropagation(); setSelectedWorkspaces([...allWsIds]); }} className="text-gray-500 hover:text-gray-800">All</button>
+              <span className="text-gray-300">·</span>
+              <button onClick={(e) => { e.stopPropagation(); setSelectedWorkspaces([]); }} className="text-gray-500 hover:text-gray-800">Clear</button>
+            </div>
           </div>
           <div className="border-b border-gray-100 p-2">
             <input
@@ -186,7 +245,7 @@ export const ProductBreakdown = memo(function ProductBreakdown({ data, isLoading
               maxHeight={256}
               getKey={(it) => it.wsId}
               renderItem={(it) => (
-                <WsRow wsId={it.wsId} wsName={it.wsName} active={selectedWorkspace === it.wsId} onSelect={selectWs} />
+                <WsRow wsId={it.wsId} wsName={it.wsName} selected={selectedSet.has(it.wsId)} onToggle={toggleWs} />
               )}
             />
           )}

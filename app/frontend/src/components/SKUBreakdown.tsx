@@ -56,18 +56,44 @@ const WsRow = memo(function WsRow({ wsId, wsName, selected, onToggle }: WsRowPro
 });
 
 export function SKUBreakdown({ data, isLoading, workspaces, dateRange, workspaceNameMap }: SKUBreakdownProps) {
-  const [workspaceFilter, setWorkspaceFilter] = useState<string[]>([]);
+  const [selectedWorkspace, setSelectedWorkspace] = useState<string>("all");
+  const [workspaceFilters, setWorkspaceFilters] = useState<string[]>([]);
+  const workspaceFiltersSeen = useRef<Set<string>>(new Set());
   const [filteredData, setFilteredData] = useState<SKUBreakdownResponse | undefined>(undefined);
   const [filterLoading, setFilterLoading] = useState(false);
   const [dropdownOpen, setDropdownOpen] = useState(false);
   const [wsSearch, setWsSearch] = useState("");
   const dropdownRef = useRef<HTMLDivElement>(null);
 
-  // When exactly one workspace is selected, fetch filtered data; otherwise show all
-  const singleWorkspace = workspaceFilter.length === 1 ? workspaceFilter[0] : null;
+  const allWorkspaceIds = useMemo(
+    () => (workspaces || []).map((ws) => String(ws.workspace_id)),
+    [workspaces],
+  );
+
+  // Sync-add: unseen workspaces get added to the filter automatically, preserving user
+  // unselections of items already seen. First load acts as default-all init.
+  useEffect(() => {
+    const seen = workspaceFiltersSeen.current;
+    const fresh = allWorkspaceIds.filter((x) => !seen.has(x));
+    if (fresh.length === 0) return;
+    setWorkspaceFilters((prev) => Array.from(new Set([...prev, ...fresh])));
+    fresh.forEach((x) => seen.add(x));
+  }, [allWorkspaceIds]);
+
+  // Clear sets the filter to []; length === 1 routes through the scoped endpoint,
+  // otherwise (empty or partial multi-select) we show the account-wide view. So
+  // an empty selection is functionally "all" — don't flag it as an active filter.
+  const isWorkspaceFilterActive = workspaceFilters.length > 0 && workspaceFilters.length < allWorkspaceIds.length;
+
+  // Sync workspaceFilters → selectedWorkspace for the existing fetch logic.
+  // Only route through the workspace-scoped endpoint when the user has selected exactly one;
+  // "all selected" (default) and any partial multi-selection use the account-wide payload.
+  useEffect(() => {
+    setSelectedWorkspace(workspaceFilters.length === 1 ? workspaceFilters[0] : "all");
+  }, [workspaceFilters]);
 
   useEffect(() => {
-    if (!singleWorkspace) {
+    if (selectedWorkspace === "all") {
       setFilteredData(undefined);
       return;
     }
@@ -76,7 +102,7 @@ export function SKUBreakdown({ data, isLoading, workspaces, dateRange, workspace
     const params = new URLSearchParams();
     if (dateRange?.startDate) params.set("start_date", dateRange.startDate);
     if (dateRange?.endDate) params.set("end_date", dateRange.endDate);
-    params.set("workspace_id", singleWorkspace);
+    params.set("workspace_id", selectedWorkspace);
 
     fetch(`/api/billing/sku-breakdown?${params}`)
       .then((res) => res.json())
@@ -87,7 +113,7 @@ export function SKUBreakdown({ data, isLoading, workspaces, dateRange, workspace
       .catch(() => {
         setFilterLoading(false);
       });
-  }, [singleWorkspace, dateRange?.startDate, dateRange?.endDate]);
+  }, [selectedWorkspace, dateRange?.startDate, dateRange?.endDate]);
 
   useEffect(() => {
     if (!dropdownOpen) {
@@ -103,28 +129,28 @@ export function SKUBreakdown({ data, isLoading, workspaces, dateRange, workspace
     return () => document.removeEventListener("mousedown", handleClick);
   }, [dropdownOpen]);
 
-  const displayData = singleWorkspace ? filteredData : data;
+  const displayData = selectedWorkspace === "all" ? data : filteredData;
   const showLoading = isLoading || filterLoading;
 
   const selectedWorkspaceName = useMemo(() => {
-    if (workspaceFilter.length !== 1 || !workspaces) return null;
-    const wsId = workspaceFilter[0];
+    if (workspaceFilters.length !== 1 || !workspaces) return null;
+    const wsId = workspaceFilters[0];
     const ws = workspaces.find((w) => String(w.workspace_id) === wsId);
     return workspaceNameMap?.[wsId] || (ws ? (ws.workspace_name || String(ws.workspace_id)) : wsId);
-  }, [workspaceFilter, workspaces, workspaceNameMap]);
+  }, [workspaceFilters, workspaces, workspaceNameMap]);
 
-  const workspaceOptions = workspaces || [];
-
+  // Stable toggle callback so memoized WsRow doesn't re-render every keystroke elsewhere.
   const toggleWs = useCallback((wsId: string) => {
-    setWorkspaceFilter((prev) => (prev.includes(wsId) ? prev.filter((x) => x !== wsId) : [...prev, wsId]));
+    setWorkspaceFilters((prev) => (prev.includes(wsId) ? prev.filter((x) => x !== wsId) : [...prev, wsId]));
   }, []);
-  const selectedSet = useMemo(() => new Set(workspaceFilter), [workspaceFilter]);
+  const selectedSet = useMemo(() => new Set(workspaceFilters), [workspaceFilters]);
+
   const wsItems = useMemo(
-    () => workspaceOptions.map((ws) => {
+    () => (workspaces || []).map((ws) => {
       const wsId = String(ws.workspace_id);
       return { wsId, wsName: workspaceNameMap?.[wsId] || ws.workspace_name || wsId };
     }),
-    [workspaceOptions, workspaceNameMap],
+    [workspaces, workspaceNameMap],
   );
   const filteredWsItems = useMemo(() => {
     if (!wsSearch.trim()) return wsItems;
@@ -136,16 +162,15 @@ export function SKUBreakdown({ data, isLoading, workspaces, dateRange, workspace
     <div className="relative" ref={dropdownRef}>
       <button
         onClick={() => setDropdownOpen(!dropdownOpen)}
-        className={`flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-sm font-medium transition-colors ${workspaceFilter.length > 0 ? "border-[#FF3621] text-[#FF3621]" : "border-gray-200 bg-white text-gray-700 hover:bg-gray-50"}`}
+        className={`flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-medium transition-colors ${isWorkspaceFilterActive ? "border-[#FF3621] text-[#FF3621]" : "border-gray-300 text-gray-700 hover:bg-gray-50"}`}
       >
-        {workspaceFilter.length === 0 ? "Workspaces" : workspaceFilter.length === 1 ? (workspaceNameMap?.[workspaceFilter[0]] || workspaceFilter[0]) : `${workspaceFilter.length} Workspaces`}
-        {workspaceFilter.length > 0 && (
-          <button onClick={(e) => { e.stopPropagation(); setWorkspaceFilter([]); }} className="ml-0.5 flex h-3.5 w-3.5 shrink-0 items-center justify-center rounded-full bg-orange-100 text-orange-600 hover:bg-orange-200">
-            <svg className="h-2 w-2" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M6 18L18 6M6 6l12 12" /></svg>
-          </button>
-        )}
-        <svg className={`h-4 w-4 transition-transform ${dropdownOpen ? "rotate-180" : ""}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-          <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
+        {workspaceFilters.length === 1
+          ? (selectedWorkspaceName || workspaceFilters[0])
+          : isWorkspaceFilterActive
+          ? `${workspaceFilters.length} Workspaces`
+          : "Workspaces"}
+        <svg className={`h-3 w-3 transition-transform ${dropdownOpen ? 'rotate-180' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
         </svg>
       </button>
       {dropdownOpen && (
@@ -153,9 +178,9 @@ export function SKUBreakdown({ data, isLoading, workspaces, dateRange, workspace
           <div className="sticky top-0 flex items-center justify-between border-b border-gray-100 bg-white px-3 py-2">
             <span className="text-[10px] font-semibold uppercase tracking-wider text-gray-500">Workspaces</span>
             <div className="flex items-center gap-2 text-xs">
-              <button onClick={(e) => { e.stopPropagation(); setWorkspaceFilter(workspaceOptions.map(ws => String(ws.workspace_id))); }} className="text-gray-500 hover:text-gray-800">All</button>
+              <button onClick={(e) => { e.stopPropagation(); setWorkspaceFilters((workspaces || []).map(ws => String(ws.workspace_id))); }} className="text-gray-500 hover:text-gray-800">All</button>
               <span className="text-gray-300">·</span>
-              <button onClick={(e) => { e.stopPropagation(); setWorkspaceFilter([]); }} className="text-gray-500 hover:text-gray-800">Clear</button>
+              <button onClick={(e) => { e.stopPropagation(); setWorkspaceFilters([]); }} className="text-gray-500 hover:text-gray-800">Clear</button>
             </div>
           </div>
           <div className="border-b border-gray-100 p-2">
@@ -239,7 +264,7 @@ export function SKUBreakdown({ data, isLoading, workspaces, dateRange, workspace
               Filtered to: {selectedWorkspaceName}
             </p>
           )}
-          {workspaceFilter.length > 1 && (
+          {workspaceFilters.length > 1 && isWorkspaceFilterActive && (
             <p className="text-xs text-amber-600 mt-1">Showing aggregate view — select one workspace to filter by workspace</p>
           )}
         </div>
