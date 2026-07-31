@@ -1057,7 +1057,8 @@ def execute_write(query: str, params: dict[str, Any] | None = None) -> int:
             raise
 
     elapsed = time.time() - start_time
-    logger.info(f"Write query executed in {elapsed:.2f}s ({affected_rows} rows affected)")
+    _sql_tag = " ".join(query.split())[:60]
+    logger.info(f"Write query executed in {elapsed:.2f}s ({affected_rows} rows affected) [{_sql_tag}]")
     return affected_rows
 
 
@@ -1123,7 +1124,8 @@ def execute_query(query: str, params: dict[str, Any] | None = None, *, cache_tag
         cache_key = _get_cache_key(query, params, tag=cache_tag)
         _query_cache[cache_key] = result
     elapsed = time.time() - start_time
-    logger.info(f"Query executed in {elapsed:.2f}s ({len(result)} rows)")
+    _sql_tag = " ".join(query.split())[:60]
+    logger.info(f"Query [{_sql_tag}] executed in {elapsed:.2f}s ({len(result)} rows)")
     return result
 
 

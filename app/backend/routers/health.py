@@ -70,19 +70,20 @@ async def detailed_health_check() -> dict[str, Any]:
 async def get_sql_warehouse_status() -> dict[str, Any]:
     """Check if the SQL warehouse is warm, starting, or unavailable.
 
-    Decision order:
-    1. Warehouse REST API state (no SQL connection needed, instant)
-    2. SQL SELECT 1 probe with 5s timeout (fallback if REST unavailable)
+    REST-only by design: it reports warehouse state from the Warehouses REST API
+    and never issues a query. This endpoint is polled by the frontend every
+    5-15s, so any query here would keep the warehouse warm continuously. If the
+    REST state is unavailable, it reports warming_up and lets the first real user
+    query warm the warehouse on demand.
 
     Returns:
-        status: "warm" | "warming_up" | "unavailable"
+        status: "warm" | "warming_up"
         state:  raw warehouse state string (or None if API unavailable)
-        latency_ms: SQL probe latency in ms (only set when probe was used)
+        latency_ms: always None (kept for response-shape compatibility)
         warehouse_id: warehouse ID being checked (or None if not configured)
     """
     import os
     import re as _re
-    import time as _time
 
     # Prefer DATABRICKS_WAREHOUSE_ID if injected; fall back to parsing HTTP path.
     # The regex handles /sql/1.0/warehouses/<id> and /sql/1.0/endpoints/<id>,
@@ -118,22 +119,13 @@ async def get_sql_warehouse_status() -> dict[str, Any]:
         except Exception as e:
             logger.debug("Warehouse REST check failed, trying SQL probe: %s", e)
 
-    # ── 2. SQL probe fallback ─────────────────────────────────────────────────
-    try:
-        from backend.db import execute_query
-        import asyncio
-
-        loop = asyncio.get_running_loop()
-        t0 = _time.monotonic()
-
-        def _probe():
-            execute_query("SELECT 1 AS probe", no_cache=True)
-
-        await asyncio.wait_for(loop.run_in_executor(None, _probe), timeout=5.0)
-        latency_ms = round((_time.monotonic() - t0) * 1000, 1)
-        return {"status": "warm", "state": None, "latency_ms": latency_ms, "warehouse_id": warehouse_id}
-    except Exception:
-        return {"status": "warming_up", "state": None, "latency_ms": None, "warehouse_id": warehouse_id}
+    # ── 2. REST-only — no SQL probe ───────────────────────────────────────────
+    # This endpoint is polled by the frontend every 5-15s. It must NOT issue a
+    # probe query: that would fire against the warehouse continuously and keep
+    # it warm forever (the exact 24x7 pinning we removed). If the REST state check
+    # above was unavailable (no warehouse id, or SDK error), report warming_up and
+    # let the first real user query warm the warehouse on demand.
+    return {"status": "warming_up", "state": None, "latency_ms": None, "warehouse_id": warehouse_id}
 
 
 async def _check_lakebase() -> dict[str, Any]:
@@ -158,27 +150,27 @@ async def _check_lakebase() -> dict[str, Any]:
 
 
 async def _check_database() -> dict[str, Any]:
-    """Test database connectivity."""
-    try:
-        from backend.db import execute_query
+    """Report warehouse configuration without issuing a query.
 
-        start_time = time.time()
-        # Simple query to test connectivity
-        result = await asyncio.to_thread(execute_query, "SELECT 1 as test", no_cache=True)
-        latency_ms = (time.time() - start_time) * 1000
+    Deliberately does NOT run a connectivity probe query — synthetic pings
+    warm the serverless warehouse and distort the usage data this app reports on.
+    Connectivity is proven by real queries elsewhere; this check only reports
+    whether a warehouse is bound to the app.
+    """
+    import os
 
+    # Return "healthy" when a warehouse is bound so the detailed_health_check
+    # aggregator (which marks the app degraded unless every non-lakebase check is
+    # "healthy") keeps working without a synthetic probe query.
+    if os.getenv("DATABRICKS_WAREHOUSE_ID") or os.getenv("DATABRICKS_HTTP_PATH"):
         return {
             "status": "healthy",
-            "latency_ms": round(latency_ms, 2),
-            "message": "Database connection successful",
+            "message": "Warehouse bound; connectivity verified by real queries (no synthetic probe)",
         }
-    except Exception as e:
-        logger.error(f"Database health check failed: {e}")
-        return {
-            "status": "unhealthy",
-            "error": str(e),
-            "message": "Database connection failed",
-        }
+    return {
+        "status": "not_configured",
+        "message": "No warehouse bound (DATABRICKS_WAREHOUSE_ID / DATABRICKS_HTTP_PATH unset)",
+    }
 
 
 def _get_cache_stats() -> dict[str, Any]:
@@ -330,12 +322,8 @@ async def query_diagnostics() -> dict[str, Any]:
     def _run_sql_tests() -> dict:
         tests: dict[str, str] = {}
 
-        # Test 1: basic connectivity
-        try:
-            execute_query("SELECT 1 AS ping", no_cache=True)
-            tests["connectivity"] = "ok"
-        except Exception as e:
-            tests["connectivity"] = f"ERROR: {e}"
+        # No synthetic connectivity probe — the system.billing.usage query below
+        # proves connectivity against a real table.
 
         # Test 2: system.billing.usage (most commonly failing)
         try:

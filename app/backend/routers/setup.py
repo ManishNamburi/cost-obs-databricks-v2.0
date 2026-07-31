@@ -789,7 +789,7 @@ def _preflight_catalog_check(catalog: str) -> dict:
 
 
 def _verify_built_objects_as_sp(catalog: str, schema: str) -> dict:
-    """Probe every MV table with SELECT 1 as the SP to confirm UC grants propagated.
+    """Probe every MV table with a one-row read as the SP to confirm UC grants propagated.
 
     Returns {"ok": bool, "failed": list[str], "errors": dict[str, str]}
     """
@@ -880,7 +880,7 @@ def _create_tables_task(catalog: str, schema: str, user_token: str = ""):
     3s sleep: brief propagation wait between grants and warehouse ops.
     Phase 2 — Build: create_materialized_views runs as SP.
     Post-grants: Apply schema-level privileges now that the schema exists.
-    Phase 3 — Verify: SELECT 1 probe on every MV table as SP with retry backoff.
+    Phase 3 — Verify: one-row probe on every MV table as SP with retry backoff.
       UC grant propagation can take 10-60s; [0,10,20,30]s delays = 60s budget.
     Only marks "done" after Phase 3 passes.
     """

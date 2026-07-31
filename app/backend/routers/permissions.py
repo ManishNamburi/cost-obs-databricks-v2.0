@@ -96,7 +96,7 @@ def check_table_access(table: str) -> tuple[bool, str]:
     Returns (granted, error_message). error_message is empty string on success.
 
     Uses SDK tables.get() first — instant REST call, no warehouse needed.
-    Falls back to SELECT 1 via SQL warehouse only when SDK returns an ambiguous
+    Falls back to a one-row table probe via SQL warehouse only when SDK returns an ambiguous
     result (not a clear grant or denial). This avoids blocking on warehouse
     cold-start which can take several minutes.
     """

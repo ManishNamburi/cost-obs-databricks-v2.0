@@ -571,20 +571,9 @@ def startup_tasks():
     # Step 0: Set up dedicated warehouse (creates Large serverless warehouse if needed)
     setup_and_check_warehouse()
 
-    # Step 0a: Ping the warehouse with retry so it's warm before later startup steps run.
-    # Serverless warehouses wake in ~15-30s; retry up to 3x (45s total) to ride out cold starts.
-    from backend.db import execute_query as _eq
-    for _attempt in range(3):
-        try:
-            _eq("SELECT 1", None, no_cache=True)
-            logger.info("Warehouse ping complete — warehouse is warm (attempt %d)", _attempt + 1)
-            break
-        except Exception as _ping_exc:
-            if _attempt < 2:
-                logger.warning("Warehouse ping attempt %d failed, retrying in 15s: %s", _attempt + 1, _ping_exc)
-                time.sleep(15)
-            else:
-                logger.warning("Warehouse ping failed after 3 attempts (proceeding): %s", _ping_exc)
+    # Step 0a: No synthetic warehouse warm-up ping. Startup steps below that
+    # genuinely need the warehouse (system.access setup, MV creation) issue real
+    # queries that trigger auto-start on their own — we never fire a warm-up query.
 
     # Step 0b: Enable system.access schema for workspace name resolution
     setup_system_access_schema()
@@ -868,27 +857,17 @@ async def lifespan(app: FastAPI):
                 logger.error(f"MV rebuild scheduler error: {e}")
                 await asyncio.sleep(3600)  # retry in 1h on unexpected error
 
-    async def _warehouse_keepalive_loop():
-        """Ping warehouse every 5 min to prevent auto-stop on idle.
-
-        With auto_stop_mins=10, a 5-minute keepalive ensures the warehouse
-        stays RUNNING while the app is live — eliminating cold-start timeouts
-        caused by nightly inactivity.
-        """
-        while True:
-            await asyncio.sleep(300)
-            try:
-                from backend.db import execute_query as _kq
-                await asyncio.to_thread(lambda: _kq("SELECT 1", None, no_cache=True))
-                logger.debug("Warehouse keepalive OK")
-            except Exception as _ke:
-                logger.debug("Warehouse keepalive failed (non-fatal): %s", _ke)
-
-    keepalive_task = asyncio.create_task(_warehouse_keepalive_loop())
+    # NOTE: there is NO warehouse keepalive or warming task of any kind. A prior
+    # design pinged the warehouse every 5 min to keep it from auto-stopping;
+    # with --workers 2 that fired twice every 5 min, pinning the (often shared)
+    # serverless warehouse online ~24x7, inflating cost and polluting the usage
+    # data this app reports on. The warehouse now warms solely as a side effect of
+    # real user queries; with no users it auto-stops as intended. A cold start adds
+    # ~15-30s to the first query after idle; the frontend shows a "Starting" splash
+    # via the REST-only /api/health/sql-warehouse poll (which issues no SQL).
     scheduler_task = asyncio.create_task(_daily_mv_refresh_loop())
     yield
     scheduler_task.cancel()
-    keepalive_task.cancel()
     try:
         from backend.routers.setup import shutdown_readiness_executor
         shutdown_readiness_executor()
