@@ -431,6 +431,30 @@ export function SQLWarehousing360({ sqlBreakdownData: _sqlBreakdownData, queryDa
 
   return (
     <div className="space-y-6">
+      {/* Region-scope banner — system.compute / system.query are region-scoped, so
+          SQL/warehouse detail only covers workspaces in this metastore's region even
+          though account-wide billing (spend totals) spans all regions. */}
+      {queryData?.region_scope?.limited && (
+        <div className="rounded-lg border border-amber-200 bg-amber-50 p-4">
+          <div className="flex items-start gap-3">
+            <svg className="mt-0.5 h-5 w-5 shrink-0 text-amber-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+            </svg>
+            <div>
+              <p className="text-sm font-medium text-amber-800">
+                SQL &amp; warehouse detail is limited to this region
+              </p>
+              <p className="mt-1 text-sm text-amber-700">
+                {queryData.region_scope.missing_workspace_count} workspace{queryData.region_scope.missing_workspace_count === 1 ? "" : "s"} with SQL spend {queryData.region_scope.missing_workspace_count === 1 ? "is" : "are"} outside this metastore&apos;s cloud region.
+                Databricks scopes <code className="rounded bg-amber-100 px-1">system.compute</code> and <code className="rounded bg-amber-100 px-1">system.query</code> per region,
+                so per-warehouse and per-query detail below covers only the {queryData.region_scope.in_region_workspace_count} in-region workspace{queryData.region_scope.in_region_workspace_count === 1 ? "" : "s"}.
+                Account-wide spend totals are unaffected. To see full detail for the other regions, deploy Cost Observability in a workspace in each region.
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Query-level Cost Attribution */}
       {hasQueryData === false ? (
         <div className="rounded-lg border border-gray-200 bg-gray-50 p-6">
@@ -754,7 +778,7 @@ export function SQLWarehousing360({ sqlBreakdownData: _sqlBreakdownData, queryDa
                     </div>
                   );
                 }
-                const typeColors: Record<string, string> = { SERVERLESS: "#1B5162", PRO: "#06B6D4", CLASSIC: "#F59E0B" };
+                const typeColors: Record<string, string> = { SERVERLESS: "#1B5162", PRO: "#06B6D4", CLASSIC: "#F59E0B", Unknown: "#9CA3AF" };
                 return (
                   <ResponsiveContainer width="100%" height={300}>
                     <AreaChart data={tsData} margin={{ top: 5, right: 10, left: 10, bottom: 5 }}>

@@ -253,6 +253,24 @@ def create_dbsql_router(table_name: str) -> APIRouter:
                       AND u.usage_quantity > 0
                     GROUP BY u.usage_date, u.usage_metadata.warehouse_id
                 """, params)),
+                # Region-scope detection: system.billing.usage is account-wide (all
+                # regions), but system.compute.warehouses is scoped to the metastore's
+                # region. Count workspaces that have SQL spend in billing vs. workspaces
+                # visible in compute; the difference is workspaces in OTHER regions whose
+                # SQL/warehouse detail this deployment cannot see.
+                ("region_billing_ws", lambda: execute_query("""
+                    SELECT COUNT(DISTINCT u.workspace_id) AS ws_count
+                    FROM system.billing.usage u
+                    WHERE u.billing_origin_product = 'SQL'
+                      AND u.usage_date BETWEEN :start_date AND :end_date
+                      AND u.usage_quantity > 0
+                      AND u.workspace_id IS NOT NULL
+                """, params)),
+                ("region_compute_ws", lambda: execute_query("""
+                    SELECT COUNT(DISTINCT workspace_id) AS ws_count
+                    FROM system.compute.warehouses
+                    WHERE workspace_id IS NOT NULL
+                """)),
             ]
 
             results = execute_queries_parallel(queries, 120.0)
@@ -351,7 +369,12 @@ def create_dbsql_router(table_name: str) -> APIRouter:
             for r in (results.get("wh_type_billing") or []):
                 d = str(r.get("date"))
                 wid = r.get("warehouse_id") or ""
-                wt = wh_type_lookup.get(wid, "CLASSIC")
+                # A warehouse_id present in billing but absent from wh_meta is
+                # out-of-region: system.compute.warehouses is region-scoped while
+                # system.billing.usage is account-wide. Do NOT default these to
+                # CLASSIC — that mislabels out-of-region serverless spend. Mark
+                # them "Unknown" so the chart is honest about what it can't classify.
+                wt = wh_type_lookup.get(wid, "Unknown")
                 spend = float(r.get("daily_spend") or 0)
                 wh_type_set.add(wt)
                 if d not in wh_ts_by_date:
@@ -366,6 +389,27 @@ def create_dbsql_router(table_name: str) -> APIRouter:
                 wh_ts_list.append(row_d)
             warehouse_type_timeseries = {"available": True, "timeseries": wh_ts_list, "warehouse_types": wh_types_list}
 
+            # region_scope — surface when this deployment's region-scoped system tables
+            # (system.compute / system.query) cover fewer workspaces than account-wide
+            # billing, so the UI can explain why SQL/Optimize detail looks incomplete.
+            def _first_count(key: str) -> int:
+                rows = results.get(key) or []
+                try:
+                    return int(rows[0].get("ws_count") or 0) if rows else 0
+                except (ValueError, TypeError, AttributeError):
+                    return 0
+            billing_ws = _first_count("region_billing_ws")
+            compute_ws = _first_count("region_compute_ws")
+            # Only claim a gap when both counts are trustworthy (>0) and billing exceeds
+            # compute. If either query failed/returned 0, stay silent rather than alarm.
+            missing_ws = max(billing_ws - compute_ws, 0) if (billing_ws > 0 and compute_ws > 0) else 0
+            region_scope = {
+                "billing_workspace_count": billing_ws,
+                "in_region_workspace_count": compute_ws,
+                "missing_workspace_count": missing_ws,
+                "limited": missing_ws > 0,
+            }
+
             _resp = {
                 "available": True,
                 "summary": summary,
@@ -374,6 +418,7 @@ def create_dbsql_router(table_name: str) -> APIRouter:
                 "by_warehouse": by_warehouse,
                 "timeseries": timeseries,
                 "warehouse_type_timeseries": warehouse_type_timeseries,
+                "region_scope": region_scope,
                 "start_date": start_date,
                 "end_date": end_date,
             }

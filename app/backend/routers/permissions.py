@@ -180,7 +180,7 @@ def _check_permissions_sync(bypass_cache: bool = False) -> dict[str, Any]:
             logger.debug(f"Returning cached permissions result (age: {age:.0f}s)")
             return _permissions_cache
 
-    from concurrent.futures import as_completed
+    from concurrent.futures import ThreadPoolExecutor, as_completed
 
     # Fire table checks + user lookup + SP info all in parallel
     with ThreadPoolExecutor(max_workers=len(REQUIRED_PERMISSIONS) + 2) as pool:
