@@ -118,13 +118,19 @@ export const WorkspaceTable = memo(function WorkspaceTable({ data, isLoading, ho
     );
   }
 
+  // Drop rows with no real workspace id — a null id stringified upstream renders
+  // as a bogus "Workspace None" row; it should never appear in this view.
+  const validWorkspaces = data.workspaces.filter((ws) => {
+    const id = ws.workspace_id;
+    return id != null && !["", "none", "null"].includes(String(id).trim().toLowerCase());
+  });
   // A workspace is only "historical" if it has no workspace_id at all.
   // Null workspace_name means the name isn't in workspaces_latest — that's not the same as historical.
   const isHistoricalWs = (ws: typeof data.workspaces[0]) => !ws.workspace_id;
-  const historicalCount = data.workspaces.filter((ws) => isHistoricalWs(ws)).length;
+  const historicalCount = validWorkspaces.filter((ws) => isHistoricalWs(ws)).length;
   // When all workspaces lack names (workspace_name is unavailable), show everything rather than a blank table.
-  const allHistorical = historicalCount === data.workspaces.length;
-  const activeWorkspaces = (showHistorical || allHistorical) ? data.workspaces : data.workspaces.filter((ws) => !isHistoricalWs(ws));
+  const allHistorical = historicalCount === validWorkspaces.length;
+  const activeWorkspaces = (showHistorical || allHistorical) ? validWorkspaces : validWorkspaces.filter((ws) => !isHistoricalWs(ws));
 
   // Clear sets the filter to []; treat empty as "show all" (not "hide everything")
   // so the Clear button matches the All button's effect on visible rows.

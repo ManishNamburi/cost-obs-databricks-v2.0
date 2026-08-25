@@ -780,17 +780,29 @@ function Dashboard() {
               Setup incomplete — materialized views have not been created. Data may be slower or incomplete.
             </span>
           </div>
-          <button
-            onClick={() => {
-              setSetupIncomplete(false);
-              fetch("/api/setup/rerun", { method: "POST" }).catch(() => {});
-              setShowSetupWizard(true);
-            }}
-            className="shrink-0 rounded-md px-3 py-1.5 text-xs font-semibold text-white transition-colors"
-            style={{ backgroundColor: '#FF3621' }}
-          >
-            Resume Setup
-          </button>
+          <div className="flex shrink-0 items-center gap-2">
+            <button
+              onClick={() => {
+                setSetupIncomplete(false);
+                fetch("/api/setup/mark-complete", { method: "POST" }).catch(() => {});
+              }}
+              className="rounded-md border border-orange-300 px-3 py-1.5 text-xs font-medium text-orange-800 hover:bg-orange-100 transition-colors"
+              title="Mark setup complete without rebuilding — use when the tables already exist"
+            >
+              Mark complete
+            </button>
+            <button
+              onClick={() => {
+                setSetupIncomplete(false);
+                fetch("/api/setup/rerun", { method: "POST" }).catch(() => {});
+                setShowSetupWizard(true);
+              }}
+              className="rounded-md px-3 py-1.5 text-xs font-semibold text-white transition-colors"
+              style={{ backgroundColor: '#FF3621' }}
+            >
+              Resume Setup
+            </button>
+          </div>
         </div>
       )}
 

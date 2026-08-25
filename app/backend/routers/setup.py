@@ -166,6 +166,69 @@ _CORE_REQUIRED_TABLES = frozenset({
     "daily_workspace_breakdown",
 })
 
+def autodiscover_storage_location() -> tuple[str, str] | None:
+    """Find where the app's own MV tables already live and adopt that location.
+
+    Runs when no catalog/schema is configured — the case on a workspace where DBFS
+    is disabled (so the app's durable override can't be stored there) and a redeploy
+    wiped `.settings/`. Without this the app forgets where its tables are and shows
+    "setup incomplete" even though the tables exist.
+
+    Searches system.information_schema for the CORE MV tables and adopts the single
+    location that holds all of them. Conservative: if ambiguous it does nothing.
+    On success it persists the location and the setup-done flag. Returns
+    (catalog, schema) on success, else None.
+    """
+    global _setup_confirmed_ready
+    from backend.db import execute_query, save_catalog_schema
+
+    core = sorted(_CORE_REQUIRED_TABLES)
+    in_list = ", ".join("'" + t + "'" for t in core)
+    try:
+        rows = execute_query(
+            f"""SELECT table_catalog AS c, table_schema AS s, COUNT(*) AS n
+                FROM system.information_schema.tables
+                WHERE table_name IN ({in_list})
+                GROUP BY table_catalog, table_schema
+                ORDER BY n DESC""",
+            no_cache=True,
+        )
+    except Exception as e:
+        logger.warning("Storage auto-discovery query failed (non-fatal): %s", e)
+        return None
+
+    candidates = [(r["c"], r["s"]) for r in (rows or []) if int(r.get("n") or 0) >= len(core)]
+    if not candidates:
+        logger.info("Storage auto-discovery: no schema holds the core MV tables yet.")
+        return None
+    if len(candidates) > 1:
+        logger.warning(
+            "Storage auto-discovery ambiguous — %d schemas hold the core tables (%s); "
+            "leaving unconfigured so the setup wizard can pick.",
+            len(candidates), candidates,
+        )
+        return None
+
+    cat, sch = candidates[0]
+    try:
+        save_catalog_schema(cat, sch)
+    except Exception as e:
+        logger.warning("Storage auto-discovery: could not persist %s.%s: %s", cat, sch, e)
+        return None
+
+    try:
+        import time as _time
+        os.makedirs(SETTINGS_DIR, exist_ok=True)
+        with open(SETUP_DONE_FILE, "w") as f:
+            json.dump({"completed_at": _time.time(), "autodiscovered": True}, f)
+        _setup_confirmed_ready = True
+    except Exception as e:
+        logger.debug("Storage auto-discovery: could not write setup-done flag: %s", e)
+
+    logger.info("Storage auto-discovered and adopted: %s.%s", cat, sch)
+    return cat, sch
+
+
 # Auto-fail bootstrap after this many seconds to prevent infinite spinner
 _BOOTSTRAP_TIMEOUT_SECONDS = 25 * 60  # 25 minutes
 
@@ -571,6 +634,39 @@ async def mark_setup_complete(background_tasks: BackgroundTasks) -> dict[str, An
     except Exception as e:
         logger.warning(f"Could not queue initial MV build (non-fatal): {e}")
 
+    return {"ok": True}
+
+
+@router.post("/mark-complete")
+async def mark_setup_complete_manual() -> dict[str, Any]:
+    """Mark setup complete WITHOUT triggering a rebuild.
+
+    For when the app-managed tables already exist but the app lost its
+    completion flag (e.g. a redeploy wiped .settings/ and DBFS is disabled, so
+    the durable flag couldn't be restored). Lets the user dismiss the
+    'setup incomplete' banner directly instead of re-running the wizard.
+    """
+    global _setup_confirmed_ready
+    try:
+        import time as _time
+        os.makedirs(SETTINGS_DIR, exist_ok=True)
+        with open(SETUP_DONE_FILE, "w") as f:
+            json.dump({"completed_at": _time.time(), "manual": True}, f)
+    except Exception as e:
+        logger.error(f"Failed to write setup_done.json (manual mark-complete): {e}")
+        return {"ok": False, "error": str(e)}
+
+    _setup_confirmed_ready = True
+    try:
+        from backend.db import write_dbfs_setup_complete
+        write_dbfs_setup_complete()
+    except Exception as e:
+        logger.debug("mark-complete: DBFS persist skipped (non-fatal): %s", e)
+    try:
+        from backend.routers import settings as _settings_router
+        _settings_router._tables_cache = None
+    except Exception:
+        pass
     return {"ok": True}
 
 

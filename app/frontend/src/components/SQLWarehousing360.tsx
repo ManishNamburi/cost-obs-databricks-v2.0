@@ -466,7 +466,7 @@ export function SQLWarehousing360({ sqlBreakdownData: _sqlBreakdownData, queryDa
               <p className="text-sm font-medium text-gray-700">Query-level cost attribution is not available</p>
               <p className="mt-1 text-sm text-gray-500">
                 This tab requires <code className="rounded bg-gray-200 px-1 text-xs">system.query.history</code> access for the app's service principal.
-                Grant it in <strong>Settings → Permissions → Run SP Grants</strong>, then rebuild tables from <strong>Settings → Config</strong>.
+                Copy the GRANT SQL from <strong>Settings → Permissions</strong> and run it as a metastore admin, then rebuild tables from <strong>Settings → Config</strong>.
               </p>
             </div>
           </div>

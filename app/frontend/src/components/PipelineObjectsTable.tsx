@@ -90,16 +90,10 @@ export const PipelineObjectsTable = memo(function PipelineObjectsTable({ data, i
     );
   }
 
+  // Nothing to show — hide the table entirely (dynamically) rather than render an
+  // empty "No pipeline objects" card that just takes up space.
   if (!data || data.objects.length === 0) {
-    return (
-      <div className="rounded-lg bg-white p-6 border " style={{ borderColor: '#E5E5E5' }}>
-        <h3 className="mb-4 text-lg font-semibold text-gray-900">ETL Leaderboard</h3>
-        <div className="flex h-32 flex-col items-center justify-center gap-2 text-gray-500">
-          <p className="text-base font-medium">No pipeline objects found</p>
-          <p className="text-sm">Jobs and SDP pipelines will appear here when billing activity is detected</p>
-        </div>
-      </div>
-    );
+    return null;
   }
 
   const searchLower = search.toLowerCase();

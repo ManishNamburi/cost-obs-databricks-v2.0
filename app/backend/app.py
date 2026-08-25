@@ -367,6 +367,19 @@ def setup_materialized_views():
 
         catalog, schema = get_catalog_schema()
 
+        # No location configured (env/.settings/DBFS all empty — the GCP case where
+        # DBFS is disabled and a redeploy wiped .settings) — try to auto-discover it
+        # from where the app's MV tables already live, so the app self-heals instead
+        # of showing "setup incomplete" with the tables sitting right there.
+        if not catalog or not schema:
+            try:
+                from backend.routers.setup import autodiscover_storage_location
+                discovered = autodiscover_storage_location()
+                if discovered:
+                    catalog, schema = discovered
+            except Exception as _disc_err:
+                logger.warning("Storage auto-discovery skipped (non-fatal): %s", _disc_err)
+
         # Validate config before touching anything
         try:
             validate_app_storage_target(catalog, schema)
