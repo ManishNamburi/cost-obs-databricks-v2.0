@@ -349,14 +349,184 @@ def save_mv_table_overrides(overrides: dict[str, str]) -> None:
     logger.info("MV table overrides saved: %s", list(overrides.keys()))
 
 
+# ── Additional MV sources (union of Delta-shared / cross-workspace MVs) ───────
+#
+# Extra locations (typically Delta-shared in from another workspace) whose tables
+# share the EXACT structure of this app's own MVs. When one or more sources are
+# configured, every MV read is routed through a per-table `<name>__unified` view
+# (built by materialized_views.rebuild_unified_views) that UNION ALLs the local
+# table with each source's same-named table, tagging every row with a
+# `source_label` column. This is additive — local data is always included.
+
+_MV_SOURCES_FILE = os.path.join(
+    os.path.dirname(__file__), "..", ".settings", "mv_sources.json"
+)
+
+# Suffix of the per-table union view. Public so the router/view-builder agree.
+MV_UNIFIED_SUFFIX = "__unified"
+
+# Which MV tables currently have a built `<name>__unified` view. Written by
+# rebuild_unified_views; read by apply_mv_overrides so it only ever remaps a table
+# to a view that actually exists (never to a missing __unified view).
+_MV_UNIFIED_TABLES_FILE = os.path.join(
+    os.path.dirname(__file__), "..", ".settings", "mv_unified_views.json"
+)
+
+
+def get_unified_view_tables() -> list[str]:
+    """MV table names that currently have a built `<name>__unified` view."""
+    try:
+        with open(_MV_UNIFIED_TABLES_FILE) as f:
+            data = json.load(f)
+        return [t for t in data if isinstance(t, str)] if isinstance(data, list) else []
+    except (FileNotFoundError, json.JSONDecodeError, OSError):
+        return []
+
+
+def save_unified_view_tables(tables: list[str]) -> None:
+    """Record which MV tables have a built unified view (best-effort)."""
+    try:
+        os.makedirs(os.path.dirname(_MV_UNIFIED_TABLES_FILE), exist_ok=True)
+        with open(_MV_UNIFIED_TABLES_FILE, "w") as f:
+            json.dump(list(tables), f)
+    except OSError as e:
+        logger.debug("Could not persist unified-view table list: %s", e)
+
+
+def _valid_mv_source(s: object) -> bool:
+    return (
+        isinstance(s, dict)
+        and isinstance(s.get("label"), str) and bool(s["label"].strip())
+        and isinstance(s.get("catalog"), str) and bool(s["catalog"].strip())
+        and isinstance(s.get("schema"), str) and bool(s["schema"].strip())
+    )
+
+
+def get_mv_sources() -> list[dict]:
+    """Additional MV source locations to union into MV reads.
+
+    Each entry: {"label": str, "catalog": str, "schema": str}. Local file first,
+    then DBFS (survives git redeploys). Never raises — returns [] on any error.
+    """
+    try:
+        with open(_MV_SOURCES_FILE) as f:
+            data = json.load(f)
+        if isinstance(data, list):
+            return [s for s in data if _valid_mv_source(s)]
+    except (FileNotFoundError, json.JSONDecodeError, OSError):
+        pass
+    dbfs = read_dbfs_mv_sources()
+    return [s for s in dbfs if _valid_mv_source(s)] if dbfs else []
+
+
+def save_mv_sources(sources: list[dict]) -> None:
+    """Persist additional MV sources (local file + DBFS)."""
+    clean = [
+        {"label": s["label"].strip(), "catalog": s["catalog"].strip(), "schema": s["schema"].strip()}
+        for s in sources if _valid_mv_source(s)
+    ]
+    os.makedirs(os.path.dirname(_MV_SOURCES_FILE), exist_ok=True)
+    with open(_MV_SOURCES_FILE, "w") as f:
+        json.dump(clean, f, indent=2)
+    write_dbfs_mv_sources(clean)
+    logger.info("MV sources saved: %s", [s["label"] for s in clean])
+
+
+def write_dbfs_mv_sources(sources: list[dict]) -> None:
+    """Persist MV sources to DBFS so they survive git redeploys. Best-effort."""
+    try:
+        import base64
+        existing = _read_dbfs_settings()
+        existing["mv_sources"] = sources
+        w = get_workspace_client()
+        content = base64.b64encode(json.dumps(existing).encode()).decode("ascii")
+        w.api_client.do("POST", "/api/2.0/dbfs/put",
+                        body={"path": _DBFS_OVERRIDE_PATH, "contents": content, "overwrite": True})
+        logger.debug("DBFS mv_sources written (%d source(s))", len(sources))
+    except Exception as e:
+        logger.debug("Could not write DBFS mv_sources (non-fatal): %s", e)
+
+
+def read_dbfs_mv_sources() -> list[dict]:
+    """Return MV sources persisted to DBFS, or [] if absent."""
+    val = _read_dbfs_settings().get("mv_sources")
+    return val if isinstance(val, list) else []
+
+
+def get_local_source_label() -> str:
+    """Label for THIS workspace's own rows in the unified `source_label` column.
+
+    Uses the workspace name from the host (matches the app's other naming), with
+    the workspace id and a generic fallback so the column is never blank.
+    """
+    try:
+        w = get_workspace_client()
+        host = (w.config.host or "").replace("https://", "").replace("http://", "")
+        name = host.split(".")[0] if host else ""
+        if name:
+            return name
+    except Exception:
+        pass
+    wsid = os.getenv("DATABRICKS_WORKSPACE_ID", "").strip()
+    return f"workspace {wsid}" if wsid else "This workspace"
+
+
+# Request-scoped selection of MV source labels to filter reads by. Set per request
+# by UserAuthMiddleware from the `source_labels` query param. Empty = no filter
+# (all sources shown) — the default. Only meaningful when additional sources are
+# configured, since `source_label` only exists on the `<name>__unified` views.
+_source_labels: ContextVar[list[str]] = ContextVar("source_labels", default=[])
+
+
+def set_source_labels(labels: list[str]) -> object:
+    """Set the current request's source-label selection; returns a reset token."""
+    return _source_labels.set(list(labels or []))
+
+
+def reset_source_labels(token: object) -> None:
+    try:
+        _source_labels.reset(token)  # type: ignore[arg-type]
+    except Exception:
+        pass
+
+
+def source_label_filter_clause() -> str:
+    """`` AND source_label IN ('a','b') `` for the current selection, else ''.
+
+    Single-quote-escaped. Appended into the MV templates' existing `{ws_filter}`
+    slot by _get_mv_query, so it filters the unified views' rows by their source.
+    """
+    labels = [str(x) for x in _source_labels.get() if str(x).strip()]
+    if not labels:
+        return ""
+    quoted = ", ".join("'" + x.replace("'", "''") + "'" for x in labels)
+    return f" AND source_label IN ({quoted})"
+
+
 def apply_mv_overrides(sql: str, catalog: str, schema: str) -> str:
-    """Replace default table references with custom overrides in a SQL string."""
-    overrides = get_mv_table_overrides()
+    """Rewrite default MV table references in a SQL string, in two layers:
+
+      1. Explicit per-table overrides (get_mv_table_overrides) — user-set paths.
+      2. Additional-MV-source unions: when extra sources are configured, each MV
+         table is read through its `<name>__unified` view (built by
+         rebuild_unified_views), which UNION ALLs local + shared rows and tags
+         each with a source_label column. Local data is always included.
+
+    Never routes a table through its own unified view when that view does not
+    apply here (the view DDL itself references base tables directly and is built
+    without going through this function, so there is no recursion).
+    """
+    overrides = dict(get_mv_table_overrides())
+    # Route reads only through unified views that were actually built (never to a
+    # missing __unified view). Empty when no sources are configured.
+    for t in get_unified_view_tables():
+        # Don't override a table the user already remapped explicitly.
+        overrides.setdefault(t, f"`{catalog}`.`{schema}`.`{t}{MV_UNIFIED_SUFFIX}`")
     if not overrides:
         return sql
     for logical_name, full_path in overrides.items():
-        sql = sql.replace(f"{catalog}.{schema}.{logical_name}", full_path)
         sql = sql.replace(f"`{catalog}`.`{schema}`.`{logical_name}`", full_path)
+        sql = sql.replace(f"{catalog}.{schema}.{logical_name}", full_path)
     return sql
 
 

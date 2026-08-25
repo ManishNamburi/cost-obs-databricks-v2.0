@@ -451,10 +451,16 @@ export function AppsCostCenter({ data: initialData, isLoading: initialLoading, h
   // Available workspaces for filtering (resolved to names)
   const availableWorkspaces = useMemo(() => {
     if (!data?.workspaces) return [];
-    return data.workspaces.map(ws => ({
-      id: ws.id,
-      name: resolveWsName(ws.id),
-    })).sort((a, b) => a.name.localeCompare(b.name));
+    return data.workspaces
+      // Drop null/"None"/"null" ids so a stringified null never becomes an option.
+      .filter(ws => ws.id != null && !["", "none", "null"].includes(String(ws.id).trim().toLowerCase()))
+      .map(ws => {
+        const name = resolveWsName(ws.id);
+        // No real name resolved (fell back to "Workspace <id>") => the workspace
+        // no longer exists in the account — mark it historical.
+        return { id: ws.id, name, historical: name === `Workspace ${ws.id}` };
+      })
+      .sort((a, b) => a.name.localeCompare(b.name));
   }, [data?.workspaces, resolveWsName]);
 
   // Sync-add: unseen workspace IDs get added to the filter automatically.
@@ -953,6 +959,11 @@ export function AppsCostCenter({ data: initialData, isLoading: initialLoading, h
                                 {selectedWorkspaces.includes(ws.id) && <svg className="h-3 w-3 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" /></svg>}
                               </div>
                               <span className="truncate text-gray-700">{ws.name}</span>
+                              {ws.historical && (
+                                <span className="ml-auto shrink-0 rounded-full border border-amber-200 bg-amber-50 px-1.5 py-0.5 text-[9px] font-medium text-amber-700" title="This workspace no longer exists in the account — data is historical.">
+                                  historical
+                                </span>
+                              )}
                             </button>
                           )}
                         />

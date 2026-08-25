@@ -145,21 +145,21 @@ export function SetupWizard({ onComplete, onClose, embedded }: SetupWizardProps)
   const [cloud, setCloud] = useState<CloudData | null>(null);
   const [readiness, setReadiness] = useState<ReadinessResult | null>(null);
   const [readinessError, setReadinessError] = useState<string | null>(null);
-  const [grantRunning, setGrantRunning] = useState(false);
-  const [grantResult, setGrantResult] = useState<{ ok: boolean; message: string; errors?: string[]; grants_sql?: string; obo_scope_missing?: boolean } | null>(null);
   const [setupStatus, setSetupStatus] = useState<SetupStatus | null>(null);
   const [loading, setLoading] = useState(true);
   const [creating, setCreating] = useState(false);
   const [tablesJustCreated, setTablesJustCreated] = useState(false);
+  // Poll-loop handles, held in refs so Skip (and unmount) can cancel the loop
+  // that handleCreateTables started — the loop is otherwise a closure with no
+  // external cancellation handle, which is why a frozen build had no way out.
+  const pollCancelledRef = useRef(false);
+  const pollTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const safetyTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [storagePhase, setStoragePhase] = useState<'idle' | 'saving' | 'creating-catalog' | 'creating-schema' | 'done' | 'error'>('idle');
   const [storageChecks, setStorageChecks] = useState<{ config: boolean | null; catalog: boolean | null; schema: boolean | null }>({ config: null, catalog: null, schema: null });
   const [error, setError] = useState<string | null>(null);
   const [preflightResult, setPreflightResult] = useState<{ ok: boolean; status: string; message: string } | null>(null);
   const [preflightLoading, setPreflightLoading] = useState(false);
-  const [verifyingGrants, setVerifyingGrants] = useState(false);
-  const [grantVerifyElapsed, setGrantVerifyElapsed] = useState(0);
-  const grantVerifyRef = useRef<ReturnType<typeof setInterval> | undefined>(undefined);
-  const autoGrantAttempted = useRef(false);
   const preflightFiredRef = useRef(false);
 
   // Storage location step state
@@ -169,7 +169,7 @@ export function SetupWizard({ onComplete, onClose, embedded }: SetupWizardProps)
 
   // Workspace filter step state
   const [wsLoading, setWsLoading] = useState(false);
-  const [allWorkspaces, setAllWorkspaces] = useState<{ id: string; name: string }[]>([]);
+  const [allWorkspaces, setAllWorkspaces] = useState<{ id: string; name: string; historical?: boolean }[]>([]);
   const [selectedWsIds, setSelectedWsIds] = useState<Set<string>>(new Set());
   const [wsSaved, setWsSaved] = useState(false);
   const [wsLocked, setWsLocked] = useState(false);
@@ -207,15 +207,8 @@ export function SetupWizard({ onComplete, onClose, embedded }: SetupWizardProps)
   }, []);
 
   useEffect(() => {
-    return () => { if (grantVerifyRef.current) clearInterval(grantVerifyRef.current); };
-  }, []);
-
-  useEffect(() => {
     setStoragePhase('idle');
     setStorageChecks({ config: null, catalog: null, schema: null });
-    // Reset auto-grant guard when leaving permissions step so a manual recheck
-    // can re-trigger if the user navigates away and back.
-    if (step !== "permissions") autoGrantAttempted.current = false;
   }, [step]);
 
 
@@ -259,79 +252,6 @@ export function SetupWizard({ onComplete, onClose, embedded }: SetupWizardProps)
     loadPreflight();
   }, [step, preflightResult, preflightLoading, loadPreflight]);
 
-  const handleAutoGrant = useCallback(async () => {
-    setGrantRunning(true);
-    setGrantResult(null);
-    try {
-      const res = await fetch("/api/setup/grant-sp-system-access", { method: "POST" });
-      const body = await res.json().catch(() => ({}));
-      const ok = body.ok ?? res.ok;
-      const message = ok
-        ? `${body.applied ?? 0} grant(s) applied for ${body.sp_client_id ?? "SP"}.`
-        : (body.errors?.[0] ?? body.detail ?? "Grant run completed with errors — check server logs.");
-      setGrantResult({
-        ok,
-        message: !ok && body.needs_admin
-          ? "Automatic grant failed — your current identity could not apply the required permissions."
-          : message,
-        errors: body.errors,
-        grants_sql: body.grants_sql ?? undefined,
-        obo_scope_missing: body.obo_scope_missing ?? false,
-      });
-    if (ok) {
-      setVerifyingGrants(true);
-      setGrantVerifyElapsed(0);
-      const verifyStart = Date.now();
-      if (grantVerifyRef.current) clearInterval(grantVerifyRef.current);
-      grantVerifyRef.current = setInterval(async () => {
-        const elapsed = Math.round((Date.now() - verifyStart) / 1000);
-        setGrantVerifyElapsed(elapsed);
-        if (elapsed >= 90) {
-          clearInterval(grantVerifyRef.current!);
-          grantVerifyRef.current = undefined;
-          setVerifyingGrants(false);
-          loadReadiness(true);
-          return;
-        }
-        try {
-          const r = await fetch("/api/setup/readiness?refresh=true");
-          if (!r.ok) return;
-          const data = normalizeReadinessResult(await r.json());
-          if (data) setReadiness(data);
-          if (data?.overall === "ready" || data?.overall === "core_ready") {
-            clearInterval(grantVerifyRef.current!);
-            grantVerifyRef.current = undefined;
-            setVerifyingGrants(false);
-          }
-        } catch { /* ignore transient polling errors */ }
-      }, 5000);
-    } else {
-      // Partial failure — re-check after 2s so any successfully-applied grants
-      // are reflected (e.g. all but system.access.audit succeeded).
-      setTimeout(() => loadReadiness(true), 2000);
-    }
-  } catch {
-    setGrantResult({ ok: false, message: "Network error running grants." });
-  } finally {
-    setGrantRunning(false);
-  }
-  }, [loadReadiness]);
-
-  // Auto-fire grants when permissions step loads with failures so the user never
-  // has to manually click "Apply SP Grants" on a fresh deploy.
-  useEffect(() => {
-    if (step !== "permissions") return;
-    if (!readiness) return;
-    if (autoGrantAttempted.current) return;
-    if (grantRunning || grantResult) return;
-    const hasFailing =
-      !readiness.warehouse.granted ||
-      readiness.core.some(c => !c.granted) ||
-      readiness.enhanced.some(c => !c.granted);
-    if (!hasFailing) return;
-    autoGrantAttempted.current = true;
-    handleAutoGrant();
-  }, [step, readiness, grantRunning, grantResult, handleAutoGrant]);
 
   const pollSetupStatus = useCallback(async () => {
     try {
@@ -347,9 +267,31 @@ export function SetupWizard({ onComplete, onClose, embedded }: SetupWizardProps)
     return null;
   }, []);
 
+  const clearPollTimers = useCallback(() => {
+    if (pollTimeoutRef.current) { clearTimeout(pollTimeoutRef.current); pollTimeoutRef.current = null; }
+    if (safetyTimeoutRef.current) { clearTimeout(safetyTimeoutRef.current); safetyTimeoutRef.current = null; }
+  }, []);
+
+  // Stop the build poll and move on. The background build keeps running on the
+  // server (tables still get built; the dashboard falls back to direct system
+  // queries meanwhile) — Skip only releases the wizard so a stuck/slow build
+  // can never trap the user on this step. Plain function (not memoized) so it
+  // always calls the current-render goNext with the live `step`.
+  const handleSkipTables = () => {
+    pollCancelledRef.current = true;
+    clearPollTimers();
+    setCreating(false);
+    goNext();
+  };
+
+  // Cancel any in-flight poll loop when the wizard unmounts.
+  useEffect(() => () => { pollCancelledRef.current = true; clearPollTimers(); }, [clearPollTimers]);
+
   const handleCreateTables = async () => {
     setCreating(true);
     setError(null);
+    pollCancelledRef.current = false;
+    clearPollTimers();
     try {
       const res = await fetch("/api/setup/create-tables?run_in_background=true", { method: "POST", signal: AbortSignal.timeout(30000) });
       if (!res.ok) {
@@ -357,44 +299,47 @@ export function SetupWizard({ onComplete, onClose, embedded }: SetupWizardProps)
         throw new Error(`HTTP ${res.status}: ${body}`);
       }
 
-      // Poll for completion — use task.status as the authority.
+      // Poll for completion. task.status is the authority, but we ALSO treat
+      // "every table reported done" as completion: if the terminal status write
+      // is ever missed, an all-done progress map still releases the step instead
+      // of hanging until the safety timeout.
       // The status endpoint returns all_tables_exist=false until setup_done.json
       // is written (post-wizard), so it is NOT a reliable success signal here.
       // Use next_poll_ms hint from server (5s during active build, 30s idle).
-      let pollTimeout: ReturnType<typeof setTimeout>;
-      let safetyTimeout: ReturnType<typeof setTimeout>;
-      let pollCancelled = false;
       const schedulePoll = async () => {
-        if (pollCancelled) return;
+        if (pollCancelledRef.current) return;
         const status = await pollSetupStatus();
-        if (pollCancelled) return;
+        if (pollCancelledRef.current) return;
         const taskStatus = status?.task?.status;
-        if (taskStatus === "done") {
-          clearTimeout(safetyTimeout);
+        const progress = status?.task?.table_progress ?? {};
+        const progressVals = Object.values(progress);
+        const allDone = progressVals.length > 0 && progressVals.every((s) => s === "done");
+        if (taskStatus === "done" || allDone) {
+          clearPollTimers();
           setCreating(false);
           setTablesJustCreated(true);
         } else if (taskStatus === "error") {
-          clearTimeout(safetyTimeout);
+          clearPollTimers();
           setCreating(false);
           const detail = status?.task?.error || "Table creation failed — check server logs for details.";
           setError(`Table creation failed: ${detail}`);
         } else if (taskStatus === "interrupted") {
-          clearTimeout(safetyTimeout);
+          clearPollTimers();
           setCreating(false);
         } else {
           const delay = status?.next_poll_ms ?? 5000;
-          pollTimeout = setTimeout(schedulePoll, delay);
+          pollTimeoutRef.current = setTimeout(schedulePoll, delay);
         }
       };
-      pollTimeout = setTimeout(schedulePoll, 2000);
+      pollTimeoutRef.current = setTimeout(schedulePoll, 2000);
 
       // Safety timeout after 10 minutes — cancelled on normal completion so it
       // doesn't fire on the Complete step after a successful build.
-      safetyTimeout = setTimeout(() => {
-        pollCancelled = true;
-        clearTimeout(pollTimeout);
+      safetyTimeoutRef.current = setTimeout(() => {
+        pollCancelledRef.current = true;
+        clearPollTimers();
         setCreating(false);
-        setError("Table creation is taking longer than expected. Check /api/setup/status for progress.");
+        setError("Table creation is taking longer than expected — you can Skip to continue; tables keep building in the background. Check /api/setup/status for progress.");
       }, 600000);
     } catch (e) {
       setCreating(false);
@@ -543,11 +488,6 @@ export function SetupWizard({ onComplete, onClose, embedded }: SetupWizardProps)
               loading={loading}
               fetchError={readinessError}
               onRecheck={loadReadiness}
-              onAutoGrant={handleAutoGrant}
-              autoGrantRunning={grantRunning}
-              autoGrantResult={grantResult}
-              verifyingGrants={verifyingGrants}
-              grantVerifyElapsed={grantVerifyElapsed}
             />
           )}
 
@@ -622,7 +562,15 @@ export function SetupWizard({ onComplete, onClose, embedded }: SetupWizardProps)
                 </button>
               </div>
             ) : step === "create-tables" ? (
-              creating ? null
+              creating ? (
+                <button
+                  onClick={handleSkipTables}
+                  className="rounded-lg border border-gray-300 px-4 py-2 text-sm font-medium text-gray-600 hover:bg-gray-50"
+                  title="Continue setup — tables keep building in the background"
+                >
+                  Skip
+                </button>
+              )
               : (tablesJustCreated || setupStatus?.all_tables_exist) ? (
                 <button
                   onClick={goNext}
@@ -756,7 +704,7 @@ export function SetupWizard({ onComplete, onClose, embedded }: SetupWizardProps)
             ) : step === "permissions" ? (
               <button
                 onClick={goNext}
-                disabled={loading || verifyingGrants || readiness == null || (readiness.overall !== "ready" && readiness.overall !== "core_ready")}
+                disabled={loading || readiness == null || (readiness.overall !== "ready" && readiness.overall !== "core_ready")}
                 className="btn-brand rounded-lg px-6 py-2 text-sm font-bold text-white transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 Next
@@ -861,6 +809,100 @@ function StorageCheckRow({ label, state }: { label: string; state: "pending" | "
   );
 }
 
+// A text field with a "Browse" dropdown of values the current user can see.
+// Picking from the list avoids typos; typing a name the list does not contain
+// is how the user signals a brand-new (net-new) catalog/schema. The list is
+// fetched lazily on first open so an env-var-locked field never calls the API.
+function BrowseField({
+  label,
+  value,
+  onChange,
+  disabled,
+  placeholder,
+  browseHint,
+  fetchOptions,
+}: {
+  label: string;
+  value: string;
+  onChange: (v: string) => void;
+  disabled?: boolean;
+  placeholder: string;
+  browseHint?: string; // when set, Browse is disabled with this tooltip
+  fetchOptions: () => Promise<{ options: string[]; error?: string }>;
+}) {
+  const [open, setOpen] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [options, setOptions] = useState<string[]>([]);
+  const [failed, setFailed] = useState(false);
+  const canBrowse = !disabled && !browseHint;
+
+  const toggle = async () => {
+    if (open) { setOpen(false); return; }
+    setOpen(true);
+    setLoading(true);
+    setFailed(false);
+    try {
+      const r = await fetchOptions();
+      setOptions(r.options ?? []);
+      setFailed(Boolean(r.error));
+    } catch {
+      setOptions([]);
+      setFailed(true);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div className="space-y-1.5">
+      <div className="flex items-center justify-between">
+        <label className="block text-xs font-medium text-gray-700">{label}</label>
+        <button
+          type="button"
+          onClick={toggle}
+          disabled={!canBrowse}
+          title={browseHint}
+          className="text-xs font-medium text-[#FF3621] hover:underline disabled:cursor-not-allowed disabled:text-gray-400 disabled:no-underline"
+        >
+          {open ? "Close" : "Browse"}
+        </button>
+      </div>
+      <input
+        type="text"
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        disabled={disabled}
+        placeholder={placeholder}
+        className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm font-mono text-gray-900 placeholder-gray-400 focus:border-[#FF3621] focus:outline-none focus:ring-1 focus:ring-[#FF3621] disabled:bg-gray-100 disabled:text-gray-500"
+      />
+      {open && (
+        <div className="max-h-44 overflow-y-auto rounded-md border border-gray-200 bg-white">
+          {loading ? (
+            <div className="flex items-center gap-2 px-3 py-2 text-xs text-gray-500"><Spinner size="xs" /> Loading…</div>
+          ) : options.length === 0 ? (
+            <div className="px-3 py-2 text-xs text-gray-500">
+              {failed
+                ? "Couldn't list here — type the name in instead."
+                : "Nothing you can access here — type a name to create a new one."}
+            </div>
+          ) : (
+            options.map((o) => (
+              <button
+                key={o}
+                type="button"
+                onClick={() => { onChange(o); setOpen(false); }}
+                className={`block w-full truncate px-3 py-1.5 text-left text-sm font-mono hover:bg-gray-50 ${o === value ? "bg-orange-50 text-[#FF3621]" : "text-gray-700"}`}
+              >
+                {o}
+              </button>
+            ))
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function StorageLocationStep({
   catalog,
   schema,
@@ -911,28 +953,35 @@ function StorageLocationStep({
       )}
 
       <div className={`rounded-lg border p-4 space-y-4 ${locked || envVarLocked ? "border-gray-100 bg-gray-50" : "border-gray-200 bg-white"}`}>
-        <div className="space-y-1.5">
-          <label className="block text-xs font-medium text-gray-700">Catalog</label>
-          <input
-            type="text"
-            value={catalog}
-            onChange={(e) => onCatalogChange(e.target.value)}
-            disabled={locked || envVarLocked}
-            placeholder="e.g. my_catalog"
-            className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm font-mono text-gray-900 placeholder-gray-400 focus:border-[#FF3621] focus:outline-none focus:ring-1 focus:ring-[#FF3621] disabled:bg-gray-100 disabled:text-gray-500"
-          />
-        </div>
-        <div className="space-y-1.5">
-          <label className="block text-xs font-medium text-gray-700">Schema</label>
-          <input
-            type="text"
-            value={schema}
-            onChange={(e) => onSchemaChange(e.target.value)}
-            disabled={locked || envVarLocked}
-            placeholder="e.g. cost_obs_app"
-            className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm font-mono text-gray-900 placeholder-gray-400 focus:border-[#FF3621] focus:outline-none focus:ring-1 focus:ring-[#FF3621] disabled:bg-gray-100 disabled:text-gray-500"
-          />
-        </div>
+        <BrowseField
+          label="Catalog"
+          value={catalog}
+          onChange={onCatalogChange}
+          disabled={locked || envVarLocked}
+          placeholder="e.g. my_catalog"
+          fetchOptions={async () => {
+            const r = await fetch("/api/setup/list-catalogs").then((x) => x.json()).catch(() => ({}));
+            return { options: r.catalogs ?? [], error: r.error };
+          }}
+        />
+        <BrowseField
+          label="Schema"
+          value={schema}
+          onChange={onSchemaChange}
+          disabled={locked || envVarLocked}
+          placeholder="e.g. cost_obs_app"
+          browseHint={!catalog.trim() ? "Enter or pick a catalog first" : undefined}
+          fetchOptions={async () => {
+            const r = await fetch(`/api/setup/list-schemas?catalog=${encodeURIComponent(catalog.trim())}`)
+              .then((x) => x.json()).catch(() => ({}));
+            return { options: r.schemas ?? [], error: r.error };
+          }}
+        />
+        {!envVarLocked && (
+          <p className="text-xs text-gray-500">
+            Browse picks from catalogs &amp; schemas you can access. Type a name that isn't listed to create a new one.
+          </p>
+        )}
       </div>
 
       {showProgress ? (
@@ -962,11 +1011,6 @@ interface WizardPermissionsStepProps {
   loading: boolean;
   fetchError: string | null;
   onRecheck: (forceRefresh?: boolean) => void;
-  onAutoGrant: () => Promise<void>;
-  autoGrantRunning: boolean;
-  autoGrantResult: { ok: boolean; message: string; errors?: string[]; grants_sql?: string; obo_scope_missing?: boolean } | null;
-  verifyingGrants: boolean;
-  grantVerifyElapsed: number;
 }
 
 function WizardPermissionsStep({
@@ -974,11 +1018,6 @@ function WizardPermissionsStep({
   loading,
   fetchError,
   onRecheck,
-  onAutoGrant,
-  autoGrantRunning,
-  autoGrantResult,
-  verifyingGrants,
-  grantVerifyElapsed,
 }: WizardPermissionsStepProps) {
   const coreReady = readiness != null &&
     (readiness.overall === "ready" || readiness.overall === "core_ready");
@@ -989,13 +1028,7 @@ function WizardPermissionsStep({
         Verifying the app's service principal has access to required Databricks system tables.
         Core tables (billing) must pass before you can continue.
       </p>
-      {verifyingGrants && (
-        <div className="rounded-lg border border-blue-200 bg-blue-50 px-4 py-2.5 flex items-center gap-2">
-          <Spinner size="sm" />
-          <span className="text-sm text-blue-700">Verifying SP access… ({grantVerifyElapsed}s)</span>
-        </div>
-      )}
-      {!loading && !verifyingGrants && coreReady && (
+      {!loading && coreReady && (
         <div className="rounded-lg border border-green-200 bg-green-50 px-4 py-2.5 text-sm text-green-700">
           Core access confirmed — you can proceed to Create Tables.
         </div>
@@ -1005,9 +1038,6 @@ function WizardPermissionsStep({
         loading={loading}
         fetchError={fetchError}
         onRecheck={onRecheck}
-        onAutoGrant={onAutoGrant}
-        autoGrantRunning={autoGrantRunning}
-        autoGrantResult={autoGrantResult}
       />
     </div>
   );
@@ -1155,7 +1185,7 @@ function WorkspaceFilterStep({
   lockedIds,
 }: {
   loading: boolean;
-  workspaces: { id: string; name: string }[];
+  workspaces: { id: string; name: string; historical?: boolean }[];
   selectedIds: Set<string>;
   onToggle: (id: string) => void;
   onSelectAll: () => void;
@@ -1235,7 +1265,14 @@ function WorkspaceFilterStep({
                       className="h-3.5 w-3.5 rounded border-gray-300 text-orange-500 focus:ring-orange-500"
                     />
                     <div className="min-w-0">
-                      <div className="text-sm font-medium text-gray-800 truncate">{ws.name}</div>
+                      <div className="flex items-center gap-1.5">
+                        <span className="text-sm font-medium text-gray-800 truncate">{ws.name}</span>
+                        {ws.historical && (
+                          <span className="shrink-0 rounded-full border border-amber-200 bg-amber-50 px-1.5 py-0.5 text-[10px] font-medium text-amber-700" title="This workspace no longer exists in the account — data is historical.">
+                            historical
+                          </span>
+                        )}
+                      </div>
                       <div className="text-xs font-mono text-gray-500">{ws.id}</div>
                     </div>
                   </label>

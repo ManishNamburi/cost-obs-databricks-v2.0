@@ -68,9 +68,6 @@ interface ReadinessChecksProps {
   loading: boolean;
   fetchError?: string | null;
   onRecheck: (forceRefresh?: boolean) => void;
-  onAutoGrant?: () => Promise<void>;
-  autoGrantRunning?: boolean;
-  autoGrantResult?: { ok: boolean; message: string; errors?: string[]; scriptHint?: string; grants_sql?: string; obo_scope_missing?: boolean } | null;
 }
 
 function CopyButton({ text }: { text: string }) {
@@ -106,11 +103,9 @@ function CheckIcon({ granted }: { granted: boolean }) {
   );
 }
 
-function CheckRow({ check, showTable = true, onApplyFix, applyFixRunning }: {
+function CheckRow({ check, showTable = true }: {
   check: ReadinessCheck | ReadinessWarehouse;
   showTable?: boolean;
-  onApplyFix?: () => void;
-  applyFixRunning?: boolean;
 }) {
   const [expanded, setExpanded] = useState(false);
   const hasFix = !check.granted && check.fix_sql;
@@ -134,7 +129,7 @@ function CheckRow({ check, showTable = true, onApplyFix, applyFixRunning }: {
           {expanded && hasFix && (
             <div className="mt-2 space-y-1">
               <div className="flex items-center justify-between">
-                <span className="text-[10px] font-medium text-gray-600 uppercase tracking-wide">If auto-apply fails — run as metastore admin</span>
+                <span className="text-[10px] font-medium text-gray-600 uppercase tracking-wide">Run as metastore admin</span>
                 <CopyButton text={check.fix_sql!} />
               </div>
               <pre className="overflow-x-auto whitespace-pre-wrap rounded bg-gray-900 px-3 py-2 text-[11px] leading-relaxed text-green-400">
@@ -145,15 +140,6 @@ function CheckRow({ check, showTable = true, onApplyFix, applyFixRunning }: {
         </div>
         {hasFix && (
           <div className="flex items-center gap-1 shrink-0">
-            {onApplyFix && (
-              <button
-                onClick={() => { onApplyFix(); setExpanded(true); }}
-                disabled={applyFixRunning}
-                className="rounded px-2.5 py-1 text-[11px] font-medium text-white bg-red-500 hover:bg-red-600 transition-colors disabled:opacity-50"
-              >
-                {applyFixRunning ? "Applying…" : "Fix"}
-              </button>
-            )}
             <button
               onClick={() => setExpanded(e => !e)}
               className="rounded px-2 py-1 text-[11px] font-medium text-gray-500 border border-gray-200 hover:bg-gray-50 transition-colors"
@@ -187,9 +173,6 @@ export function ReadinessChecks({
   loading,
   fetchError,
   onRecheck,
-  onAutoGrant,
-  autoGrantRunning,
-  autoGrantResult,
 }: ReadinessChecksProps) {
   if (loading) {
     return (
@@ -215,6 +198,21 @@ export function ReadinessChecks({
   const anyCoreFailing = !result.warehouse.granted || result.core.some(c => !c.granted);
   const anyEnhancedFailing = result.enhanced.some(c => !c.granted);
 
+  // Copyable GRANT SQL for every failing check, de-duplicated line-by-line. Built
+  // from the fix_sql the readiness endpoint returns per check — no on-behalf-of
+  // grant call is made (a metastore admin runs this, which always works).
+  const combinedGrantSql = Array.from(new Set(
+    [
+      !result.warehouse.granted ? result.warehouse.fix_sql : null,
+      ...result.core.map(c => (!c.granted ? c.fix_sql : null)),
+      ...result.enhanced.map(c => (!c.granted ? c.fix_sql : null)),
+    ]
+      .filter((s): s is string => Boolean(s))
+      .flatMap(s => s.split("\n"))
+      .map(s => s.trim())
+      .filter(Boolean)
+  )).join("\n");
+
   return (
     <div className="space-y-5">
       {/* Header row */}
@@ -231,54 +229,22 @@ export function ReadinessChecks({
         </button>
       </div>
 
-      {/* Auto-grant panel — shown when core checks are failing */}
-      {anyCoreFailing && onAutoGrant && (
+      {/* Grant SQL — shown when any check is failing. A metastore admin copies and
+          runs this, then clicks Re-check. No on-behalf-of grant is attempted. */}
+      {(anyCoreFailing || anyEnhancedFailing) && combinedGrantSql && (
         <div className="rounded-lg border border-[#FF3621]/20 bg-orange-50 px-4 py-3 space-y-2">
-          <p className="text-xs font-medium text-gray-800">Apply SP grants automatically</p>
-          <p className="text-[11px] text-gray-600">
-            Uses your current identity to grant the app's service principal access to all required system tables.
-            You must be a <strong>metastore admin</strong> for this to succeed.
-          </p>
-          <div className="flex items-center gap-3 flex-wrap">
-            <button
-              onClick={onAutoGrant}
-              disabled={autoGrantRunning}
-              className="rounded-md px-3 py-1.5 text-xs font-medium text-white transition-colors disabled:opacity-50"
-              style={{ backgroundColor: autoGrantRunning ? "#FFA390" : "#FF3621" }}
-            >
-              {autoGrantRunning ? "Applying grants…" : "Apply SP Grants"}
-            </button>
-            {autoGrantResult && (
-              <div className={`text-[11px] font-medium ${autoGrantResult.ok ? "text-green-700" : "text-red-600"}`}>
-                <span>{autoGrantResult.ok ? "✓ " : "✗ "}{autoGrantResult.message}</span>
-                {!autoGrantResult.ok && autoGrantResult.errors && autoGrantResult.errors.length > 0 && (
-                  <ul className="mt-0.5 list-disc pl-4 space-y-0.5 font-normal text-red-500">
-                    {autoGrantResult.errors.slice(0, 3).map((e, i) => (
-                      <li key={i} className="break-all">{e}</li>
-                    ))}
-                  </ul>
-                )}
-                {autoGrantResult.obo_scope_missing && (
-                  <p className="mt-1 text-[10px] text-amber-700 font-normal">
-                    OBO scope missing — this app is not configured with the <code className="font-mono">sql</code> user authorization scope, so forwarded user tokens cannot execute SQL.
-                  </p>
-                )}
-                {autoGrantResult.grants_sql && (
-                  <div className="mt-2 space-y-1">
-                    <p className="text-[10px] font-medium text-amber-900">
-                      Run as metastore admin (audit logs require account admin) — Copy and run the SQL below, then click Re-check.
-                    </p>
-                    <div className="relative">
-                      <CopyButton text={autoGrantResult.grants_sql} />
-                      <pre className="overflow-x-auto whitespace-pre-wrap rounded bg-gray-900 px-3 py-2 text-[10px] leading-relaxed text-green-400">
-                        {autoGrantResult.grants_sql}
-                      </pre>
-                    </div>
-                  </div>
-                )}
-              </div>
-            )}
+          <div className="flex items-center justify-between gap-2">
+            <p className="text-xs font-medium text-gray-800">Grant the service principal access</p>
+            <CopyButton text={combinedGrantSql} />
           </div>
+          <p className="text-[11px] text-gray-600">
+            Run this as a <strong>metastore admin</strong> (<code className="font-mono">system.access.audit</code> also
+            requires an <strong>account admin</strong>){result.sp_client_id ? <> — the service principal is <code className="font-mono">{result.sp_client_id}</code></> : null},
+            then click <strong>Re-check</strong>.
+          </p>
+          <pre className="overflow-x-auto whitespace-pre-wrap rounded bg-gray-900 px-3 py-2 text-[10px] leading-relaxed text-green-400">
+            {combinedGrantSql}
+          </pre>
         </div>
       )}
 
@@ -305,7 +271,7 @@ export function ReadinessChecks({
           )}
         </div>
         <div className="space-y-1.5">
-          {result.core.map((c, i) => <CheckRow key={c.table ?? i} check={c} onApplyFix={onAutoGrant} applyFixRunning={autoGrantRunning} />)}
+          {result.core.map((c, i) => <CheckRow key={c.table ?? i} check={c} />)}
         </div>
       </div>
 
@@ -322,7 +288,7 @@ export function ReadinessChecks({
             )}
           </div>
           <div className="space-y-1.5">
-            {result.enhanced.map((c, i) => <CheckRow key={c.table ?? i} check={c} onApplyFix={onAutoGrant} applyFixRunning={autoGrantRunning} />)}
+            {result.enhanced.map((c, i) => <CheckRow key={c.table ?? i} check={c} />)}
           </div>
         </div>
       )}

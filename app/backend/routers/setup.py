@@ -99,6 +99,65 @@ def _restore_task_state() -> None:
 
 _restore_task_state()
 
+
+def _load_shared_task_state() -> dict | None:
+    """Read the build progress the *builder worker* last wrote to the pod filesystem.
+
+    Returns None when the file is absent or unreadable. Kept separate from
+    _restore_task_state (which runs once at startup and downgrades 'running' →
+    'interrupted'); this reads the live file on every /status poll.
+    """
+    try:
+        with open(_TASK_STATE_FILE) as fh:
+            return json.load(fh)
+    except Exception:
+        return None
+
+
+# Ordering of task lifecycle states, most-advanced last. Terminal states
+# (error, done) outrank the in-flight ones so a finished build is never masked
+# by a worker that still thinks it is idle/running.
+_TASK_STATE_RANK = {"idle": 0, "interrupted": 1, "running": 2, "error": 3, "done": 4}
+
+
+def _reconcile_task_state_from_disk() -> None:
+    """Fold the shared on-disk build progress into this worker's in-memory copy.
+
+    Table creation runs in exactly ONE uvicorn worker, but /status is polled
+    round-robin across ALL workers (`--workers 2`). A worker that did not run the
+    build otherwise reports a stale 'idle' with empty table_progress — which makes
+    the setup wizard's progress list flicker between the real list and nothing, and
+    never observe the terminal 'done' (so it hangs until the client safety timeout).
+
+    build_progress.json is written by the builder on every table completion and on
+    every status transition, so it is the authority whenever it is further along
+    than this worker's memory. We only ever move *forward* (higher rank, or same
+    rank with more tables done), so the builder worker — which is always at least
+    as current — is never regressed by a lagging disk read.
+    """
+    disk = _load_shared_task_state()
+    if not disk:
+        return
+
+    def _done_count(state: dict) -> int:
+        return sum(1 for v in (state.get("table_progress") or {}).values() if v == "done")
+
+    mem_rank = _TASK_STATE_RANK.get(_create_task_state.get("status", "idle"), 0)
+    disk_rank = _TASK_STATE_RANK.get(disk.get("status", "idle"), 0)
+    # A fresh build started after a previous one finished: disk shows 'running'
+    # while this (non-builder) worker still holds a stale terminal state. The latest
+    # persisted state is only ever 'running' when a build is actually in flight
+    # (the builder persists 'done'/'error' when it ends), so adopt it — otherwise
+    # this worker would report the old build's 'done' for the new run.
+    fresh_rerun = disk.get("status") == "running" and _create_task_state.get("status") in ("done", "error")
+    if fresh_rerun or disk_rank > mem_rank or (
+        disk_rank == mem_rank and _done_count(disk) > _done_count(_create_task_state)
+    ):
+        _create_task_state["status"] = disk.get("status", _create_task_state["status"])
+        _create_task_state["error"] = disk.get("error")
+        _create_task_state["table_progress"] = disk.get("table_progress") or {}
+
+
 # Core billing tables — must exist for the dashboard to be functional.
 # Used by get_setup_status to gate the "ready" state.
 _CORE_REQUIRED_TABLES = frozenset({
@@ -269,6 +328,12 @@ async def get_setup_status() -> dict[str, Any]:
     """
     global _setup_confirmed_ready
     import asyncio as _asyncio
+
+    # Cross-worker reconciliation: adopt the shared build progress written by
+    # whichever worker is running the build. Without this, polls that land on a
+    # non-builder worker make the wizard's progress list flicker and never see
+    # the terminal 'done'. Cheap (one small local file read); safe (forward-only).
+    _reconcile_task_state_from_disk()
 
     if _setup_confirmed_ready and _create_task_state["status"] != "running":
         catalog, schema = get_catalog_schema()
@@ -2155,22 +2220,81 @@ async def list_workspaces() -> dict:
         rows = await asyncio.to_thread(execute_query, f"""
             SELECT
                 CAST(workspace_id AS STRING) AS workspace_id,
-                MAX(COALESCE(workspace_name, CAST(workspace_id AS STRING))) AS workspace_name
+                MAX(workspace_name) AS workspace_name
             FROM `{catalog}`.`{schema}`.daily_workspace_breakdown
             WHERE workspace_id IS NOT NULL
             GROUP BY workspace_id
-            ORDER BY workspace_name
+            ORDER BY MAX(workspace_name)
         """)
-        return {
-            "workspaces": [
-                {"id": r["workspace_id"], "name": r["workspace_name"]}
-                for r in (rows or [])
-                if r.get("workspace_id")
-            ]
-        }
+        workspaces = []
+        for r in (rows or []):
+            wid = r.get("workspace_id")
+            if not wid:
+                continue
+            raw_name = (r.get("workspace_name") or "").strip()
+            # A workspace with no real display name in billing history is one that
+            # no longer exists in the account (deleted) — its name column was never
+            # populated or was dropped. Flag it "historical" so the wizard can label
+            # it instead of showing a bare workspace id that looks like a live one.
+            historical = (not raw_name) or (raw_name == wid)
+            workspaces.append({
+                "id": wid,
+                "name": raw_name or wid,
+                "historical": historical,
+            })
+        return {"workspaces": workspaces}
     except Exception as e:
         logger.warning("list-workspaces failed: %s", e)
         return {"workspaces": [], "error": str(e)}
+
+
+@router.get("/list-catalogs")
+async def list_catalogs() -> dict:
+    """Catalogs the CURRENT USER can see, for the storage-step Browse picker.
+
+    Uses the user's OAuth token (get_user_workspace_client) so the list reflects
+    what they actually have access to — picking from it avoids typos, and typing a
+    name the list does not contain is the signal that a brand-new catalog/schema is
+    intended. Never throws: a failure returns an empty list plus an error string so
+    the field stays usable (the user can always type a name in by hand).
+    """
+    from backend.db import get_user_workspace_client
+
+    def _list() -> list[str]:
+        w = get_user_workspace_client()
+        return [c.name for c in w.catalogs.list() if getattr(c, "name", None)]
+
+    try:
+        names = await asyncio.to_thread(_list)
+        # Hide catalogs the app can never use as its storage location.
+        hidden = {"system", "__databricks_internal", "samples"}
+        return {"catalogs": sorted(n for n in names if n and n.lower() not in hidden)}
+    except Exception as e:
+        logger.warning("list-catalogs failed: %s", e)
+        return {"catalogs": [], "error": _clean_sdk_error(str(e))}
+
+
+@router.get("/list-schemas")
+async def list_schemas(
+    catalog: str = Query(..., description="Catalog to list schemas from"),
+) -> dict:
+    """Schemas in `catalog` the current user can see, for the Browse picker."""
+    from backend.db import get_user_workspace_client
+
+    cat = (catalog or "").strip()
+    if not cat:
+        return {"catalog": "", "schemas": []}
+
+    def _list() -> list[str]:
+        w = get_user_workspace_client()
+        return [s.name for s in w.schemas.list(catalog_name=cat) if getattr(s, "name", None)]
+
+    try:
+        names = await asyncio.to_thread(_list)
+        return {"catalog": cat, "schemas": sorted(n for n in names if n and n.lower() != "information_schema")}
+    except Exception as e:
+        logger.warning("list-schemas failed for %s: %s", cat, e)
+        return {"catalog": cat, "schemas": [], "error": _clean_sdk_error(str(e))}
 
 
 @router.get("/preflight-catalog")

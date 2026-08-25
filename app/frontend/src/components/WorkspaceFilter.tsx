@@ -3,6 +3,15 @@ import { useState, useRef, useEffect } from "react";
 interface Workspace {
   workspace_id: string | null;
   workspace_name?: string | null;
+  historical?: boolean;
+}
+
+// Guards against ids that would render a bogus option — null, or the strings
+// "None"/"null"/"" that leak in when a null workspace id is stringified upstream.
+function isValidWorkspaceId(id: string | null | undefined): id is string {
+  if (id == null) return false;
+  const s = String(id).trim().toLowerCase();
+  return s !== "" && s !== "none" && s !== "null";
 }
 
 interface WorkspaceFilterProps {
@@ -22,7 +31,7 @@ export function WorkspaceFilter({ workspaces, selectedIds, onChange, isLoading }
   const [draftIds, setDraftIds] = useState<string[]>([]);
   const searchRef = useRef<HTMLInputElement>(null);
 
-  const validWorkspaces = workspaces.filter((ws) => ws.workspace_id != null);
+  const validWorkspaces = workspaces.filter((ws) => isValidWorkspaceId(ws.workspace_id));
 
   // Sync draft from applied state each time the dropdown opens
   useEffect(() => {
@@ -191,6 +200,11 @@ export function WorkspaceFilter({ workspaces, selectedIds, onChange, isLoading }
                     <span className="flex-1 truncate text-sm text-gray-700">
                       {ws.workspace_name || `Workspace ${id}`}
                     </span>
+                    {ws.historical && (
+                      <span className="shrink-0 rounded-full border border-amber-200 bg-amber-50 px-1.5 py-0.5 text-[10px] font-medium text-amber-700" title="This workspace no longer exists in the account — data is historical.">
+                        historical
+                      </span>
+                    )}
                   </label>
                 );
               };

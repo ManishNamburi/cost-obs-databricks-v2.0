@@ -58,17 +58,31 @@ class UserAuthMiddleware:
 
     async def __call__(self, scope, receive, send):
         if scope["type"] == "http":
-            from backend.db import _user_token, _auth_mode
+            from backend.db import _user_token, _auth_mode, set_source_labels, reset_source_labels
             headers = {k.lower(): v for k, v in scope.get("headers", [])}
             raw_token = headers.get(b"x-forwarded-access-token", b"").decode()
             # If auth mode is locked to SP, never use the user token — every query
             # in every request uses the service principal identity consistently.
             token = "" if _auth_mode == "sp" else raw_token
             ctx_token = _user_token.set(token)
+            # Propagate the MV source-label selection (?source_labels=a,b) so MV
+            # reads can be narrowed to the chosen sources. Absent/blank = all.
+            sl_token = None
+            try:
+                from urllib.parse import parse_qs
+                qs = parse_qs(scope.get("query_string", b"").decode())
+                # Repeated ?source_labels=a&source_labels=b — parse_qs returns the full
+                # list, so labels may safely contain commas.
+                labels = [x for x in qs.get("source_labels", []) if x and x.strip()]
+                sl_token = set_source_labels(labels)
+            except Exception:
+                sl_token = set_source_labels([])
             try:
                 await self.app(scope, receive, send)
             finally:
                 _user_token.reset(ctx_token)
+                if sl_token is not None:
+                    reset_source_labels(sl_token)
         else:
             await self.app(scope, receive, send)
 
@@ -383,6 +397,22 @@ def setup_materialized_views():
                 catalog, schema,
             )
             return
+
+        # Rebuild the additional-MV-source union views if any are configured. Their
+        # definitions persist in UC across redeploys, but mv_sources is restored from
+        # DBFS (the local .settings copy is wiped on redeploy) and MV reads remap to the
+        # `<name>__unified` views — so rebuild is cheap insurance that they always exist.
+        try:
+            from backend.db import get_mv_sources
+            if get_mv_sources():
+                import threading as _uth
+                from backend.materialized_views import rebuild_unified_views
+                _uth.Thread(
+                    target=lambda: rebuild_unified_views(catalog, schema), daemon=True
+                ).start()
+                logger.info("Rebuilding additional-MV-source union views in background")
+        except Exception as _uerr:
+            logger.warning("Could not rebuild unified MV views on startup (non-fatal): %s", _uerr)
 
         # Tables durably exist — background refresh is safe, but skip if recently refreshed.
         # Refreshing on every restart hammers the warehouse during cold start. The nightly

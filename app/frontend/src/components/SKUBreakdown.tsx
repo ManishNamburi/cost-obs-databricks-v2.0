@@ -40,8 +40,9 @@ interface WsRowProps {
   wsName: string;
   selected: boolean;
   onToggle: (id: string) => void;
+  historical?: boolean;
 }
-const WsRow = memo(function WsRow({ wsId, wsName, selected, onToggle }: WsRowProps) {
+const WsRow = memo(function WsRow({ wsId, wsName, selected, onToggle, historical }: WsRowProps) {
   return (
     <button
       onClick={() => onToggle(wsId)}
@@ -51,6 +52,11 @@ const WsRow = memo(function WsRow({ wsId, wsName, selected, onToggle }: WsRowPro
         {selected && <svg className="h-3 w-3 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" /></svg>}
       </div>
       <span className="truncate text-gray-700">{wsName}</span>
+      {historical && (
+        <span className="ml-auto shrink-0 rounded-full border border-amber-200 bg-amber-50 px-1.5 py-0.5 text-[9px] font-medium text-amber-700" title="This workspace no longer exists in the account — data is historical.">
+          historical
+        </span>
+      )}
     </button>
   );
 });
@@ -148,7 +154,8 @@ export function SKUBreakdown({ data, isLoading, workspaces, dateRange, workspace
   const wsItems = useMemo(
     () => (workspaces || []).map((ws) => {
       const wsId = String(ws.workspace_id);
-      return { wsId, wsName: workspaceNameMap?.[wsId] || ws.workspace_name || wsId };
+      const resolvedName = workspaceNameMap?.[wsId] || ws.workspace_name || null;
+      return { wsId, wsName: resolvedName || wsId, historical: ws.historical ?? !resolvedName };
     }),
     [workspaces, workspaceNameMap],
   );
@@ -202,7 +209,7 @@ export function SKUBreakdown({ data, isLoading, workspaces, dateRange, workspace
               maxHeight={256}
               getKey={(it) => it.wsId}
               renderItem={(it) => (
-                <WsRow wsId={it.wsId} wsName={it.wsName} selected={selectedSet.has(it.wsId)} onToggle={toggleWs} />
+                <WsRow wsId={it.wsId} wsName={it.wsName} historical={it.historical} selected={selectedSet.has(it.wsId)} onToggle={toggleWs} />
               )}
             />
           )}

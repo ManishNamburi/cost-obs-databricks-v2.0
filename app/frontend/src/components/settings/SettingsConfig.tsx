@@ -2,6 +2,7 @@ import { useState, useRef, useEffect } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import type { AppSettings } from "../SettingsDialog";
 import { READINESS_QUERY_KEY } from "@/hooks/useFeatureAvailability";
+import { MvSourcesSection } from "./MvSourcesSection";
 
 interface AppConfigInfo {
   warehouse: { id: string; name: string | null; size: string | null; state: string; source?: "app_resource" | "http_path" | "none" } | null;
@@ -65,6 +66,19 @@ export function SettingsConfig({
     queryKey: ["settings-catalog"],
     queryFn: () => fetch("/api/settings/catalog").then(r => r.json()).catch(() => null),
     staleTime: 30 * 1000,
+  });
+  // Links to the app's source code (in the workspace) and its Databricks Apps page.
+  const { data: appLinks = null } = useQuery<{
+    host: string;
+    app_name: string;
+    app_url?: string;
+    app_page_url: string;
+    source_code_url: string;
+    error?: string;
+  } | null>({
+    queryKey: ["settings-app-links"],
+    queryFn: () => fetch("/api/settings/app-links").then(r => r.json()).catch(() => null),
+    staleTime: 5 * 60 * 1000,
   });
   const { data: authStatus = null } = useQuery<{
     user_token_active: boolean;
@@ -368,6 +382,49 @@ export function SettingsConfig({
                 </div>
               )}
             </div>
+
+            {/* App links — source code in the workspace + backend in Databricks Apps */}
+            {appLinks && (appLinks.source_code_url || appLinks.app_page_url) && (
+              <div className="mb-3 rounded-lg border border-gray-200 bg-white p-3 space-y-2">
+                {appLinks.source_code_url && (
+                  <a
+                    href={appLinks.source_code_url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="group flex items-center gap-2 text-xs text-gray-700 hover:text-[#FF3621]"
+                  >
+                    <svg className="h-4 w-4 shrink-0 text-gray-400 group-hover:text-[#FF3621]" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4" />
+                    </svg>
+                    <span className="font-medium">App source code</span>
+                    <span className="text-gray-500">in workspace</span>
+                    <svg className="h-3 w-3 shrink-0 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
+                    </svg>
+                  </a>
+                )}
+                {appLinks.app_page_url && (
+                  <a
+                    href={appLinks.app_page_url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="group flex items-center gap-2 text-xs text-gray-700 hover:text-[#FF3621]"
+                  >
+                    <svg className="h-4 w-4 shrink-0 text-gray-400 group-hover:text-[#FF3621]" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 12h14M5 12a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v4a2 2 0 01-2 2M5 12a2 2 0 00-2 2v4a2 2 0 002 2h14a2 2 0 002-2v-4a2 2 0 00-2-2m-2-4h.01M17 16h.01" />
+                    </svg>
+                    <span className="font-medium">App backend</span>
+                    <span className="text-gray-500">in Databricks Apps</span>
+                    <svg className="h-3 w-3 shrink-0 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
+                    </svg>
+                  </a>
+                )}
+              </div>
+            )}
+
+            {/* Additional MV sources (shared views from other workspaces) */}
+            <MvSourcesSection />
 
             {/* Last refresh + Rebuild controls */}
             <div className="flex items-center justify-between mb-2">

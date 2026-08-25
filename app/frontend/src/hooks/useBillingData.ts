@@ -68,6 +68,14 @@ async function fetchJson<T>(url: string): Promise<T> {
   return response.json();
 }
 
+// Active MV source-label selection, set by the top-nav SourceLabelFilter. Empty
+// means "all sources" (no filter). Appended to every data URL so the backend can
+// narrow MV reads by source; changing it invalidates queries to force a refetch.
+let _activeSourceLabels: string[] = [];
+export function setActiveSourceLabels(labels: string[]): void {
+  _activeSourceLabels = labels ?? [];
+}
+
 function buildUrl(endpoint: string, dateRange?: DateRange): string {
   const params = new URLSearchParams();
   if (dateRange?.startDate) {
@@ -75,6 +83,10 @@ function buildUrl(endpoint: string, dateRange?: DateRange): string {
   }
   if (dateRange?.endDate) {
     params.set("end_date", dateRange.endDate);
+  }
+  // One param per label (not comma-joined) so a label containing a comma round-trips.
+  for (const lbl of _activeSourceLabels) {
+    if (lbl) params.append("source_labels", lbl);
   }
   const queryString = params.toString();
   return queryString ? `${endpoint}?${queryString}` : endpoint;

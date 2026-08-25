@@ -11,7 +11,7 @@ from cachetools import TTLCache
 
 from fastapi import APIRouter, Query
 
-from backend.db import execute_query, execute_queries_parallel, get_catalog_schema, get_host_url, get_workspace_client, bundle_cache_key, delta_cache_get, delta_cache_put
+from backend.db import execute_query, execute_queries_parallel, get_catalog_schema, get_host_url, get_workspace_client, bundle_cache_key, delta_cache_get, delta_cache_put, apply_mv_overrides
 from backend import cache_ttls
 from backend.queries import (
     ACCOUNT_INFO,
@@ -156,10 +156,16 @@ def _check_mv_available() -> bool:
 
 
 def _get_mv_query(mv_query: str, ws_filter: str = "") -> str:
-    """Format a materialized view query with the correct catalog/schema and apply table overrides."""
-    from backend.db import apply_mv_overrides
+    """Format a materialized view query with the correct catalog/schema and apply table overrides.
+
+    The active source-label selection (if any) is appended into the same
+    `{ws_filter}` slot the workspace filter uses, so MV reads against the unified
+    views are narrowed to the chosen sources. No-op when nothing is selected or
+    no additional sources are configured.
+    """
+    from backend.db import apply_mv_overrides, source_label_filter_clause
     catalog, schema = get_catalog_schema()
-    sql = mv_query.format(catalog=catalog, schema=schema, ws_filter=ws_filter)
+    sql = mv_query.format(catalog=catalog, schema=schema, ws_filter=ws_filter + source_label_filter_clause())
     return apply_mv_overrides(sql, catalog, schema)
 
 
@@ -1410,7 +1416,17 @@ async def get_workspace_list(
     try:
         rows = await asyncio.wait_for(asyncio.to_thread(_fetch_rows), timeout=30.0)
         return {
-            "workspaces": [{"id": r["workspace_id"], "name": r["workspace_name"]} for r in rows],
+            "workspaces": [
+                {
+                    "id": r["workspace_id"],
+                    "name": r["workspace_name"],
+                    # No name resolvable from any source => workspace no longer exists.
+                    "historical": not (r.get("workspace_name") and str(r["workspace_name"]).strip()),
+                }
+                for r in rows
+                if r.get("workspace_id") is not None
+                and str(r["workspace_id"]).strip().lower() not in ("", "none", "null")
+            ],
             "is_scoped": bool(configured_ids),
             "env_var": "COST_OBS_WORKSPACES",
             "env_var_value": ",".join(configured_ids),
@@ -1682,10 +1698,21 @@ def _format_workspaces(results: list[dict[str, Any]] | None, params: dict[str, s
     total_spend = sum(float(row.get("total_spend") or 0) for row in results)
     workspaces = []
     for row in results:
+        wid = row.get("workspace_id")
+        # Skip rows with no workspace id — str(None) would otherwise render a bogus
+        # "None" entry in every workspace dropdown across the app.
+        if wid is None or str(wid).strip().lower() in ("", "none", "null"):
+            continue
+        wid = str(wid)
+        raw_name = row.get("workspace_name")
+        name = raw_name if (raw_name and str(raw_name).strip()) else None
         spend = float(row.get("total_spend") or 0)
         workspaces.append({
-            "workspace_id": str(row.get("workspace_id")),
-            "workspace_name": row.get("workspace_name") or None,
+            "workspace_id": wid,
+            "workspace_name": name,
+            # No display name in billing history => the workspace no longer exists
+            # in the account (deleted); surface it as "historical" in dropdowns.
+            "historical": name is None,
             "total_dbus": float(row.get("total_dbus") or 0),
             "total_spend": spend,
             "top_products": _ensure_list(row.get("top_products")),
@@ -2997,7 +3024,7 @@ async def get_kpi_trend(
         return {"error": f"Unknown KPI: {kpi}"}
 
     try:
-        results = await asyncio.to_thread(execute_query, _inject_ws_filter(query, ws_clause), params)
+        results = await asyncio.to_thread(execute_query, apply_mv_overrides(_inject_ws_filter(query, ws_clause), *get_catalog_schema()), params)
         if not results and mv_fallback_query:
             logger.info(f"KPI trend MV returned empty for {kpi}, falling back to live query")
             results = await asyncio.to_thread(execute_query, _inject_ws_filter(mv_fallback_query, ws_clause), params)
@@ -3211,7 +3238,7 @@ async def get_platform_kpi_trend(
             GROUP BY DATE_TRUNC('{trunc}', usage_date)
             ORDER BY date
             """
-            results = await asyncio.to_thread(execute_query, _inject_ws_filter(query, ws_clause), params)
+            results = await asyncio.to_thread(execute_query, apply_mv_overrides(_inject_ws_filter(query, ws_clause), *get_catalog_schema()), params)
             daily_points = [{"date": str(r["date"])[:10], "value": float(r["value"] or 0)} for r in results]
             return _resp(_build_platform_kpi_response(kpi, granularity, daily_points))
         elif kpi == "total_jobs":
@@ -3225,7 +3252,7 @@ async def get_platform_kpi_trend(
             GROUP BY DATE_TRUNC('{trunc}', usage_date)
             ORDER BY date
             """
-            results = await asyncio.to_thread(execute_query, _inject_ws_filter(query, ws_clause), params)
+            results = await asyncio.to_thread(execute_query, apply_mv_overrides(_inject_ws_filter(query, ws_clause), *get_catalog_schema()), params)
             daily_points = [{"date": str(r["date"])[:10], "value": float(r["value"] or 0)} for r in results]
             return _resp(_build_platform_kpi_response(kpi, granularity, daily_points))
         elif kpi == "models_served":
@@ -3239,7 +3266,7 @@ async def get_platform_kpi_trend(
             GROUP BY DATE_TRUNC('{trunc}', usage_date)
             ORDER BY date
             """
-            results = await asyncio.to_thread(execute_query, _inject_ws_filter(query, ws_clause), params)
+            results = await asyncio.to_thread(execute_query, apply_mv_overrides(_inject_ws_filter(query, ws_clause), *get_catalog_schema()), params)
             daily_points = [{"date": str(r["date"])[:10], "value": float(r["value"] or 0)} for r in results]
             return _resp(_build_platform_kpi_response(kpi, granularity, daily_points))
         elif kpi == "unique_warehouses":

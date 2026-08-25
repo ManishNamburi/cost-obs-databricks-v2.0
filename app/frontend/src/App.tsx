@@ -9,6 +9,7 @@ import { WorkspaceTable } from "@/components/WorkspaceTable";
 import { PipelineObjectsTable } from "@/components/PipelineObjectsTable";
 import { DateRangePicker } from "@/components/DateRangePicker";
 import { WorkspaceFilter } from "@/components/WorkspaceFilter";
+import { SourceLabelFilter } from "@/components/SourceLabelFilter";
 import { SKUBreakdown } from "@/components/SKUBreakdown";
 import { ExportDialog, type ExportSections, type ExportFormat } from "@/components/ExportDialog";
 import { SettingsDialog, loadTabVisibility, loadAppSettings, type TabVisibility, type AppSettings } from "@/components/SettingsDialog";
@@ -540,7 +541,7 @@ function Dashboard() {
   useQuery({ queryKey: ["available-tags"], queryFn: async () => { const r = await fetch("/api/tagging/available-tags"); if (!r.ok) return { tags: {}, count: 0 }; return r.json(); } });
 
   // Workspace list for the filter dropdown — pool-scoped, independent of the bundle.
-  const { data: wsListData, isLoading: wsListLoading } = useQuery<{ workspaces: { id: string; name: string }[] }>({
+  const { data: wsListData, isLoading: wsListLoading } = useQuery<{ workspaces: { id: string; name: string; historical?: boolean }[] }>({
     queryKey: ["billing", "workspaces"],
     queryFn: () => fetch("/api/billing/workspaces").then(r => r.json()),
     staleTime: Infinity,
@@ -559,10 +560,11 @@ function Dashboard() {
   // Overlay the merged name map so the top-nav filter picks up billing-derived
   // names when /api/billing/workspaces returns an id-only record.
   const wsFilterList = useMemo(
-    () => (wsListData?.workspaces ?? []).map(w => ({
-      workspace_id: w.id,
-      workspace_name: workspaceNameMap[w.id] || w.name || null,
-    })),
+    () => (wsListData?.workspaces ?? []).map(w => {
+      const name = workspaceNameMap[w.id] || w.name || null;
+      // No resolvable name => workspace no longer exists in the account.
+      return { workspace_id: w.id, workspace_name: name, historical: !name };
+    }),
     [wsListData?.workspaces, workspaceNameMap],
   );
 
@@ -1014,6 +1016,7 @@ function Dashboard() {
                 onChange={setSelectedWorkspaceIds}
                 isLoading={wsListLoading}
               />
+              <SourceLabelFilter />
             </div>
             <div />
           </div>

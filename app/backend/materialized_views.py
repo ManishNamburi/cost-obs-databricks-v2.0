@@ -1851,6 +1851,107 @@ _MV_TABLES = [
 ]
 
 
+def _table_columns(full_table: str) -> list[str] | None:
+    """Ordered column names for a (backticked) table path, or None if unreadable.
+
+    Doubles as a readability probe — a Delta-shared source the app can't SELECT
+    from raises here and is skipped rather than breaking the union.
+    """
+    from backend.db import execute_query
+    try:
+        rows = execute_query(f"DESCRIBE TABLE {full_table}", no_cache=True)
+    except Exception as e:
+        logger.info("MV source not readable, skipping: %s (%s)", full_table, e)
+        return None
+    cols: list[str] = []
+    for r in rows or []:
+        cn = (r.get("col_name") or "").strip()
+        # DESCRIBE trails partition-info after a blank / '#'-prefixed marker row.
+        if not cn or cn.startswith("#"):
+            break
+        cols.append(cn)
+    return cols or None
+
+
+def rebuild_unified_views(catalog: str | None = None, schema: str | None = None) -> dict:
+    """(Re)create per-table `<name>__unified` views: local MV UNION ALL each source.
+
+    Every row is tagged with a `source_label` column (local rows use the
+    workspace's own label). A source table is included only when it is readable
+    AND its column list matches the local MV exactly — so the `SELECT *` union can
+    never fail on a mismatched share, and the app's reads stay healthy. When no
+    sources are configured, unified views are dropped so reads fall back to base
+    tables. Returns a per-table build summary (used by the Settings UI).
+    """
+    from backend.db import (
+        execute_query, get_catalog_schema, get_mv_sources,
+        get_local_source_label, save_unified_view_tables, MV_UNIFIED_SUFFIX,
+    )
+    if catalog is None or schema is None:
+        c, s = get_catalog_schema()
+        catalog = catalog or c
+        schema = schema or s
+    if not catalog or not schema:
+        return {"ok": False, "error": "no catalog/schema configured"}
+
+    sources = get_mv_sources()
+    if not sources:
+        drop_unified_views(catalog, schema)
+        return {"ok": True, "sources": 0, "views": {}}
+
+    local_label = get_local_source_label().replace("'", "''")
+    summary: dict = {}
+    for t in _MV_TABLES:
+        local_full = f"`{catalog}`.`{schema}`.`{t}`"
+        local_cols = _table_columns(local_full)
+        if not local_cols:
+            summary[t] = {"built": False, "reason": "local table missing"}
+            continue
+        selects = [f"SELECT *, '{local_label}' AS source_label FROM {local_full}"]
+        included, skipped = [get_local_source_label()], []
+        for src in sources:
+            full = f"`{src['catalog']}`.`{src['schema']}`.`{t}`"
+            cols = _table_columns(full)
+            if cols is None:
+                skipped.append({"label": src["label"], "reason": "unreadable/absent"})
+            elif cols != local_cols:
+                skipped.append({"label": src["label"], "reason": "column mismatch"})
+            else:
+                slabel = src["label"].replace("'", "''")
+                selects.append(f"SELECT *, '{slabel}' AS source_label FROM {full}")
+                included.append(src["label"])
+        view = f"`{catalog}`.`{schema}`.`{t}{MV_UNIFIED_SUFFIX}`"
+        union_sql = "\nUNION ALL\n".join(selects)
+        try:
+            execute_query(f"CREATE OR REPLACE VIEW {view} AS\n{union_sql}", no_cache=True)
+            summary[t] = {"built": True, "included": included, "skipped": skipped}
+        except Exception as e:
+            summary[t] = {"built": False, "reason": str(e), "skipped": skipped}
+            logger.warning("Failed to build unified view %s: %s", view, e)
+    # Record which unified views exist so apply_mv_overrides only remaps those.
+    save_unified_view_tables([t for t, info in summary.items() if info.get("built")])
+    logger.info("Unified MV views rebuilt (%d source(s) configured)", len(sources))
+    return {"ok": True, "sources": len(sources), "views": summary}
+
+
+def drop_unified_views(catalog: str | None = None, schema: str | None = None) -> None:
+    """Drop every `<name>__unified` view so reads fall back to base tables."""
+    from backend.db import execute_query, get_catalog_schema, save_unified_view_tables, MV_UNIFIED_SUFFIX
+    # No unified views remain — stop apply_mv_overrides from remapping to them.
+    save_unified_view_tables([])
+    if catalog is None or schema is None:
+        c, s = get_catalog_schema()
+        catalog = catalog or c
+        schema = schema or s
+    if not catalog or not schema:
+        return
+    for t in _MV_TABLES:
+        try:
+            execute_query(f"DROP VIEW IF EXISTS `{catalog}`.`{schema}`.`{t}{MV_UNIFIED_SUFFIX}`", no_cache=True)
+        except Exception as e:
+            logger.debug("drop unified view %s failed (non-fatal): %s", t, e)
+
+
 def check_materialized_views_exist(catalog: str | None = None, schema: str | None = None) -> dict:
     """Check which materialized view tables exist.
 

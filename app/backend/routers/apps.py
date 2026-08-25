@@ -18,7 +18,7 @@ import httpx
 from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import JSONResponse, Response
 
-from backend.db import execute_query, execute_queries_parallel, get_workspace_client, bundle_cache_key, delta_cache_get, delta_cache_put, apply_mv_overrides, get_catalog_schema
+from backend.db import execute_query, execute_queries_parallel, get_workspace_client, bundle_cache_key, delta_cache_get, delta_cache_put, apply_mv_overrides, get_catalog_schema, source_label_filter_clause
 from backend import workspace_filter as wf
 from backend import cache_ttls
 from backend.routers.billing import _check_mv_available
@@ -798,7 +798,7 @@ def _compute_apps_bundle(params: dict, id_list: list | None, active_only: bool, 
             if _use_mv:
                 try:
                     cat, sch = get_catalog_schema()
-                    mv_sql = mv_sql_tpl.format(catalog=cat, schema=sch, ws_filter=_mv_ws_clause, **fmt_kwargs)
+                    mv_sql = mv_sql_tpl.format(catalog=cat, schema=sch, ws_filter=_mv_ws_clause + source_label_filter_clause(), **fmt_kwargs)
                     mv_sql = apply_mv_overrides(mv_sql, cat, sch)
                     return execute_query(mv_sql, params)
                 except Exception as e:

@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from "react";
+import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { ReadinessChecks, normalizeReadinessResult } from "./ReadinessChecks";
 import type { ReadinessResult } from "./ReadinessChecks";
@@ -30,11 +30,7 @@ interface AuthStatus {
 
 export function SettingsPermissions() {
   const queryClient = useQueryClient();
-  const [grantRunning, setGrantRunning] = useState(false);
-  const [grantResult, setGrantResult] = useState<{ ok: boolean; message: string; errors?: string[]; grants_sql?: string; obo_scope_missing?: boolean } | null>(null);
-  const [grantSqlCopied, setGrantSqlCopied] = useState(false);
   const [readinessOpen, setReadinessOpen] = useState(false);
-  const autoGrantAttempted = useRef(false);
 
   const { data: permissions, isLoading } = useQuery<UserPermissions>({
     queryKey: ["user-permissions"],
@@ -45,7 +41,7 @@ export function SettingsPermissions() {
     },
   });
 
-  const { data: authStatus, isLoading: authLoading, refetch: refetchAuth } = useQuery<AuthStatus>({
+  const { data: authStatus, isLoading: authLoading } = useQuery<AuthStatus>({
     queryKey: ["settings-auth-status"],
     queryFn: () => fetch("/api/settings/auth-status").then(r => r.json()),
     staleTime: 10 * 1000,
@@ -92,59 +88,6 @@ export function SettingsPermissions() {
       queryClient.refetchQueries({ queryKey: ["user"] });
     },
   });
-
-  const runSpGrants = async () => {
-    setGrantRunning(true);
-    setGrantResult(null);
-    try {
-      const res = await fetch("/api/setup/grant-sp-system-access", { method: "POST" });
-      const body = await res.json().catch(() => ({}));
-      if (body.ok || (res.ok && body.status === "ok")) {
-        const detail = body.applied != null
-          ? `${body.applied} grant(s) applied for ${body.sp_client_id}.`
-          : `Grants applied for ${body.sp_client_id}.`;
-        setGrantResult({ ok: true, message: detail });
-        await refetchAuth();
-      } else {
-        const allErrors: string[] = body.errors ?? [];
-        const summary = body.failed
-          ? `${body.failed} grant(s) failed, ${body.applied ?? 0} applied.`
-          : (body.reason ?? body.detail ?? "Grant run completed — check server logs.");
-        setGrantResult({
-          ok: false,
-          message: body.needs_admin
-            ? "Automatic grant failed — your current identity could not apply the required permissions."
-            : summary,
-          errors: allErrors,
-          grants_sql: body.grants_sql ?? undefined,
-          obo_scope_missing: body.obo_scope_missing ?? false,
-        });
-      }
-      // Always re-check after grant attempt (success or partial) so the UI reflects
-      // which permissions were actually applied. Small delay for UC propagation.
-      setTimeout(() => queryClient.refetchQueries({ queryKey: READINESS_QUERY_KEY }), 2000);
-    } catch {
-      setGrantResult({ ok: false, message: "Network error running grants." });
-    } finally {
-      setGrantRunning(false);
-    }
-  };
-
-  // Auto-fire grants on first load if there are SP access failures — avoids
-  // requiring a manual "Apply SP Grants" click on fresh deploys.
-  useEffect(() => {
-    if (!readiness) return;
-    if (autoGrantAttempted.current) return;
-    if (grantRunning || grantResult) return;
-    const hasFailing =
-      !readiness.warehouse.granted ||
-      readiness.core.some(c => !c.granted) ||
-      readiness.enhanced.some(c => !c.granted);
-    if (!hasFailing) return;
-    autoGrantAttempted.current = true;
-    runSpGrants();
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [readiness]);
 
   const [newUserEmail, setNewUserEmail] = useState("");
   const [newUserRole, setNewUserRole] = useState<"admin" | "consumer">("consumer");
@@ -239,9 +182,6 @@ export function SettingsPermissions() {
                   loading={readinessLoading}
                   fetchError={readinessQueryError ? String(readinessQueryError) : null}
                   onRecheck={handleReadinessRecheck}
-                  onAutoGrant={runSpGrants}
-                  autoGrantRunning={grantRunning}
-                  autoGrantResult={grantResult}
                 />
               </div>
             )}
@@ -441,54 +381,11 @@ export function SettingsPermissions() {
               </div>
             )}
 
-            <div className="flex items-center gap-3 flex-wrap">
-              <button
-                onClick={runSpGrants}
-                disabled={grantRunning}
-                className="btn-brand rounded-md px-3 py-1.5 text-xs font-medium text-white disabled:opacity-50 transition-colors"
-              >
-                {grantRunning ? "Running grants…" : "Re-run SP grants"}
-              </button>
-              {grantResult && (
-                <div className={`text-[11px] font-medium ${grantResult.ok ? "text-green-700" : "text-red-600"}`}>
-                  <span>{grantResult.ok ? "✓ " : "✗ "}{grantResult.message}</span>
-                  {!grantResult.ok && grantResult.errors && grantResult.errors.length > 0 && (
-                    <ul className="mt-1 list-disc pl-4 space-y-0.5 font-normal text-red-500">
-                      {grantResult.errors.map((e, i) => (
-                        <li key={i} className="break-all">{e}</li>
-                      ))}
-                    </ul>
-                  )}
-                  {grantResult.obo_scope_missing && (
-                    <p className="mt-1 text-[10px] text-amber-700 font-normal">
-                      OBO scope missing — this app is not configured with the <code className="font-mono">sql</code> user authorization scope.
-                    </p>
-                  )}
-                  {grantResult.grants_sql && (
-                    <div className="mt-2 space-y-1">
-                      <div className="flex items-center justify-between">
-                        <p className="text-[10px] font-medium text-amber-900">
-                          Run as metastore admin — Copy and run the SQL below, then click Re-check.
-                        </p>
-                        <button
-                          onClick={() => {
-                            navigator.clipboard.writeText(grantResult.grants_sql!);
-                            setGrantSqlCopied(true);
-                            setTimeout(() => setGrantSqlCopied(false), 1800);
-                          }}
-                          className="shrink-0 rounded px-2 py-0.5 text-[10px] font-medium bg-gray-700 text-white hover:bg-gray-600"
-                        >
-                          {grantSqlCopied ? "Copied!" : "Copy"}
-                        </button>
-                      </div>
-                      <pre className="overflow-x-auto whitespace-pre-wrap rounded bg-gray-900 px-3 py-2 text-[10px] leading-relaxed text-green-400">
-                        {grantResult.grants_sql}
-                      </pre>
-                    </div>
-                  )}
-                </div>
-              )}
-            </div>
+            <p className="text-[11px] text-gray-600">
+              Expand <span className="font-medium">SP access to Databricks system tables</span> above to see the exact
+              GRANT SQL for any missing permission, or use the <span className="font-medium">App runtime grants</span> block
+              below. Run it as a metastore admin, then click Re-check.
+            </p>
           </div>
 
           {/* SP grants reference — app runtime grants */}

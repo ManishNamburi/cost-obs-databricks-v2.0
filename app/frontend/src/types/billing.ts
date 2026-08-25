@@ -28,6 +28,7 @@ export interface ProductBreakdownResponse {
 export interface WorkspaceBreakdown {
   workspace_id: string;
   workspace_name: string | null;
+  historical?: boolean;
   total_dbus: number;
   total_spend: number;
   percentage: number;

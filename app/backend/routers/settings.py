@@ -975,6 +975,177 @@ async def get_catalog_settings():
     return get_catalog_schema_info()
 
 
+@router.get("/app-links")
+async def get_app_links() -> dict:
+    """URLs for the Settings → Config card: the app's source code in the customer
+    workspace, and the app's page in Databricks Apps (its "backend").
+
+    Best-effort and never raises — any field that can't be resolved is left "".
+    The app asks the Apps API about ITSELF (SP identity), so this works even when
+    the viewer is not a workspace admin. A Git-deployed app has no workspace source
+    folder, so its source link falls back to the Databricks Apps page.
+    """
+    import asyncio
+    import re as _re
+
+    host = (os.getenv("DATABRICKS_HOST") or "").rstrip("/")
+    if host and not host.startswith("http"):
+        host = "https://" + host
+    app_name = (os.getenv("DATABRICKS_APP_NAME") or "").strip()
+    out: dict[str, Any] = {
+        "host": host, "app_name": app_name,
+        "app_url": "", "app_page_url": "", "source_code_url": "",
+    }
+    if not host or not app_name:
+        return out
+
+    def _resolve() -> dict:
+        from backend.db import get_workspace_client
+        w = get_workspace_client()
+        body = w.api_client.do("GET", f"/api/2.0/apps/{app_name}") or {}
+        folder_id = ""
+        # Uploaded / bundle deploys carry a /Workspace path we can turn into the
+        # folder-browser id. Git deploys report a repo path (no workspace object).
+        dep = body.get("active_deployment") or {}
+        git_backed = bool(dep.get("git_source"))
+        src_path = "" if git_backed else (dep.get("source_code_path") or "")
+        if isinstance(src_path, str) and src_path.startswith("/Workspace/"):
+            try:
+                st = w.api_client.do("GET", "/api/2.0/workspace/get-status", query={"path": src_path}) or {}
+                oid = st.get("object_id") if st.get("object_id") is not None else st.get("resource_id")
+                if oid is not None:
+                    folder_id = str(oid)
+            except Exception as exc:
+                logger.info("app-links: could not resolve folder id for %s: %s", src_path, exc)
+        return {"body": body, "folder_id": folder_id}
+
+    try:
+        resolved = await asyncio.to_thread(_resolve)
+    except Exception as e:
+        logger.warning("app-links: could not fetch app %s: %s", app_name, e)
+        out["error"] = str(e)
+        return out
+
+    body = resolved.get("body") or {}
+    app_url = body.get("url") or ""
+    out["app_url"] = app_url
+
+    # Workspace id, read off the app's own hostname
+    # (<name>-<workspace-id>.<cloud>.databricksapps.com) — nothing hands the
+    # container a workspace id directly.
+    m = _re.search(r"-(\d{6,})\.", app_url)
+    wsid = m.group(1) if m else (os.getenv("DATABRICKS_WORKSPACE_ID") or "").strip()
+    org = f"?o={wsid}" if wsid else ""
+
+    # The app's page in Databricks Apps — where compute, logs and deployments live.
+    out["app_page_url"] = f"{host}/apps/{app_name}{org}"
+
+    # Source code in the workspace: the folder holding what is serving, when the
+    # workspace resolved one; otherwise the app page (a Git deploy has no folder).
+    fid = resolved.get("folder_id") or ""
+    out["source_code_url"] = f"{host}/browse/folders/{fid}{org}" if fid else out["app_page_url"]
+    return out
+
+
+# ── Additional MV sources (union of Delta-shared / cross-workspace MVs) ───────
+
+def _invalidate_mv_caches() -> None:
+    """Clear caches so a just-changed set of MV sources is reflected immediately."""
+    try:
+        from backend.db import clear_query_cache, delta_cache_invalidate
+        clear_query_cache()
+        delta_cache_invalidate()
+    except Exception as exc:
+        logger.debug("MV cache invalidation (non-fatal): %s", exc)
+    try:
+        from backend.routers.billing import _mv_cache
+        _mv_cache["available"] = None
+        _mv_cache["checked_at"] = 0
+    except Exception:
+        pass
+
+
+@router.get("/mv-sources")
+async def get_mv_sources_endpoint() -> dict:
+    """Additional MV source locations unioned into every MV read, plus this
+    workspace's own label (used for its rows in the source_label column)."""
+    from backend.db import get_mv_sources, get_local_source_label
+    return {"sources": get_mv_sources(), "local_label": get_local_source_label()}
+
+
+@router.get("/mv-sources/preview")
+async def preview_mv_source(catalog: str, schema: str) -> dict:
+    """Probe a candidate source location: for each MV table, whether it exists
+    there and matches the local structure (so the Browse UI can show readiness)."""
+    from backend.db import get_catalog_schema
+    from backend.materialized_views import _MV_TABLES, _table_columns
+
+    cat, sch = get_catalog_schema()
+    src_cat, src_sch = (catalog or "").strip(), (schema or "").strip()
+    if not src_cat or not src_sch:
+        raise HTTPException(status_code=400, detail="catalog and schema are required")
+
+    def _probe() -> list[dict]:
+        out = []
+        for t in _MV_TABLES:
+            local_cols = _table_columns(f"`{cat}`.`{sch}`.`{t}`")
+            src_cols = _table_columns(f"`{src_cat}`.`{src_sch}`.`{t}`")
+            if src_cols is None:
+                status = "absent"
+            elif local_cols and src_cols == local_cols:
+                status = "match"
+            else:
+                status = "mismatch"
+            out.append({"table": t, "status": status})
+        return out
+
+    tables = await asyncio.to_thread(_probe)
+    matched = sum(1 for x in tables if x["status"] == "match")
+    return {"catalog": src_cat, "schema": src_sch, "tables": tables,
+            "matched": matched, "total": len(_MV_TABLES)}
+
+
+@router.post("/mv-sources")
+async def add_mv_source(request: Request, body: dict) -> dict:
+    """Add (or replace by label) an additional MV source and rebuild the unified
+    views. Admin-only. The source's tables must match the app's MV structure."""
+    _require_admin(request)
+    from backend.db import get_mv_sources, save_mv_sources, get_catalog_schema
+    from backend.materialized_views import rebuild_unified_views
+
+    label = (body.get("label") or "").strip()
+    catalog = (body.get("catalog") or "").strip()
+    schema = (body.get("schema") or "").strip()
+    if not (label and catalog and schema):
+        raise HTTPException(status_code=400, detail="label, catalog and schema are required")
+    cat, sch = get_catalog_schema()
+    if catalog == cat and schema == sch:
+        raise HTTPException(status_code=400, detail="Source cannot be the app's own catalog.schema.")
+
+    sources = [s for s in get_mv_sources() if s.get("label") != label]
+    sources.append({"label": label, "catalog": catalog, "schema": schema})
+    save_mv_sources(sources)
+    summary = await asyncio.to_thread(rebuild_unified_views)
+    _invalidate_mv_caches()
+    return {"ok": True, "sources": sources, "build": summary}
+
+
+@router.delete("/mv-sources")
+async def remove_mv_source(request: Request, label: str = None) -> dict:
+    """Remove an additional MV source by label and rebuild unified views. Admin-only."""
+    _require_admin(request)
+    from backend.db import get_mv_sources, save_mv_sources
+    from backend.materialized_views import rebuild_unified_views
+
+    if not label:
+        raise HTTPException(status_code=400, detail="label query param is required")
+    sources = [s for s in get_mv_sources() if s.get("label") != label]
+    save_mv_sources(sources)
+    summary = await asyncio.to_thread(rebuild_unified_views)
+    _invalidate_mv_caches()
+    return {"ok": True, "sources": sources, "build": summary}
+
+
 @router.post("/catalog")
 async def save_catalog_settings(body: dict):
     """Save catalog/schema override from the Setup Wizard."""
