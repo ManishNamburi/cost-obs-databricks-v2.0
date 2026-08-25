@@ -1,4 +1,5 @@
 import { Fragment, useState, useRef, useEffect, useMemo, memo } from "react";
+import { useQuery } from "@tanstack/react-query";
 import type { WorkspaceBreakdownResponse } from "@/types/billing";
 import { formatCurrency, formatNumber, workspaceUrl } from "@/utils/formatters";
 import { formatIdentity, useSpNameMap } from "@/utils/identity";
@@ -42,6 +43,16 @@ function formatProductName(raw: string): string {
 
 export const WorkspaceTable = memo(function WorkspaceTable({ data, isLoading, host, workspaceNameMap }: WorkspaceTableProps) {
   const spNameMap = useSpNameMap();
+  // Whether any Delta-shared summary sources are active. This live breakdown is a
+  // system-table query (it needs per-product/per-user detail the shared summary MVs
+  // don't carry), so it reflects only THIS account's workspaces — a note explains
+  // why its totals can trail the MV-backed KPIs when shared sources are present.
+  const { data: mvSources } = useQuery<{ sources: { label: string }[] }>({
+    queryKey: ["mv-sources"],
+    queryFn: () => fetch("/api/settings/mv-sources").then((r) => r.json()).catch(() => ({ sources: [] })),
+    staleTime: 60 * 1000,
+  });
+  const hasSharedSources = (mvSources?.sources?.length ?? 0) > 0;
   const [currentPage, setCurrentPage] = useState(1);
   const [search, setSearch] = useState("");
   const [showHistorical, setShowHistorical] = useState(false);
@@ -124,9 +135,13 @@ export const WorkspaceTable = memo(function WorkspaceTable({ data, isLoading, ho
     const id = ws.workspace_id;
     return id != null && !["", "none", "null"].includes(String(id).trim().toLowerCase());
   });
-  // A workspace is only "historical" if it has no workspace_id at all.
-  // Null workspace_name means the name isn't in workspaces_latest — that's not the same as historical.
-  const isHistoricalWs = (ws: typeof data.workspaces[0]) => !ws.workspace_id;
+  // Historical = no resolvable display name (neither a live name from workspaceNameMap
+  // nor a name in the billing history). Such a workspace no longer exists in the
+  // account (deleted/orphaned), so it's hidden by default behind "Show historical" and
+  // badged when shown — keeping the default row count aligned with the active-workspace
+  // KPI. Mirrors the backend `historical` flag (workspace_name is None).
+  const isHistoricalWs = (ws: typeof data.workspaces[0]) =>
+    !ws.workspace_id || !(workspaceNameMap?.[ws.workspace_id] || ws.workspace_name);
   const historicalCount = validWorkspaces.filter((ws) => isHistoricalWs(ws)).length;
   // When all workspaces lack names (workspace_name is unavailable), show everything rather than a blank table.
   const allHistorical = historicalCount === validWorkspaces.length;
@@ -165,9 +180,16 @@ export const WorkspaceTable = memo(function WorkspaceTable({ data, isLoading, ho
   return (
     <div className="animate-fade-in rounded-lg bg-white p-6 border " style={{ borderColor: '#E5E5E5' }}>
       <div className="mb-4 flex flex-wrap items-center gap-2">
-        <h3 className="text-lg font-semibold text-gray-900 shrink-0">
-          Spend by Workspace
-        </h3>
+        <div className="shrink-0">
+          <h3 className="text-lg font-semibold text-gray-900">
+            Spend by Workspace
+          </h3>
+          {hasSharedSources && (
+            <p className="mt-0.5 text-xs text-gray-500">
+              This workspace's account only — shared sources are included in the totals above, not this live breakdown.
+            </p>
+          )}
+        </div>
         <div className="ml-auto flex shrink-0 items-center gap-2">
           {historicalCount > 0 && !allHistorical && (
             <label className="flex items-center gap-1.5 text-xs text-gray-500 cursor-pointer">

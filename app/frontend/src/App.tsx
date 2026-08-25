@@ -10,6 +10,7 @@ import { PipelineObjectsTable } from "@/components/PipelineObjectsTable";
 import { DateRangePicker } from "@/components/DateRangePicker";
 import { WorkspaceFilter } from "@/components/WorkspaceFilter";
 import { SourceLabelFilter } from "@/components/SourceLabelFilter";
+import { TopProgressBar } from "@/components/TopProgressBar";
 import { SKUBreakdown } from "@/components/SKUBreakdown";
 import { ExportDialog, type ExportSections, type ExportFormat } from "@/components/ExportDialog";
 import { SettingsDialog, loadTabVisibility, loadAppSettings, type TabVisibility, type AppSettings } from "@/components/SettingsDialog";
@@ -769,6 +770,7 @@ function Dashboard() {
   return (
     <SpNameMapContext.Provider value={spNameMap}>
     <div className="min-h-screen" style={{ backgroundColor: appSettings.darkMode ? '#1B1F23' : '#F9F7F4' }}>
+      <TopProgressBar />
       {/* Setup incomplete banner — non-dismissable, shown when wizard was closed without finishing */}
       {setupIncomplete && (
         <div className="flex items-center justify-between gap-4 px-4 py-2.5 border-b" style={{ backgroundColor: '#FFF7ED', borderColor: '#FED7AA' }}>

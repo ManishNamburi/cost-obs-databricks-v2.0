@@ -28,6 +28,8 @@ export function SourceLabelFilter() {
 
   const [open, setOpen] = useState(false);
   const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [applying, setApplying] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
   const lastAppliedRef = useRef<string>("");
 
   // Start with everything selected once labels are known.
@@ -40,16 +42,28 @@ export function SourceLabelFilter() {
 
   const allSelected = selected.size === allLabels.length;
 
-  const apply = (next: Set<string>) => {
+  const apply = async (next: Set<string>) => {
     // Empty selection is treated as "all" so the dashboard never goes blank.
     const effective = next.size === 0 || next.size === allLabels.length ? [] : Array.from(next);
     // Skip the refetch when the effective selection hasn't changed (e.g. closing
     // the dropdown without edits).
-    const key = [...effective].sort().join("");
+    const key = [...effective].sort().join("");
     if (key === lastAppliedRef.current) return;
     lastAppliedRef.current = key;
     setActiveSourceLabels(effective);
-    queryClient.invalidateQueries();
+    // Tactile "Applying…" feedback until the refetch settles — invalidateQueries
+    // resolves once the invalidated active queries have refetched.
+    setApplying(true);
+    setErr(null);
+    try {
+      await queryClient.invalidateQueries();
+      const failed = queryClient.getQueryCache().getAll().some((q) => q.isActive() && q.state.status === "error");
+      setErr(failed ? "Some data failed to refresh — try again." : null);
+    } catch {
+      setErr("Some data failed to refresh — try again.");
+    } finally {
+      setApplying(false);
+    }
   };
 
   const toggle = (label: string) => {
@@ -74,10 +88,17 @@ export function SourceLabelFilter() {
         className="flex items-center gap-2 rounded-full border border-gray-200 bg-white px-3 py-1.5 text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors"
         title="Filter by data source"
       >
-        <svg className="h-4 w-4 shrink-0 text-gray-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 7h16M6 12h12M9 17h6" />
-        </svg>
-        <span className="max-w-[140px] truncate">{label()}</span>
+        {applying ? (
+          <svg className="h-4 w-4 shrink-0 animate-spin text-[#FF3621]" viewBox="0 0 24 24" fill="none">
+            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+          </svg>
+        ) : (
+          <svg className="h-4 w-4 shrink-0 text-gray-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 7h16M6 12h12M9 17h6" />
+          </svg>
+        )}
+        <span className="max-w-[140px] truncate">{applying ? "Updating…" : label()}</span>
         <svg className={`ml-0.5 h-4 w-4 shrink-0 text-gray-500 transition-transform ${open ? "rotate-180" : ""}`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
         </svg>
@@ -106,14 +127,22 @@ export function SourceLabelFilter() {
               );
             })}
           </div>
+          {err && <div className="mt-2 rounded bg-red-50 px-2 py-1 text-[11px] text-red-700">{err}</div>}
           <div className="mt-3 flex items-center justify-between border-t border-gray-100 pt-2">
             <span className="text-[11px] text-gray-500">{allSelected ? `All ${allLabels.length}` : `${selected.size} of ${allLabels.length}`} selected</span>
             <button
               onClick={() => { apply(selected); setOpen(false); }}
-              className="rounded-md px-3 py-1.5 text-xs font-medium text-white transition-colors"
-              style={{ backgroundColor: "#FF3621" }}
+              disabled={applying}
+              className="flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-medium text-white transition-colors disabled:cursor-not-allowed"
+              style={{ backgroundColor: applying ? "#FFA390" : "#FF3621" }}
             >
-              Apply
+              {applying && (
+                <svg className="h-3 w-3 animate-spin" viewBox="0 0 24 24" fill="none">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                </svg>
+              )}
+              {applying ? "Applying…" : "Apply"}
             </button>
           </div>
         </div>

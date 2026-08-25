@@ -113,7 +113,9 @@ export function MvSourcesSection() {
       });
       const body = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(body.detail || `HTTP ${res.status}`);
-      await queryClient.invalidateQueries({ queryKey: ["mv-sources"] });
+      // Refresh the sources list AND every dashboard tab — the unified views just
+      // changed, so all visuals should refetch (the global progress bar reflects it).
+      await queryClient.invalidateQueries();
       resetForm();
       setOpen(false);
     } catch (e) {
@@ -130,7 +132,9 @@ export function MvSourcesSection() {
       const res = await fetch(`/api/settings/mv-sources?label=${encodeURIComponent(lbl)}`, { method: "DELETE" });
       const body = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(body.detail || `HTTP ${res.status}`);
-      await queryClient.invalidateQueries({ queryKey: ["mv-sources"] });
+      // Refresh the sources list AND every dashboard tab — the unified views just
+      // changed, so all visuals should refetch (the global progress bar reflects it).
+      await queryClient.invalidateQueries();
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
