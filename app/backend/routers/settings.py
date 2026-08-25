@@ -1108,10 +1108,12 @@ async def preview_mv_source(catalog: str, schema: str) -> dict:
 @router.post("/mv-sources")
 async def add_mv_source(request: Request, body: dict) -> dict:
     """Add (or replace by label) an additional MV source and rebuild the unified
-    views. Admin-only. The source's tables must match the app's MV structure."""
-    _require_admin(request)
+    views. The source's tables must match the app's MV structure.
+
+    Not gated on the app admin role — registering a shared-view source only ever
+    adds read-only data on top of this workspace's own, never replacing it."""
     from backend.db import get_mv_sources, save_mv_sources, get_catalog_schema
-    from backend.materialized_views import rebuild_unified_views
+    from backend.materialized_views import rebuild_unified_views, _MV_TABLES
 
     label = (body.get("label") or "").strip()
     catalog = (body.get("catalog") or "").strip()
@@ -1122,8 +1124,19 @@ async def add_mv_source(request: Request, body: dict) -> dict:
     if catalog == cat and schema == sch:
         raise HTTPException(status_code=400, detail="Source cannot be the app's own catalog.schema.")
 
+    # Optional per-source view selection (multiselect in the Browse UI). None means
+    # "include every matching view" (backward-compatible with pre-picker sources).
+    tables = body.get("tables")
+    if tables is not None:
+        tables = [t for t in tables if t in _MV_TABLES]
+        if not tables:
+            raise HTTPException(status_code=400, detail="Select at least one view to include.")
+
     sources = [s for s in get_mv_sources() if s.get("label") != label]
-    sources.append({"label": label, "catalog": catalog, "schema": schema})
+    entry = {"label": label, "catalog": catalog, "schema": schema}
+    if tables is not None:
+        entry["tables"] = tables
+    sources.append(entry)
     save_mv_sources(sources)
     summary = await asyncio.to_thread(rebuild_unified_views)
     _invalidate_mv_caches()
@@ -1132,8 +1145,7 @@ async def add_mv_source(request: Request, body: dict) -> dict:
 
 @router.delete("/mv-sources")
 async def remove_mv_source(request: Request, label: str = None) -> dict:
-    """Remove an additional MV source by label and rebuild unified views. Admin-only."""
-    _require_admin(request)
+    """Remove an additional MV source by label and rebuild unified views."""
     from backend.db import get_mv_sources, save_mv_sources
     from backend.materialized_views import rebuild_unified_views
 

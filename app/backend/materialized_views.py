@@ -1910,6 +1910,12 @@ def rebuild_unified_views(catalog: str | None = None, schema: str | None = None)
         selects = [f"SELECT *, '{local_label}' AS source_label FROM {local_full}"]
         included, skipped = [get_local_source_label()], []
         for src in sources:
+            # A source may restrict which views it contributes (chosen via the
+            # multiselect at add time). No `tables` key => contribute every matching
+            # view (legacy sources added before the picker existed).
+            sel = src.get("tables")
+            if sel is not None and t not in sel:
+                continue
             full = f"`{src['catalog']}`.`{src['schema']}`.`{t}`"
             cols = _table_columns(full)
             if cols is None:

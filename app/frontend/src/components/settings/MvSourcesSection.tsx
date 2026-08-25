@@ -5,18 +5,26 @@ interface MvSource {
   label: string;
   catalog: string;
   schema: string;
+  tables?: string[];
+}
+
+interface PreviewTable {
+  table: string;
+  status: "match" | "mismatch" | "absent";
 }
 
 interface PreviewResult {
   matched: number;
   total: number;
-  tables: { table: string; status: "match" | "mismatch" | "absent" }[];
+  tables: PreviewTable[];
 }
 
 // Settings → Config: register additional materialized-view source locations
 // (typically Delta-shared in from another workspace) whose tables share the app's
 // MV structure. They are unioned into every MV read (additive — local data always
-// included) and tagged with the source's label for later filtering.
+// included) and tagged with the source's label for later filtering. After a
+// catalog + schema is chosen, the views actually present in that schema are listed
+// and the user multiselects which ones to include.
 export function MvSourcesSection() {
   const queryClient = useQueryClient();
 
@@ -35,6 +43,7 @@ export function MvSourcesSection() {
   const [schemas, setSchemas] = useState<string[]>([]);
   const [preview, setPreview] = useState<PreviewResult | null>(null);
   const [previewing, setPreviewing] = useState(false);
+  const [selected, setSelected] = useState<Set<string>>(new Set());
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -49,27 +58,48 @@ export function MvSourcesSection() {
     setSchema("");
     setSchemas([]);
     setPreview(null);
+    setSelected(new Set());
     if (!catalog) return;
     fetch(`/api/setup/list-schemas?catalog=${encodeURIComponent(catalog)}`)
       .then((r) => r.json()).then((r) => setSchemas(r.schemas ?? [])).catch(() => setSchemas([]));
   }, [catalog]);
 
-  // Probe structure match whenever a full location is chosen.
+  // Probe the chosen location whenever a full catalog.schema is selected; default the
+  // selection to every view whose structure matches this app's.
   useEffect(() => {
     setPreview(null);
+    setSelected(new Set());
     if (!catalog || !schema) return;
     setPreviewing(true);
     fetch(`/api/settings/mv-sources/preview?catalog=${encodeURIComponent(catalog)}&schema=${encodeURIComponent(schema)}`)
       .then((r) => r.json())
-      .then((r) => setPreview(r))
+      .then((r: PreviewResult) => {
+        setPreview(r);
+        setSelected(new Set((r.tables || []).filter((t) => t.status === "match").map((t) => t.table)));
+      })
       .catch(() => setPreview(null))
       .finally(() => setPreviewing(false));
   }, [catalog, schema]);
 
-  const canAdd = Boolean(label.trim() && catalog && schema && preview && preview.matched > 0 && !busy);
+  // Views actually present in the shared schema (match or column-mismatch); absent
+  // ones aren't shown. Only matching views can be selected — a column mismatch can't
+  // be unioned into the app's structure.
+  const presentTables = (preview?.tables ?? []).filter((t) => t.status !== "absent");
+  const matchableCount = presentTables.filter((t) => t.status === "match").length;
+
+  const toggle = (table: string) => {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(table)) next.delete(table);
+      else next.add(table);
+      return next;
+    });
+  };
+
+  const canAdd = Boolean(label.trim() && catalog && schema && selected.size > 0 && !busy);
 
   const resetForm = () => {
-    setCatalog(""); setSchema(""); setLabel(""); setPreview(null); setError(null);
+    setCatalog(""); setSchema(""); setLabel(""); setPreview(null); setSelected(new Set()); setError(null);
   };
 
   const addSource = async () => {
@@ -79,7 +109,7 @@ export function MvSourcesSection() {
       const res = await fetch("/api/settings/mv-sources", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ label: label.trim(), catalog, schema }),
+        body: JSON.stringify({ label: label.trim(), catalog, schema, tables: Array.from(selected) }),
       });
       const body = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(body.detail || `HTTP ${res.status}`);
@@ -136,6 +166,9 @@ export function MvSourcesSection() {
             <div key={s.label} className="flex items-center gap-2 rounded-md border border-gray-100 bg-gray-50 px-2.5 py-1.5">
               <span className="rounded-full border border-amber-200 bg-amber-50 px-1.5 py-0.5 text-[10px] font-medium text-amber-700">{s.label}</span>
               <span className="min-w-0 flex-1 truncate font-mono text-xs text-gray-600">{s.catalog}.{s.schema}</span>
+              <span className="shrink-0 text-[10px] text-gray-500">
+                {s.tables ? `${s.tables.length} view${s.tables.length === 1 ? "" : "s"}` : "all views"}
+              </span>
               <button onClick={() => removeSource(s.label)} disabled={busy} className="shrink-0 text-xs font-medium text-gray-500 hover:text-red-600 disabled:opacity-50">
                 Remove
               </button>
@@ -164,14 +197,62 @@ export function MvSourcesSection() {
           </div>
 
           {catalog && schema && (
-            <div className="text-[11px]">
+            <div className="space-y-1.5">
               {previewing ? (
-                <span className="text-gray-500">Checking view structure…</span>
+                <span className="text-[11px] text-gray-500">Reading views in this schema…</span>
               ) : preview ? (
-                preview.matched > 0 ? (
-                  <span className="text-green-700">{preview.matched} of {preview.total} views match and will be included.</span>
+                presentTables.length === 0 ? (
+                  <span className="text-[11px] text-red-600">
+                    No summary views found at this location — check that the shared schema holds this app's views.
+                  </span>
                 ) : (
-                  <span className="text-red-600">No matching views found at this location — check that the shared schema holds this app's summary views.</span>
+                  <>
+                    <div className="flex items-center justify-between">
+                      <label className="block text-[11px] font-medium text-gray-700">
+                        Views to include ({selected.size} of {matchableCount})
+                      </label>
+                      {matchableCount > 0 && (
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setSelected(
+                              selected.size === matchableCount
+                                ? new Set()
+                                : new Set(presentTables.filter((t) => t.status === "match").map((t) => t.table))
+                            )
+                          }
+                          className="text-[10px] font-medium text-[#FF3621] hover:underline"
+                        >
+                          {selected.size === matchableCount ? "Clear all" : "Select all"}
+                        </button>
+                      )}
+                    </div>
+                    <div className="max-h-40 space-y-1 overflow-y-auto rounded-md border border-gray-200 bg-white p-1.5">
+                      {presentTables.map((t) => {
+                        const isMatch = t.status === "match";
+                        return (
+                          <label
+                            key={t.table}
+                            className={`flex items-center gap-2 rounded px-1.5 py-1 text-xs ${isMatch ? "cursor-pointer hover:bg-gray-50" : "cursor-not-allowed opacity-60"}`}
+                          >
+                            <input
+                              type="checkbox"
+                              disabled={!isMatch}
+                              checked={selected.has(t.table)}
+                              onChange={() => toggle(t.table)}
+                              className="h-3.5 w-3.5 rounded border-gray-300 text-[#FF3621] focus:ring-[#FF3621]"
+                            />
+                            <span className="min-w-0 flex-1 truncate font-mono text-gray-700">{t.table}</span>
+                            {isMatch ? (
+                              <span className="shrink-0 rounded-full bg-green-50 px-1.5 py-0.5 text-[10px] font-medium text-green-700">matches</span>
+                            ) : (
+                              <span className="shrink-0 rounded-full bg-gray-100 px-1.5 py-0.5 text-[10px] font-medium text-gray-500" title="Column structure differs from this app's view — cannot be unioned.">structure differs</span>
+                            )}
+                          </label>
+                        );
+                      })}
+                    </div>
+                  </>
                 )
               ) : null}
             </div>

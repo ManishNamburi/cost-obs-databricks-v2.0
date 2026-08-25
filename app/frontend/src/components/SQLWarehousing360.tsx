@@ -429,12 +429,16 @@ export function SQLWarehousing360({ sqlBreakdownData: _sqlBreakdownData, queryDa
   // "not available" banner prematurely.
   const hasQueryData = queryData != null ? queryData.available : undefined;
 
+  // Detection logic (queryData.region_scope) is retained server-side and above; the
+  // banner itself is suppressed for now. Flip to true to re-enable the UI callout.
+  const SHOW_REGION_SCOPE_BANNER = false;
+
   return (
     <div className="space-y-6">
       {/* Region-scope banner — system.compute / system.query are region-scoped, so
           SQL/warehouse detail only covers workspaces in this metastore's region even
           though account-wide billing (spend totals) spans all regions. */}
-      {queryData?.region_scope?.limited && (
+      {SHOW_REGION_SCOPE_BANNER && queryData?.region_scope?.limited && (
         <div className="rounded-lg border border-amber-200 bg-amber-50 p-4">
           <div className="flex items-start gap-3">
             <svg className="mt-0.5 h-5 w-5 shrink-0 text-amber-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">

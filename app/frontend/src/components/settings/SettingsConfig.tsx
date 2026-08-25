@@ -336,6 +336,35 @@ export function SettingsConfig({
                   </div>
                 </div>
               )}
+              {/* App source code (workspace) + backend (Databricks Apps) */}
+              {appLinks && (appLinks.source_code_url || appLinks.app_page_url) && (
+                <div className="rounded-lg border border-gray-200 bg-white p-3 space-y-2">
+                  {appLinks.source_code_url && (
+                    <a href={appLinks.source_code_url} target="_blank" rel="noopener noreferrer" className="group flex items-center gap-2 text-xs text-gray-700 hover:text-[#FF3621]">
+                      <svg className="h-4 w-4 shrink-0 text-gray-400 group-hover:text-[#FF3621]" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4" />
+                      </svg>
+                      <span className="font-medium">App source code</span>
+                      <span className="text-gray-500">in workspace</span>
+                      <svg className="h-3 w-3 shrink-0 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
+                      </svg>
+                    </a>
+                  )}
+                  {appLinks.app_page_url && (
+                    <a href={appLinks.app_page_url} target="_blank" rel="noopener noreferrer" className="group flex items-center gap-2 text-xs text-gray-700 hover:text-[#FF3621]">
+                      <svg className="h-4 w-4 shrink-0 text-gray-400 group-hover:text-[#FF3621]" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 12h14M5 12a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v4a2 2 0 01-2 2M5 12a2 2 0 00-2 2v4a2 2 0 002 2h14a2 2 0 002-2v-4a2 2 0 00-2-2m-2-4h.01M17 16h.01" />
+                      </svg>
+                      <span className="font-medium">App backend</span>
+                      <span className="text-gray-500">in Databricks Apps</span>
+                      <svg className="h-3 w-3 shrink-0 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
+                      </svg>
+                    </a>
+                  )}
+                </div>
+              )}
             </div>
           </div>
 
@@ -382,46 +411,6 @@ export function SettingsConfig({
                 </div>
               )}
             </div>
-
-            {/* App links — source code in the workspace + backend in Databricks Apps */}
-            {appLinks && (appLinks.source_code_url || appLinks.app_page_url) && (
-              <div className="mb-3 rounded-lg border border-gray-200 bg-white p-3 space-y-2">
-                {appLinks.source_code_url && (
-                  <a
-                    href={appLinks.source_code_url}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="group flex items-center gap-2 text-xs text-gray-700 hover:text-[#FF3621]"
-                  >
-                    <svg className="h-4 w-4 shrink-0 text-gray-400 group-hover:text-[#FF3621]" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4" />
-                    </svg>
-                    <span className="font-medium">App source code</span>
-                    <span className="text-gray-500">in workspace</span>
-                    <svg className="h-3 w-3 shrink-0 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
-                    </svg>
-                  </a>
-                )}
-                {appLinks.app_page_url && (
-                  <a
-                    href={appLinks.app_page_url}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="group flex items-center gap-2 text-xs text-gray-700 hover:text-[#FF3621]"
-                  >
-                    <svg className="h-4 w-4 shrink-0 text-gray-400 group-hover:text-[#FF3621]" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 12h14M5 12a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v4a2 2 0 01-2 2M5 12a2 2 0 00-2 2v4a2 2 0 002 2h14a2 2 0 002-2v-4a2 2 0 00-2-2m-2-4h.01M17 16h.01" />
-                    </svg>
-                    <span className="font-medium">App backend</span>
-                    <span className="text-gray-500">in Databricks Apps</span>
-                    <svg className="h-3 w-3 shrink-0 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
-                    </svg>
-                  </a>
-                )}
-              </div>
-            )}
 
             {/* Additional MV sources (shared views from other workspaces) */}
             <MvSourcesSection />
