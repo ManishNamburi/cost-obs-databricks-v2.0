@@ -405,31 +405,118 @@ def _valid_mv_source(s: object) -> bool:
 def get_mv_sources() -> list[dict]:
     """Additional MV source locations to union into MV reads.
 
-    Each entry: {"label": str, "catalog": str, "schema": str}. Local file first,
-    then DBFS (survives git redeploys). Never raises — returns [] on any error.
+    Each entry: {"label": str, "catalog": str, "schema": str, "tables"?: list[str]}.
+    Read order: local .settings file (fast, present during a worker's lifetime), then
+    a durable Delta table (survives git redeploys and works where DBFS is disabled —
+    e.g. GCP), then DBFS (legacy). Never raises — returns [] on any error.
     """
     try:
         with open(_MV_SOURCES_FILE) as f:
             data = json.load(f)
+        # A present file is authoritative for this worker — even when it's an empty
+        # list (the user removed every source), so we don't resurrect stale entries.
         if isinstance(data, list):
             return [s for s in data if _valid_mv_source(s)]
     except (FileNotFoundError, json.JSONDecodeError, OSError):
         pass
+    # File missing (fresh redeploy wiped .settings) — restore from the durable stores.
+    delta = read_delta_mv_sources()
+    if delta:
+        return [s for s in delta if _valid_mv_source(s)]
     dbfs = read_dbfs_mv_sources()
     return [s for s in dbfs if _valid_mv_source(s)] if dbfs else []
 
 
 def save_mv_sources(sources: list[dict]) -> None:
-    """Persist additional MV sources (local file + DBFS)."""
-    clean = [
-        {"label": s["label"].strip(), "catalog": s["catalog"].strip(), "schema": s["schema"].strip()}
-        for s in sources if _valid_mv_source(s)
-    ]
+    """Persist additional MV sources: local .settings file (fast) + durable Delta
+    table (survives redeploys) + DBFS (legacy best-effort). Preserves the optional
+    per-source `tables` selection from the Browse multiselect."""
+    clean: list[dict] = []
+    for s in sources:
+        if not _valid_mv_source(s):
+            continue
+        entry = {"label": s["label"].strip(), "catalog": s["catalog"].strip(), "schema": s["schema"].strip()}
+        if isinstance(s.get("tables"), list):
+            picked = [str(t).strip() for t in s["tables"] if str(t).strip()]
+            if picked:
+                entry["tables"] = picked
+        clean.append(entry)
     os.makedirs(os.path.dirname(_MV_SOURCES_FILE), exist_ok=True)
     with open(_MV_SOURCES_FILE, "w") as f:
         json.dump(clean, f, indent=2)
+    write_delta_mv_sources(clean)
     write_dbfs_mv_sources(clean)
     logger.info("MV sources saved: %s", [s["label"] for s in clean])
+
+
+def _mv_sources_table() -> str:
+    """Fully-qualified Delta table for durable MV-source persistence, or '' when the
+    storage location isn't configured yet."""
+    catalog, schema = get_catalog_schema()
+    if not catalog or not schema:
+        return ""
+    return f"`{catalog}`.`{schema}`.`app_mv_sources`"
+
+
+def _ensure_mv_sources_table() -> None:
+    """Create the durable MV-sources table if it doesn't exist."""
+    table = _mv_sources_table()
+    if not table:
+        return
+    execute_write(
+        f"CREATE TABLE IF NOT EXISTS {table} "
+        f"(label STRING NOT NULL, catalog STRING NOT NULL, schema STRING NOT NULL, "
+        f"tables STRING, updated_at TIMESTAMP) USING DELTA",
+        None,
+    )
+
+
+def read_delta_mv_sources() -> list[dict]:
+    """MV sources from the durable Delta table (survives redeploys). [] on any error."""
+    try:
+        table = _mv_sources_table()
+        if not table:
+            return []
+        _ensure_mv_sources_table()
+        rows = execute_query(f"SELECT label, catalog, schema, tables FROM {table}", None, no_cache=True)
+        out: list[dict] = []
+        for r in (rows or []):
+            entry = {"label": r.get("label"), "catalog": r.get("catalog"), "schema": r.get("schema")}
+            raw = r.get("tables")
+            if raw:
+                try:
+                    parsed = json.loads(raw)
+                    if isinstance(parsed, list) and parsed:
+                        entry["tables"] = [str(x) for x in parsed]
+                except (json.JSONDecodeError, TypeError):
+                    pass
+            out.append(entry)
+        return out
+    except Exception as e:
+        logger.debug("Could not read mv_sources from Delta (non-fatal): %s", e)
+        return []
+
+
+def write_delta_mv_sources(sources: list[dict]) -> None:
+    """Persist MV sources to the durable Delta table (replace-all). Best-effort."""
+    try:
+        table = _mv_sources_table()
+        if not table:
+            return
+        _ensure_mv_sources_table()
+        execute_write(f"DELETE FROM {table}", None)
+        for s in sources:
+            execute_write(
+                f"INSERT INTO {table} (label, catalog, schema, tables, updated_at) "
+                f"VALUES (:label, :catalog, :schema, :tables, current_timestamp())",
+                {
+                    "label": s["label"], "catalog": s["catalog"], "schema": s["schema"],
+                    "tables": json.dumps(s["tables"]) if isinstance(s.get("tables"), list) else None,
+                },
+            )
+        logger.info("MV sources persisted to Delta table (%d source(s))", len(sources))
+    except Exception as e:
+        logger.warning("Could not persist mv_sources to Delta (non-fatal): %s", e)
 
 
 def write_dbfs_mv_sources(sources: list[dict]) -> None:
