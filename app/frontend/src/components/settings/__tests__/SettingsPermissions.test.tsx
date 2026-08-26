@@ -104,12 +104,15 @@ function renderPermissions() {
 // ---------------------------------------------------------------------------
 
 describe("SettingsPermissions — SP identity panel", () => {
-  it("renders the SP client ID from auth-status", async () => {
+  it("renders the Service principal auth mode from auth-status", async () => {
+    // The Query-authentication group identifies the app's identity from auth-status.
+    // (The raw client-id UUID is no longer surfaced here — the panel identifies the SP
+    // by its display name, per the settings-revamp Access design.)
     mockApis(SP_AUTH_STATUS);
     renderPermissions();
 
     await waitFor(() => {
-      expect(screen.getByText("0000-aaaa-bbbb-1234")).toBeInTheDocument();
+      expect(screen.getAllByText(/service principal/i).length).toBeGreaterThan(0);
     });
   });
 
@@ -117,8 +120,10 @@ describe("SettingsPermissions — SP identity panel", () => {
     mockApis(SP_AUTH_STATUS);
     renderPermissions();
 
+    // The display name appears in more than one place (Running-as chip + the grant
+    // bundle's Target-SP chip), so match all occurrences.
     await waitFor(() => {
-      expect(screen.getByText("cost-observer-app-sp")).toBeInTheDocument();
+      expect(screen.getAllByText("cost-observer-app-sp").length).toBeGreaterThan(0);
     });
   });
 });

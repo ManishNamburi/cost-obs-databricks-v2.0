@@ -85,9 +85,13 @@ function fixActionLabel(check: DiagCheck): string {
   return "Show Fix";
 }
 
-/** Returns true when the fix text looks like SQL that should be rendered as a code block. */
+/** Returns true when the fix text looks like SQL that should be rendered as a code block.
+ * Requires BOTH a leading SQL keyword AND a statement-terminating semicolon — prose
+ * remediation that merely starts with a keyword word (e.g. "Drop and rebuild the
+ * materialized view…") has no semicolon and must render as prose, not a code block. */
 function fixIsSql(fix: string): boolean {
-  return /^\s*(GRANT|CREATE|DROP|ALTER|INSERT|USE |SHOW )/i.test(fix.trim());
+  const t = fix.trim();
+  return /^(GRANT|CREATE|DROP|ALTER|INSERT|USE|SHOW)\b/i.test(t) && /;/.test(t);
 }
 
 interface DiagResult {

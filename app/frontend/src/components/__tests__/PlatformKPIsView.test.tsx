@@ -29,6 +29,34 @@ function makeTableGranted(overrides: Record<string, boolean | undefined> = {}) {
   return (table: string) => overrides[table];
 }
 
+// Complete KPI payload so the card-rendering path is reached. The component
+// early-returns an empty state when `data` is undefined; the unavailable-vs-zero
+// invariant only applies once data exists and a grant is denied (a denied card
+// renders "—" regardless of its numeric value).
+const SAMPLE_DATA = {
+  total_queries: 100,
+  unique_query_users: 10,
+  total_rows_read: 1000,
+  total_bytes_read: 1000000,
+  total_compute_seconds: 500,
+  total_jobs: 20,
+  total_job_runs: 40,
+  successful_runs: 38,
+  total_job_run_hours: 12,
+  unique_job_owners: 5,
+  active_workspaces: 3,
+  avg_daily_workspaces: 2,
+  total_workspace_count: 4,
+  active_notebooks: 7,
+  models_served: 2,
+  total_serving_dbus: 50,
+  avg_daily_models: 1,
+  avg_daily_query_users: 8,
+  stickiness_pct: 60,
+  start_date: "2026-01-01",
+  end_date: "2026-01-31",
+};
+
 function renderView(tableOverrides: Record<string, boolean | undefined> = {}) {
   vi.mocked(useFeatureAvailability).mockReturnValue({
     warehouseGranted: true,
@@ -40,7 +68,7 @@ function renderView(tableOverrides: Record<string, boolean | undefined> = {}) {
   return render(
     <QueryClientProvider client={client}>
       <PlatformKPIsView
-        data={undefined}
+        data={SAMPLE_DATA}
         isLoading={false}
         spendAnomalies={undefined}
         anomaliesLoading={false}

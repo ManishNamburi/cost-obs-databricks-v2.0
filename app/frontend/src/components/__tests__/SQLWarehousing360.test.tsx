@@ -71,11 +71,11 @@ const BASE_BUNDLE_AVAILABLE: DBSQLDashboardBundle = {
 // ---------------------------------------------------------------------------
 
 describe("SQLWarehousing360 — available=false renders dependency-blocked panel", () => {
-  it("shows 'Query-level Cost Attribution Not Available' heading", () => {
+  it("shows the 'Query-level cost attribution is not available' heading", () => {
     renderSQLView({ available: false, start_date: "2026-01-01", end_date: "2026-01-31" });
 
     expect(
-      screen.getByText(/query-level cost attribution not available/i)
+      screen.getByText(/query-level cost attribution.*not available/i)
     ).toBeInTheDocument();
   });
 
@@ -85,12 +85,13 @@ describe("SQLWarehousing360 — available=false renders dependency-blocked panel
     expect(screen.queryByText(/total query spend/i)).not.toBeInTheDocument();
   });
 
-  it("shows the 'Create Materialized Views' setup button", () => {
+  it("shows the remediation guidance (grant system.query.history via Settings)", () => {
+    // The old "Create Materialized Views" button was removed; the dependency-blocked
+    // panel now points the admin at the GRANT SQL in Settings → Permissions.
     renderSQLView({ available: false, start_date: "2026-01-01", end_date: "2026-01-31" });
 
-    expect(
-      screen.getByRole("button", { name: /create materialized views/i })
-    ).toBeInTheDocument();
+    expect(screen.getByText(/system\.query\.history/i)).toBeInTheDocument();
+    expect(screen.getByText(/settings\s*→\s*permissions/i)).toBeInTheDocument();
   });
 });
 

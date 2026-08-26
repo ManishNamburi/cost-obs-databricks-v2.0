@@ -172,6 +172,57 @@ body {
    Activated by adding .dark-mode to <html>.
    ────────────────────────────────────────────────────── */
 
+/* ── DuBois settings-modal tokens ──────────────────────────────────────────
+   The settings modal is inline-styled from the `T` object in settings/dubois.tsx,
+   where every token is `var(--dob-*, <light fallback>)`. Defining the properties
+   here (light on :root, dark under .dark-mode) makes the whole modal theme-aware —
+   .dark-mode is on <html>, an ancestor of the portaled modal, so these cascade in.
+   Dark values are WCAG-AA checked against the dark surface; `primary-fill` stays
+   dark enough for white button text while `primary` lightens for link/accent text.
+   ────────────────────────────────────────────────────── */
+:root {
+  --dob-text: #11171C;
+  --dob-text-secondary: #5F7281;
+  --dob-text-faint: #8CA0B0;
+  --dob-primary: #2272B4;
+  --dob-primary-hover: #0E538B;
+  --dob-primary-fill: #2272B4;
+  --dob-primary-fill-hover: #0E538B;
+  --dob-border-control: #C4CFD8;
+  --dob-border-group: #E0E5EA;
+  --dob-border-row: #E8ECF0;
+  --dob-nav-bg: #FAFBFC;
+  --dob-code-bg: #F2F5F7;
+  --dob-surface: #FFFFFF;
+  --dob-success-fg: #277C43; --dob-success-bg: #EFFAF3; --dob-success-border: #BFE6CC;
+  --dob-warning-fg: #8A5C10; --dob-warning-bg: #FCF6E4; --dob-warning-border: #F2DDA5;
+  --dob-danger-fg: #C82D4C; --dob-danger-bg: #FBEBEF; --dob-danger-border: #EFB8C4;
+  --dob-toggle-off: #B6C2CC;
+  --dob-badge-bg: #FCF3DE;
+  --dob-navy: #1B3139;
+}
+.dark-mode {
+  --dob-text: #E6EAEE;
+  --dob-text-secondary: #AAB2BD;
+  --dob-text-faint: #808B99;
+  --dob-primary: #5AA6E4;
+  --dob-primary-hover: #86C0EE;
+  --dob-primary-fill: #2E6FB0;
+  --dob-primary-fill-hover: #3A82C9;
+  --dob-border-control: #565A61;
+  --dob-border-group: #3A3D41;
+  --dob-border-row: #34373B;
+  --dob-nav-bg: #23262A;
+  --dob-code-bg: #1F2226;
+  --dob-surface: #2C2F33;
+  --dob-success-fg: #57C784; --dob-success-bg: rgba(46,164,79,0.15); --dob-success-border: rgba(46,164,79,0.35);
+  --dob-warning-fg: #E3B341; --dob-warning-bg: rgba(210,153,34,0.15); --dob-warning-border: rgba(210,153,34,0.35);
+  --dob-danger-fg: #F27183; --dob-danger-bg: rgba(207,34,46,0.15); --dob-danger-border: rgba(207,34,46,0.40);
+  --dob-toggle-off: #565A61;
+  --dob-badge-bg: rgba(210,153,34,0.22);
+  --dob-navy: #11151A;
+}
+
 /* CSS custom properties for dark mode */
 .dark-mode {
   --dm-bg: #1B1F23;
@@ -238,11 +289,6 @@ body {
   color: #9CA3AF !important;
 }
 
-/* ── Header bar ── */
-.dark-mode [style*="background-color: rgb(27, 49, 57)"],
-.dark-mode [style*="backgroundColor"] {
-  /* Keep the dark header, just darken slightly */
-}
 
 /* ── Inputs and selects ── */
 .dark-mode input,
@@ -341,12 +387,6 @@ body {
 }
 .dark-mode .bg-orange-100 {
   background-color: rgba(255, 54, 33, 0.15) !important;
-}
-.dark-mode .bg-purple-50 {
-  background-color: rgba(163, 113, 247, 0.15) !important;
-}
-.dark-mode .bg-purple-100 {
-  background-color: rgba(163, 113, 247, 0.2) !important;
 }
 
 /* Colored borders for banners */
@@ -499,11 +539,6 @@ header.sticky {
 .dark-mode .text-orange-400,
 .dark-mode .text-orange-300 { color: #fed7aa !important; }
 
-.dark-mode .text-purple-700,
-.dark-mode .text-purple-800,
-.dark-mode .text-purple-900 { color: #c4b5fd !important; }
-.dark-mode .text-purple-600 { color: #a78bfa !important; }
-
 .dark-mode .text-red-700,
 .dark-mode .text-red-800 { color: #fca5a5 !important; }
 .dark-mode .text-red-600,
@@ -511,8 +546,6 @@ header.sticky {
 .dark-mode .text-red-400 { color: #fca5a5 !important; }
 
 /* ── Missing border colors ── */
-.dark-mode .border-purple-200,
-.dark-mode .border-purple-300 { border-color: rgba(163, 113, 247, 0.3) !important; }
 .dark-mode .border-emerald-200 { border-color: rgba(52, 211, 153, 0.3) !important; }
 
 /* ── Modal overlay opacity variants (bg-black/30, bg-black/40) ── */
@@ -542,6 +575,5 @@ header.sticky {
 .dark-mode .bg-green-200 { background-color: rgba(46, 164, 79, 0.25) !important; }
 .dark-mode .bg-blue-200  { background-color: rgba(74, 159, 216, 0.25) !important; }
 .dark-mode .bg-amber-200 { background-color: rgba(210, 153, 34, 0.25) !important; }
-.dark-mode .bg-purple-200 { background-color: rgba(163, 113, 247, 0.25) !important; }
 .dark-mode .bg-red-50    { background-color: rgba(207, 34, 46, 0.15) !important; }
 .dark-mode .bg-red-200   { background-color: rgba(207, 34, 46, 0.25) !important; }

@@ -90,16 +90,18 @@ describe("SettingsConfig — destructive action disabled in degraded state", () 
   it("'Drop Tables' button is disabled when a required table is missing", async () => {
     renderSettingsConfig(DEGRADED_TABLES);
 
-    // Wait for tables to load
-    const dropBtn = await screen.findByRole("button", { name: /drop tables/i });
-    expect(dropBtn).toBeDisabled();
+    // Wait for the async table-status fetch to resolve; the degraded guard is applied
+    // once tablesStatus loads (the button is always present, so findByRole alone would
+    // capture the pre-fetch, not-yet-disabled state).
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: /drop tables/i })).toBeDisabled()
+    );
   });
 
   it("shows a degraded-state warning when tables are missing", async () => {
     renderSettingsConfig(DEGRADED_TABLES);
 
-    await screen.findByRole("button", { name: /drop tables/i });
-    expect(screen.getByText(/table.*already missing|missing.*table/i)).toBeInTheDocument();
+    expect(await screen.findByText(/table.*already missing|missing.*table/i)).toBeInTheDocument();
   });
 
   it("confirm UI never appears in degraded state — hard block, no break-glass path", async () => {

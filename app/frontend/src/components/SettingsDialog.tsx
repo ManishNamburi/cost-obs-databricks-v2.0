@@ -369,7 +369,7 @@ function SettingsShell({ onClose, onTabVisibilityChange, onSettingsChange, tabVi
         style={{
           display: "flex", alignItems: "center", gap: 6, width: "100%", textAlign: "left",
           padding: "7px 10px", borderRadius: 6, fontSize: 13, fontWeight: active ? 600 : 500,
-          color: active ? T.text : T.textSecondary, backgroundColor: active ? "#FFFFFF" : "transparent",
+          color: active ? T.text : T.textSecondary, backgroundColor: active ? T.surface : "transparent",
           border: active ? `1px solid ${T.borderGroup}` : "1px solid transparent", cursor: "pointer",
         }}>
         {label}{badge}
@@ -379,7 +379,7 @@ function SettingsShell({ onClose, onTabVisibilityChange, onSettingsChange, tabVi
 
   return (
     <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/30 p-4" onClick={(e) => e.target === e.currentTarget && requestClose()}>
-      <div style={{ width: "100%", maxWidth: 1120, height: "min(760px, 90vh)", backgroundColor: "#FFFFFF", borderRadius: 8, border: `1px solid ${T.borderGroup}`, boxShadow: "0 20px 60px rgba(0,0,0,0.25)", display: "flex", flexDirection: "column", overflow: "hidden" }} onClick={(e) => e.stopPropagation()}>
+      <div style={{ width: "100%", maxWidth: 1120, height: "min(760px, 90vh)", backgroundColor: T.surface, borderRadius: 8, border: `1px solid ${T.borderGroup}`, boxShadow: "0 20px 60px rgba(0,0,0,0.25)", display: "flex", flexDirection: "column", overflow: "hidden" }} onClick={(e) => e.stopPropagation()}>
         {/* Header */}
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "16px 20px", borderBottom: `1px solid ${T.borderGroup}` }}>
           <div>
@@ -412,7 +412,7 @@ function SettingsShell({ onClose, onTabVisibilityChange, onSettingsChange, tabVi
           </div>
 
           {/* Content */}
-          <div style={{ flex: 1, minHeight: 0, overflowY: "auto", backgroundColor: "#FFFFFF" }}>
+          <div style={{ flex: 1, minHeight: 0, overflowY: "auto", backgroundColor: T.surface }}>
             <div style={{ maxWidth: 720, padding: "20px 24px" }}>
               {overlay === "setup" && isAdmin && (
                 <SetupWizard embedded onComplete={() => {
@@ -445,9 +445,9 @@ function SettingsShell({ onClose, onTabVisibilityChange, onSettingsChange, tabVi
             {dirty && <span style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 12, color: T.warningFg }}><span style={{ width: 6, height: 6, borderRadius: 999, backgroundColor: "#E0A82E" }} />Unsaved changes</span>}
           </div>
           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-            <button onClick={requestClose} style={{ height: 32, borderRadius: 4, padding: "0 14px", fontSize: 13, fontWeight: 500, color: T.text, backgroundColor: "#FFFFFF", border: `1px solid ${T.borderControl}`, cursor: "pointer" }}>Cancel</button>
+            <button onClick={requestClose} style={{ height: 32, borderRadius: 4, padding: "0 14px", fontSize: 13, fontWeight: 500, color: T.text, backgroundColor: T.surface, border: `1px solid ${T.borderControl}`, cursor: "pointer" }}>Cancel</button>
             <button onClick={handleSave} disabled={!dirty}
-              style={{ height: 32, borderRadius: 4, padding: "0 14px", fontSize: 13, fontWeight: 500, color: "#FFFFFF", backgroundColor: dirty ? T.primary : "#A9C6DC", cursor: dirty ? "pointer" : "not-allowed", border: "none" }}>
+              style={{ height: 32, borderRadius: 4, padding: "0 14px", fontSize: 13, fontWeight: 500, color: "#FFFFFF", backgroundColor: dirty ? T.primaryFill : "#A9C6DC", cursor: dirty ? "pointer" : "not-allowed", border: "none" }}>
               Save changes
             </button>
           </div>
@@ -461,7 +461,7 @@ function footerLink(active: boolean): React.CSSProperties {
   return {
     display: "flex", alignItems: "center", gap: 6, width: "100%", textAlign: "left",
     padding: "6px 10px", borderRadius: 6, fontSize: 12.5, fontWeight: active ? 600 : 500,
-    color: active ? T.text : T.textSecondary, backgroundColor: active ? "#FFFFFF" : "transparent",
+    color: active ? T.text : T.textSecondary, backgroundColor: active ? T.surface : "transparent",
     border: active ? `1px solid ${T.borderGroup}` : "1px solid transparent", cursor: "pointer",
   };
 }

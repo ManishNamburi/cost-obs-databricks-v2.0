@@ -3,29 +3,41 @@ import type { ReactNode } from "react";
 
 // DuBois product-UI tokens (spec §3). Scoped to the Settings modal only — the rest of
 // the app keeps its marketing-brand orange. Red means danger only; toggles are blue.
+//
+// Each token is a CSS custom property (`var(--dob-*, <light fallback>)`) so the modal
+// is theme-aware: the light values are defined on :root in index.css and overridden
+// under .dark-mode, which cascades to this portaled modal. The hex fallback means the
+// modal still renders correctly if the stylesheet hasn't loaded. `surface` is the
+// panel/input background (was hardcoded #FFFFFF, which couldn't adapt to dark).
 export const T = {
-  text: "#11171C",
-  textSecondary: "#5F7281",
-  textFaint: "#8CA0B0",
-  primary: "#2272B4",
-  primaryHover: "#0E538B",
-  borderControl: "#C4CFD8",
-  borderGroup: "#E0E5EA",
-  borderRow: "#E8ECF0",
-  navBg: "#FAFBFC",
-  codeBg: "#F2F5F7",
-  successFg: "#277C43",
-  successBg: "#EFFAF3",
-  successBorder: "#BFE6CC",
-  warningFg: "#8A5C10",
-  warningBg: "#FCF6E4",
-  warningBorder: "#F2DDA5",
-  dangerFg: "#C82D4C",
-  dangerBg: "#FBEBEF",
-  dangerBorder: "#EFB8C4",
-  toggleOff: "#B6C2CC",
-  badgeBg: "#FCF3DE",
-  navy: "#1B3139",
+  text: "var(--dob-text, #11171C)",
+  textSecondary: "var(--dob-text-secondary, #5F7281)",
+  textFaint: "var(--dob-text-faint, #8CA0B0)",
+  primary: "var(--dob-primary, #2272B4)",
+  primaryHover: "var(--dob-primary-hover, #0E538B)",
+  // Filled-button background (white text on top). Separate from `primary` so that in
+  // dark mode `primary` can lighten for link/accent text while the button fill stays
+  // dark enough for white text to pass WCAG AA.
+  primaryFill: "var(--dob-primary-fill, #2272B4)",
+  primaryFillHover: "var(--dob-primary-fill-hover, #0E538B)",
+  borderControl: "var(--dob-border-control, #C4CFD8)",
+  borderGroup: "var(--dob-border-group, #E0E5EA)",
+  borderRow: "var(--dob-border-row, #E8ECF0)",
+  navBg: "var(--dob-nav-bg, #FAFBFC)",
+  codeBg: "var(--dob-code-bg, #F2F5F7)",
+  surface: "var(--dob-surface, #FFFFFF)",
+  successFg: "var(--dob-success-fg, #277C43)",
+  successBg: "var(--dob-success-bg, #EFFAF3)",
+  successBorder: "var(--dob-success-border, #BFE6CC)",
+  warningFg: "var(--dob-warning-fg, #8A5C10)",
+  warningBg: "var(--dob-warning-bg, #FCF6E4)",
+  warningBorder: "var(--dob-warning-border, #F2DDA5)",
+  dangerFg: "var(--dob-danger-fg, #C82D4C)",
+  dangerBg: "var(--dob-danger-bg, #FBEBEF)",
+  dangerBorder: "var(--dob-danger-border, #EFB8C4)",
+  toggleOff: "var(--dob-toggle-off, #B6C2CC)",
+  badgeBg: "var(--dob-badge-bg, #FCF3DE)",
+  navy: "var(--dob-navy, #1B3139)",
 } as const;
 
 export const MONO = '"SF Mono", Menlo, Consolas, "Liberation Mono", monospace';
@@ -48,7 +60,7 @@ export function Group({ label, children, danger }: { label?: string; children: R
   return (
     <div className="mb-5">
       {label && <div style={{ fontSize: 13, fontWeight: 600, color: T.text, marginBottom: 8 }}>{label}</div>}
-      <div style={{ border: `1px solid ${danger ? T.dangerBorder : T.borderGroup}`, borderRadius: 8, overflow: "hidden", backgroundColor: danger ? T.dangerBg : "#FFFFFF" }}>
+      <div style={{ border: `1px solid ${danger ? T.dangerBorder : T.borderGroup}`, borderRadius: 8, overflow: "hidden", backgroundColor: danger ? T.dangerBg : T.surface }}>
         {children}
       </div>
     </div>
@@ -114,7 +126,7 @@ export function Select<V extends string | number>({ value, onChange, options, di
       }}
       style={{
         height: 32, borderRadius: 4, border: `1px solid ${T.borderControl}`, padding: "0 10px",
-        fontSize: 13, color: T.text, backgroundColor: disabled ? T.codeBg : "#FFFFFF",
+        fontSize: 13, color: T.text, backgroundColor: disabled ? T.codeBg : T.surface,
         cursor: disabled ? "not-allowed" : "pointer", minWidth: 160,
       }}
     >
@@ -137,7 +149,7 @@ export function TextInput({ value, onChange, placeholder, mono, disabled, width 
       style={{
         height: 32, borderRadius: 4, border: `1px solid ${T.borderControl}`, padding: "0 10px",
         fontSize: 13, color: T.text, fontFamily: mono ? MONO : undefined,
-        width: width ?? 280, backgroundColor: disabled ? T.codeBg : "#FFFFFF",
+        width: width ?? 280, backgroundColor: disabled ? T.codeBg : T.surface,
       }}
     />
   );
@@ -182,7 +194,7 @@ export function PrimaryButton({ children, onClick, disabled }: { children: React
       onMouseEnter={() => setHover(true)} onMouseLeave={() => setHover(false)}
       style={{
         height: 32, borderRadius: 4, padding: "0 14px", fontSize: 13, fontWeight: 500, color: "#FFFFFF",
-        backgroundColor: disabled ? "#A9C6DC" : hover ? T.primaryHover : T.primary,
+        backgroundColor: disabled ? "#A9C6DC" : hover ? T.primaryFillHover : T.primaryFill,
         cursor: disabled ? "not-allowed" : "pointer", border: "none",
       }}
     >
@@ -195,7 +207,7 @@ export function SecondaryButton({ children, onClick, disabled }: { children: Rea
   return (
     <button
       type="button" onClick={onClick} disabled={disabled}
-      style={{ height: 32, borderRadius: 4, padding: "0 14px", fontSize: 13, fontWeight: 500, color: T.text, backgroundColor: "#FFFFFF", border: `1px solid ${T.borderControl}`, cursor: disabled ? "not-allowed" : "pointer", opacity: disabled ? 0.5 : 1 }}
+      style={{ height: 32, borderRadius: 4, padding: "0 14px", fontSize: 13, fontWeight: 500, color: T.text, backgroundColor: T.surface, border: `1px solid ${T.borderControl}`, cursor: disabled ? "not-allowed" : "pointer", opacity: disabled ? 0.5 : 1 }}
     >
       {children}
     </button>
@@ -206,7 +218,7 @@ export function DangerOutlineButton({ children, onClick, disabled }: { children:
   return (
     <button
       type="button" onClick={onClick} disabled={disabled}
-      style={{ height: 32, borderRadius: 4, padding: "0 14px", fontSize: 13, fontWeight: 500, color: disabled ? T.textFaint : T.dangerFg, backgroundColor: "#FFFFFF", border: `1px solid ${disabled ? T.borderControl : T.dangerBorder}`, cursor: disabled ? "not-allowed" : "pointer", opacity: disabled ? 0.7 : 1 }}
+      style={{ height: 32, borderRadius: 4, padding: "0 14px", fontSize: 13, fontWeight: 500, color: disabled ? T.textFaint : T.dangerFg, backgroundColor: T.surface, border: `1px solid ${disabled ? T.borderControl : T.dangerBorder}`, cursor: disabled ? "not-allowed" : "pointer", opacity: disabled ? 0.7 : 1 }}
     >
       {children}
     </button>
