@@ -354,8 +354,8 @@ function SettingsShell({ onClose, onTabVisibilityChange, onSettingsChange, tabVi
   const navItems: { key: NavKey; label: string; admin?: boolean }[] = [
     { key: "general", label: "General" },
     { key: "tabs", label: "Dashboard tabs" },
-    { key: "alerts", label: "Alerts & notifications", admin: true },
     { key: "data", label: "Data & tables", admin: true },
+    { key: "alerts", label: "Alerts & notifications", admin: true },
     { key: "access", label: "Access", admin: true },
     { key: "resources", label: "Resources" },
     { key: "experimental", label: "Experimental", admin: true },

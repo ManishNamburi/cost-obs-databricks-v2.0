@@ -458,11 +458,26 @@ def setup_materialized_views():
         # produced duplicate rows.) No separate flock here — that would
         # double-lock against the internal guard and self-deadlock.
         def _bg_refresh():
+            import time as _time
+            _bg_start = _time.monotonic()
             try:
                 logger.info("Refreshing materialized views in background (post-deploy, data is stale)...")
                 r = create_materialized_views(catalog, schema)
                 ok = sum(1 for v in r.values() if v == "created")
                 logger.info(f"Background MV refresh complete: {ok}/{len(r)} tables rebuilt")
+                # Record the startup/auto refresh in rebuild history — otherwise only
+                # manual "Rebuild now" and nightly runs (which go through _run_mv_refresh)
+                # ever appear, and the app's own refreshes look untracked.
+                try:
+                    from backend.routers.settings import append_refresh_history
+                    failed = [k for k, v in r.items() if isinstance(v, str) and v.startswith("error")]
+                    append_refresh_history(
+                        "partial_error" if failed else "success", "startup",
+                        duration_seconds=_time.monotonic() - _bg_start,
+                        error="; ".join(failed) if failed else None,
+                    )
+                except Exception as _hist_exc:
+                    logger.debug("Could not record startup refresh history: %s", _hist_exc)
                 try:
                     from backend.db import clear_query_cache, delta_cache_invalidate
                     clear_query_cache()
@@ -892,6 +907,17 @@ async def lifespan(app: FastAPI):
                         await _run_in_daemon_thread(lambda: _run_mv_refresh(lookback_days=lookback_days))
                         logger.info("Scheduled rebuild complete")
                         fcntl.flock(lf, fcntl.LOCK_UN)
+                        # Evaluate cost-alert thresholds against the freshly-refreshed data
+                        # and deliver breaches to Slack. Gated inside run_alert_check on a
+                        # webhook being configured (configuring one is the opt-in), so this
+                        # never posts unless the admin set it up.
+                        try:
+                            from backend.alerting import run_alert_check
+                            res = await _run_in_daemon_thread(lambda: run_alert_check(send=True))
+                            if res.get("sent"):
+                                logger.info("Nightly alert check: %d breach(es) posted to Slack", len(res.get("breaches", [])))
+                        except Exception as _alert_exc:
+                            logger.warning(f"Nightly alert check failed (non-fatal): {_alert_exc}")
                 except BlockingIOError:
                     logger.info("Rebuild already running in another worker — skipping")
             except asyncio.CancelledError:

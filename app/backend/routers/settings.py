@@ -295,6 +295,48 @@ def save_refresh_log_to_delta(log_data: dict) -> None:
         logger.debug("UC dual-write of refresh log skipped/failed (non-fatal): %s", e)
 
 
+def append_refresh_history(status: str, trigger: str, *, lookback_days: int | None = None,
+                           duration_seconds: float = 0, note: str | None = None,
+                           error: str | None = None) -> None:
+    """Append one entry to the rebuild-history log (file + Delta), keeping the last 20.
+
+    Used for refresh runs that don't go through app._run_mv_refresh (the startup/auto
+    build) and for config/lineage events like adding or removing a shared MV source, so
+    the Rebuild history reflects everything that changed the managed tables — not only
+    manual "Rebuild now" and nightly runs.
+    """
+    import json as _json
+    from datetime import datetime, timezone
+    log_dir = os.path.join(os.path.dirname(__file__), "..", "..", ".settings")
+    log_path = os.path.join(log_dir, "mv_refresh_log.json")
+    try:
+        log_data: dict = {}
+        try:
+            with open(log_path) as f:
+                log_data = _json.load(f)
+        except (FileNotFoundError, json.JSONDecodeError, OSError):
+            log_data = {}
+        entry: dict = {
+            "timestamp": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "status": status,
+            "duration_seconds": round(duration_seconds, 1),
+            "lookback_days": lookback_days,
+            "trigger": trigger,
+        }
+        if note:
+            entry["note"] = note
+        if error:
+            entry["error"] = error[:200]
+        history = (log_data.get("refresh_history") or []) + [entry]
+        log_data["refresh_history"] = history[-20:]
+        os.makedirs(log_dir, exist_ok=True)
+        with open(log_path, "w") as f:
+            _json.dump(log_data, f)
+        save_refresh_log_to_delta(log_data)
+    except Exception as e:
+        logger.debug("append_refresh_history (non-fatal): %s", e)
+
+
 def restore_refresh_log_from_delta() -> None:
     """Restore the MV refresh log to the .settings file at startup.
 
@@ -696,10 +738,21 @@ async def get_app_config():
     sp_client_id = os.getenv("DATABRICKS_CLIENT_ID", "")
     identity = {"display_name": sp_client_id, "user_name": sp_client_id} if sp_client_id else None
 
-    # Storage location: pure env var / override file read
+    # Storage location: env var / override file read. On GCP after a redeploy this can
+    # be empty (env unset, .settings wiped, DBFS disabled) until autodiscovery has run —
+    # which left the "Catalog & schema" chip showing just ".". Self-heal by discovering
+    # the location from where the MV tables already live, same as startup.
     storage_location = None
     try:
         catalog, schema = get_catalog_schema()
+        if not (catalog and schema):
+            try:
+                from backend.routers.setup import autodiscover_storage_location
+                discovered = autodiscover_storage_location()
+                if discovered:
+                    catalog, schema = discovered
+            except Exception as _disc_err:
+                logger.debug("Config storage auto-discovery skipped (non-fatal): %s", _disc_err)
         storage_location = {
             "catalog": catalog,
             "schema": schema,
@@ -858,7 +911,11 @@ async def _get_tables_status_inner(request: Request):
     ]
 
     results = []
-    _TABLE_CHECK_TIMEOUT = 12  # seconds — was 25; fail-fast on cold warehouse for better UX
+    # 30s — a warming warehouse (e.g. right after adding a shared source kicks off a
+    # unified-view rebuild) can take >12s to answer per-table probes; the old 12s
+    # produced spurious "?" error rows on healthy tables. Base-table probes are fast
+    # once warm, so this only extends the cold/contended case.
+    _TABLE_CHECK_TIMEOUT = 30
     import asyncio as _asyncio
     loop = _asyncio.get_running_loop()
 
@@ -1140,6 +1197,12 @@ async def add_mv_source(request: Request, body: dict) -> dict:
     save_mv_sources(sources)
     summary = await asyncio.to_thread(rebuild_unified_views)
     _invalidate_mv_caches()
+    # Record the source addition as a config/lineage step in the rebuild history.
+    n_views = len(tables) if tables is not None else len(_MV_TABLES)
+    await asyncio.to_thread(
+        append_refresh_history, "config", "config",
+        note=f"Added shared source '{label}' ({catalog}.{schema}, {n_views} view{'s' if n_views != 1 else ''})",
+    )
     return {"ok": True, "sources": sources, "build": summary}
 
 
@@ -1155,6 +1218,9 @@ async def remove_mv_source(request: Request, label: str = None) -> dict:
     save_mv_sources(sources)
     summary = await asyncio.to_thread(rebuild_unified_views)
     _invalidate_mv_caches()
+    await asyncio.to_thread(
+        append_refresh_history, "config", "config", note=f"Removed shared source '{label}'",
+    )
     return {"ok": True, "sources": sources, "build": summary}
 
 
@@ -1661,6 +1727,16 @@ async def send_webhook_alert(alert_data: dict[str, Any]) -> dict[str, Any]:
     except Exception as e:
         logger.error(f"Webhook alert failed: {e}")
         return {"success": False, "error": str(e)}
+
+
+@router.post("/alerts/run")
+async def run_alerts(request: Request, send: bool = True) -> dict[str, Any]:
+    """Evaluate the configured cost-alert thresholds against the latest spend and,
+    when a Slack webhook is set and `send`, post any breaches. Admin-only. This is the
+    manual trigger for the same check the nightly scheduler runs."""
+    _require_admin(request)
+    from backend.alerting import run_alert_check
+    return await asyncio.to_thread(run_alert_check, send)
 
 
 # ── User Permissions ──────────────────────────────────────────────────────────

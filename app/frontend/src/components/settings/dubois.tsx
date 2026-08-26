@@ -207,7 +207,7 @@ export function SecondaryButton({ children, onClick, disabled }: { children: Rea
   return (
     <button
       type="button" onClick={onClick} disabled={disabled}
-      style={{ height: 32, borderRadius: 4, padding: "0 14px", fontSize: 13, fontWeight: 500, color: T.text, backgroundColor: T.surface, border: `1px solid ${T.borderControl}`, cursor: disabled ? "not-allowed" : "pointer", opacity: disabled ? 0.5 : 1 }}
+      style={{ height: 32, borderRadius: 4, padding: "0 14px", fontSize: 13, fontWeight: 500, color: T.text, backgroundColor: T.surface, border: `1px solid ${T.borderControl}`, cursor: disabled ? "not-allowed" : "pointer", opacity: disabled ? 0.5 : 1, whiteSpace: "nowrap" }}
     >
       {children}
     </button>
@@ -218,7 +218,7 @@ export function DangerOutlineButton({ children, onClick, disabled }: { children:
   return (
     <button
       type="button" onClick={onClick} disabled={disabled}
-      style={{ height: 32, borderRadius: 4, padding: "0 14px", fontSize: 13, fontWeight: 500, color: disabled ? T.textFaint : T.dangerFg, backgroundColor: T.surface, border: `1px solid ${disabled ? T.borderControl : T.dangerBorder}`, cursor: disabled ? "not-allowed" : "pointer", opacity: disabled ? 0.7 : 1 }}
+      style={{ height: 32, borderRadius: 4, padding: "0 14px", fontSize: 13, fontWeight: 500, color: disabled ? T.textFaint : T.dangerFg, backgroundColor: T.surface, border: `1px solid ${disabled ? T.borderControl : T.dangerBorder}`, cursor: disabled ? "not-allowed" : "pointer", opacity: disabled ? 0.7 : 1, whiteSpace: "nowrap", flexShrink: 0 }}
     >
       {children}
     </button>

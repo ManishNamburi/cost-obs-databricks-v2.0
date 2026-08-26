@@ -67,8 +67,9 @@ export function SettingsConfig() {
         timestamp: string;
         status: string;
         duration_seconds: number;
-        lookback_days: number;
-        trigger: "manual" | "scheduled";
+        lookback_days: number | null;
+        trigger: "manual" | "scheduled" | "startup" | "config";
+        note?: string;
         error?: string;
       }>;
     } | null;
@@ -272,7 +273,8 @@ export function SettingsConfig() {
         const fmtWindow = (d: number) => (!d ? "—" : d === 180 ? "6 months" : d === 365 ? "1 year" : d === 730 ? "2 years" : d === 1095 ? "3 years" : `${d} days`);
         const fmtDuration = (s: number) => (s < 60 ? `${Math.round(s)}s` : `${Math.floor(s / 60)}m ${Math.round(s % 60)}s`);
         const fmtTs = (ts: string) => { try { return new Date(ts).toLocaleString(undefined, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit", timeZoneName: "short" }); } catch { return ts; } };
-        const toneFor = (s: string) => s === "success" ? T.successFg : s === "partial_error" ? T.warningFg : s === "dropped" ? T.textFaint : T.dangerFg;
+        const toneFor = (s: string) => s === "success" ? T.successFg : s === "partial_error" ? T.warningFg : s === "config" ? T.primary : s === "dropped" ? T.textFaint : T.dangerFg;
+        const resultLabel = (s: string) => s === "partial_error" ? "Partial" : s === "config" ? "Config" : s;
         return (
           <div style={{ marginTop: 16 }}>
             <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", marginBottom: 6 }}>
@@ -297,10 +299,13 @@ export function SettingsConfig() {
                     {[...history].reverse().slice(0, 10).map((e, i) => (
                       <tr key={i}>
                         <td style={{ ...td, fontFamily: MONO, fontSize: 11, color: T.textSecondary }}>{fmtTs(e.timestamp)}</td>
-                        <td style={{ ...td, color: T.textSecondary, textTransform: "capitalize" }}>{e.trigger}</td>
-                        <td style={{ ...td, textAlign: "right", color: T.textSecondary }}>{fmtWindow(e.lookback_days)}</td>
-                        <td style={{ ...td, textAlign: "right", color: T.textSecondary, fontVariantNumeric: "tabular-nums" }}>{e.status === "dropped" ? "—" : fmtDuration(e.duration_seconds)}</td>
-                        <td style={{ ...td, textAlign: "right", color: toneFor(e.status), fontWeight: 600, textTransform: "capitalize" }} title={e.error}>{e.status === "partial_error" ? "Partial" : e.status}</td>
+                        <td style={{ ...td, color: T.textSecondary }} title={e.note || undefined}>
+                          {/* Config/lineage events (e.g. adding a shared source) carry a note describing the change. */}
+                          {e.note ? e.note : <span style={{ textTransform: "capitalize" }}>{e.trigger}</span>}
+                        </td>
+                        <td style={{ ...td, textAlign: "right", color: T.textSecondary }}>{e.status === "config" ? "—" : fmtWindow(e.lookback_days ?? 0)}</td>
+                        <td style={{ ...td, textAlign: "right", color: T.textSecondary, fontVariantNumeric: "tabular-nums" }}>{e.status === "dropped" || e.status === "config" ? "—" : fmtDuration(e.duration_seconds)}</td>
+                        <td style={{ ...td, textAlign: "right", color: toneFor(e.status), fontWeight: 600, textTransform: "capitalize" }} title={e.error}>{resultLabel(e.status)}</td>
                       </tr>
                     ))}
                   </tbody>

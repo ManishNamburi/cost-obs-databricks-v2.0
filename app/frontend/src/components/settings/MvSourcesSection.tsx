@@ -147,24 +147,11 @@ export function MvSourcesSection() {
 
   return (
     <div className="mb-3 rounded-lg border border-gray-200 bg-white p-3">
-      <div className="mb-1 flex items-center justify-between">
-        <h4 className="text-sm font-semibold text-gray-900">Additional data (shared views)</h4>
-        {!open && (
-          <button onClick={() => setOpen(true)} className="text-xs font-medium text-[#2272B4] hover:underline">
-            + Add source
-          </button>
-        )}
-      </div>
-      <p className="mb-2 text-xs text-gray-500">
-        Include summary views shared in from another workspace (Delta Sharing). They must match this
-        app's view structure and are added on top of this workspace's data{data?.local_label ? <> (<span className="font-mono">{data.local_label}</span>)</> : null}, never replacing it.
-      </p>
+      <h4 className="mb-2 text-sm font-semibold text-gray-900">Additional data (shared views)</h4>
 
       {isLoading ? (
         <div className="text-xs text-gray-500">Loading…</div>
-      ) : sources.length === 0 && !open ? (
-        <div className="text-xs text-gray-500">No additional sources. Only this workspace's data is shown.</div>
-      ) : (
+      ) : sources.length > 0 ? (
         <div className="space-y-1.5">
           {sources.map((s) => (
             <div key={s.label} className="flex items-center gap-2 rounded-md border border-gray-100 bg-gray-50 px-2.5 py-1.5">
@@ -179,6 +166,20 @@ export function MvSourcesSection() {
             </div>
           ))}
         </div>
+      ) : null}
+
+      {/* Browse is the primary affordance for adding a Delta-shared source. */}
+      {!open && (
+        <button
+          onClick={() => setOpen(true)}
+          className="mt-2 inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-semibold text-white transition-colors"
+          style={{ backgroundColor: "#2272B4" }}
+        >
+          <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" />
+          </svg>
+          Browse{sources.length > 0 ? " for another source" : ""}
+        </button>
       )}
 
       {open && (

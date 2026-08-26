@@ -374,23 +374,83 @@ _MV_UNIFIED_TABLES_FILE = os.path.join(
 
 
 def get_unified_view_tables() -> list[str]:
-    """MV table names that currently have a built `<name>__unified` view."""
+    """MV table names that currently have a built `<name>__unified` view.
+
+    Read order: local .settings file (fast), then the durable Delta table (survives
+    redeploys AND is consistent across the app's multiple uvicorn workers — the file
+    is per-container and wiped on redeploy, so on its own it silently drops back to
+    base-table reads, which is why an added shared source stopped affecting the UI).
+    """
     try:
         with open(_MV_UNIFIED_TABLES_FILE) as f:
             data = json.load(f)
-        return [t for t in data if isinstance(t, str)] if isinstance(data, list) else []
+        if isinstance(data, list):
+            return [t for t in data if isinstance(t, str)]
     except (FileNotFoundError, json.JSONDecodeError, OSError):
-        return []
+        pass
+    return read_delta_unified_view_tables()
 
 
 def save_unified_view_tables(tables: list[str]) -> None:
-    """Record which MV tables have a built unified view (best-effort)."""
+    """Record which MV tables have a built unified view — local file (fast) + durable
+    Delta table (cross-worker + survives redeploys)."""
+    clean = [t for t in tables if isinstance(t, str)]
     try:
         os.makedirs(os.path.dirname(_MV_UNIFIED_TABLES_FILE), exist_ok=True)
         with open(_MV_UNIFIED_TABLES_FILE, "w") as f:
-            json.dump(list(tables), f)
+            json.dump(clean, f)
     except OSError as e:
-        logger.debug("Could not persist unified-view table list: %s", e)
+        logger.debug("Could not persist unified-view table list to file: %s", e)
+    write_delta_unified_view_tables(clean)
+
+
+def _unified_views_table() -> str:
+    catalog, schema = get_catalog_schema()
+    if not catalog or not schema:
+        return ""
+    return f"`{catalog}`.`{schema}`.`app_unified_views`"
+
+
+def _ensure_unified_views_table() -> None:
+    table = _unified_views_table()
+    if not table:
+        return
+    execute_write(
+        f"CREATE TABLE IF NOT EXISTS {table} "
+        f"(table_name STRING NOT NULL, updated_at TIMESTAMP) USING DELTA",
+        None,
+    )
+
+
+def read_delta_unified_view_tables() -> list[str]:
+    """Built-unified-view table names from the durable Delta table. [] on any error."""
+    try:
+        table = _unified_views_table()
+        if not table:
+            return []
+        _ensure_unified_views_table()
+        rows = execute_query(f"SELECT table_name FROM {table}", None, no_cache=True)
+        return [r["table_name"] for r in (rows or []) if r.get("table_name")]
+    except Exception as e:
+        logger.debug("Could not read unified-view list from Delta (non-fatal): %s", e)
+        return []
+
+
+def write_delta_unified_view_tables(tables: list[str]) -> None:
+    """Persist the built-unified-view list to the durable Delta table (replace-all)."""
+    try:
+        table = _unified_views_table()
+        if not table:
+            return
+        _ensure_unified_views_table()
+        execute_write(f"DELETE FROM {table}", None)
+        for t in tables:
+            execute_write(
+                f"INSERT INTO {table} (table_name, updated_at) VALUES (:t, current_timestamp())",
+                {"t": t},
+            )
+    except Exception as e:
+        logger.warning("Could not persist unified-view list to Delta (non-fatal): %s", e)
 
 
 def _valid_mv_source(s: object) -> bool:

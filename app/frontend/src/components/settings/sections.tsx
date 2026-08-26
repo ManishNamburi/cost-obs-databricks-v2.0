@@ -147,6 +147,7 @@ export function DashboardTabsSection({ localVisibility, toggleTab, enableUseCase
 // ── Alerts & notifications ──────────────────────────────────────────────────
 export function AlertsSection({ localSettings, updateSetting, caps }: CommonProps) {
   const toast = useToast();
+  const [checking, setChecking] = useState(false);
   const { data: webhookStatus } = useQuery<{ configured: boolean } | null>({
     queryKey: ["settings-webhook-status"], queryFn: () => fetch("/api/settings/webhook").then(r => r.json()).catch(() => null), staleTime: 300000,
   });
@@ -182,6 +183,20 @@ export function AlertsSection({ localSettings, updateSetting, caps }: CommonProp
         <Row label="Email recipients"
           helper={caps?.smtp_configured ? "Comma-separated addresses for alert emails." : "Requires SMTP configuration (SMTP_* environment variables)."}
           control={<TextInput value="" onChange={() => {}} placeholder="Comma-separated addresses" disabled={!caps?.smtp_configured} width={260} />} />
+        <Row label="Run alert check now"
+          helper="Evaluate saved thresholds against the latest day's spend; posts any breaches to the Slack webhook. Runs automatically each night too."
+          control={<SecondaryButton disabled={checking} onClick={async () => {
+            setChecking(true);
+            try {
+              const r = await fetch("/api/settings/alerts/run", { method: "POST" });
+              const d = await r.json().catch(() => ({}));
+              const n = (d.breaches || []).length;
+              if (!r.ok) toast("Alert check failed");
+              else if (n === 0) toast("No threshold breaches in the latest data");
+              else toast(`${n} breach${n === 1 ? "" : "es"} found${d.sent ? " — posted to Slack" : " (configure a webhook to deliver)"}`);
+            } catch { toast("Alert check failed"); }
+            finally { setChecking(false); }
+          }}>{checking ? "Checking…" : "Run check"}</SecondaryButton>} />
       </Group>
     </div>
   );
@@ -204,7 +219,7 @@ export function ResourcesSection() {
           helper={wh ? `${wh.name || wh.id} · ${wh.size || "—"} · ${wh.state}` : "No warehouse bound."}
           control={<MonoChip>resource: sql-warehouse</MonoChip>} />
         <Row label="Permissions table" helper="Roles persist here across redeploys."
-          control={<MonoChip>{loc ? `${loc.catalog}.${loc.schema}.app_user_permissions` : "—"}</MonoChip>} />
+          control={<MonoChip>{loc?.catalog && loc?.schema ? `${loc.catalog}.${loc.schema}.app_user_permissions` : "—"}</MonoChip>} />
         <Row label="Workspace filter pool" helper="Set via COST_OBS_WORKSPACES at deploy time."
           control={<span style={{ fontSize: 12, color: T.textSecondary }}>Redeploy to change</span>} />
       </Group>
@@ -283,7 +298,7 @@ export function DataTablesSection({ localSettings, updateSetting, caps }: Common
       <SectionTitle title="Data & tables" subtitle="Where the app stores its managed tables and how they refresh." />
       <Group label="Storage location">
         <Row first label="Catalog & schema" helper="Fixed after setup. Redeploy or re-run setup to change."
-          control={<MonoChip>{loc ? `${loc.catalog}.${loc.schema}` : "—"}</MonoChip>} />
+          control={<MonoChip>{loc?.catalog && loc?.schema ? `${loc.catalog}.${loc.schema}` : "—"}</MonoChip>} />
         <Row label="Workspace filter" helper="Set at deploy time via COST_OBS_WORKSPACES. Redeploy to change."
           control={<span style={{ fontSize: 12, color: T.textSecondary }}>All workspaces</span>} />
         <Row label="Workspace display names"
