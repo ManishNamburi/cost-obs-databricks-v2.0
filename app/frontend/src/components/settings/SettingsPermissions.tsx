@@ -3,7 +3,9 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { ReadinessChecks, normalizeReadinessResult } from "./ReadinessChecks";
 import type { ReadinessResult } from "./ReadinessChecks";
 import { READINESS_QUERY_KEY } from "@/hooks/useFeatureAvailability";
-import { Spinner } from "@/components/Spinner";
+import { Group, Row, Select, SecondaryButton, LinkButton, MonoChip, Callout, useToast, T, MONO } from "./dubois";
+
+const EMAIL_RE = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
 
 interface UserPermissions {
   admins: string[];
@@ -30,7 +32,11 @@ interface AuthStatus {
 
 export function SettingsPermissions() {
   const queryClient = useQueryClient();
+  const toast = useToast();
   const [readinessOpen, setReadinessOpen] = useState(false);
+  // Open by default: the exact GRANT SQL is what an admin needs on hand when the app
+  // runs as a service principal (the common case), matching the pre-revamp behavior.
+  const [grantsOpen, setGrantsOpen] = useState(true);
 
   const { data: permissions, isLoading } = useQuery<UserPermissions>({
     queryKey: ["user-permissions"],
@@ -41,15 +47,14 @@ export function SettingsPermissions() {
     },
   });
 
-  const { data: authStatus, isLoading: authLoading } = useQuery<AuthStatus>({
+  const { data: authStatus } = useQuery<AuthStatus>({
     queryKey: ["settings-auth-status"],
     queryFn: () => fetch("/api/settings/auth-status").then(r => r.json()),
     staleTime: 10 * 1000,
     refetchInterval: 30 * 1000,
   });
 
-  // Shared readiness query — same key as useFeatureAvailability so all
-  // components (KPI cards, ReadinessChecks panel here) read from one cache entry.
+  // Shared readiness query — same key as useFeatureAvailability so all components read one cache entry.
   const {
     data: readiness,
     isLoading: readinessLoading,
@@ -66,7 +71,7 @@ export function SettingsPermissions() {
     refetchOnWindowFocus: false,
   });
 
-  const handleReadinessRecheck = (_forceRefresh?: boolean) => {
+  const handleReadinessRecheck = () => {
     queryClient.refetchQueries({ queryKey: READINESS_QUERY_KEY });
   };
 
@@ -86,7 +91,9 @@ export function SettingsPermissions() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["user-permissions"] });
       queryClient.refetchQueries({ queryKey: ["user"] });
+      toast("Users updated");
     },
+    onError: (e) => toast(e instanceof Error ? e.message : "Save failed"),
   });
 
   const [newUserEmail, setNewUserEmail] = useState("");
@@ -100,6 +107,8 @@ export function SettingsPermissions() {
   const addUser = () => {
     const email = newUserEmail.trim();
     if (!email) return;
+    if (!EMAIL_RE.test(email)) { toast("Enter a valid email address"); return; }
+    if (allUsers.some((u) => u.email.toLowerCase() === email.toLowerCase())) { toast("That user is already listed"); return; }
     const admins = [
       ...(permissions?.admins ?? []).filter(e => e !== email),
       ...(newUserRole === "admin" ? [email] : []),
@@ -133,276 +142,27 @@ export function SettingsPermissions() {
   const noToken = !authStatus?.token_present;
 
   if (isLoading) {
-    return <div className="py-8 text-center text-sm text-gray-500">Loading permissions...</div>;
+    return <div style={{ padding: "32px 0", textAlign: "center", fontSize: 13, color: T.textSecondary }}>Loading permissions…</div>;
   }
 
-  return (
-    <div className="space-y-6">
+  const overall = readiness?.overall;
+  const ready = overall === "ready";
+  const bannerTone = ready ? { fg: T.successFg, bg: T.successBg, border: T.successBorder }
+    : overall === "core_ready" ? { fg: T.warningFg, bg: T.warningBg, border: T.warningBorder }
+    : overall ? { fg: T.dangerFg, bg: T.dangerBg, border: T.dangerBorder }
+    : { fg: T.textSecondary, bg: T.navBg, border: T.borderGroup };
+  const bannerLabel = ready ? "System tables access verified — billing.usage · query.history · schema grants"
+    : overall === "core_ready" ? "Core system tables verified — some optional grants missing"
+    : overall === "needs_action" ? "System-table grants pending — some metrics show unavailable"
+    : overall === "not_ready" ? "System tables not accessible — run the grants below"
+    : readinessLoading ? "Checking system-table access…" : "System-table access status unknown";
 
-      {/* ── System Readiness (collapsible) ── */}
-      {(() => {
-        const overall = readiness?.overall;
-        const dotColor = overall === "ready" ? "bg-green-500"
-          : overall === "core_ready" ? "bg-amber-500"
-          : overall ? "bg-red-500" : "bg-gray-300";
-        const badgeLabel = overall === "ready" ? "Ready"
-          : overall === "core_ready" ? "Core Ready"
-          : overall === "needs_action" ? "Needs Action"
-          : overall === "not_ready" ? "Not Ready"
-          : readinessLoading ? "Checking…" : "—";
-        const badgeColor = overall === "ready" ? "bg-green-50 text-green-700 border-green-200"
-          : overall === "core_ready" ? "bg-amber-50 text-amber-700 border-amber-200"
-          : overall ? "bg-red-50 text-red-700 border-red-200"
-          : "bg-gray-50 text-gray-500 border-gray-200";
-        return (
-          <div className="rounded-lg border border-gray-200 bg-white overflow-hidden">
-            <button
-              type="button"
-              onClick={() => setReadinessOpen(o => !o)}
-              className="w-full flex items-center justify-between px-4 py-3 text-left hover:bg-gray-50 transition-colors"
-            >
-              <div className="flex items-center gap-2.5">
-                <span className={`h-2 w-2 rounded-full shrink-0 ${dotColor}`} />
-                <h4 className="text-sm font-semibold text-gray-800">System Readiness</h4>
-                <span className={`inline-flex items-center rounded-full border px-2 py-0.5 text-[10px] font-semibold ${badgeColor}`}>
-                  {badgeLabel}
-                </span>
-              </div>
-              <div className="flex items-center gap-3">
-                <span className="text-xs text-gray-500">SP access to Databricks system tables</span>
-                <svg className={`h-4 w-4 text-gray-500 transition-transform duration-200 ${readinessOpen ? "rotate-180" : ""}`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-                </svg>
-              </div>
-            </button>
-            {readinessOpen && (
-              <div className="border-t border-gray-100 px-4 py-3">
-                <ReadinessChecks
-                  result={readiness ?? null}
-                  loading={readinessLoading}
-                  fetchError={readinessQueryError ? String(readinessQueryError) : null}
-                  onRecheck={handleReadinessRecheck}
-                />
-              </div>
-            )}
-          </div>
-        );
-      })()}
-
-      {/* ── App-level user/role permissions ── */}
-      {saveMutation.isError && (
-        <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-xs text-red-700">
-          <strong>Save failed:</strong> {saveMutation.error instanceof Error ? saveMutation.error.message : "Unknown error"}
-        </div>
-      )}
-
-      <div className="rounded-lg border border-gray-200 bg-gray-50 px-4 py-3 text-xs text-gray-700">
-        <strong>Default access:</strong> Any user not explicitly listed is treated as a <strong>Consumer</strong>. Add users to the table below and set their role to <strong>Admin</strong> to grant settings access.
-      </div>
-
-      {permissions?.table_location && (
-        <div className="rounded-lg border border-gray-200 bg-gray-50 px-4 py-3 text-xs text-gray-700">
-          <strong>Permissions table:</strong>{" "}
-          <code className="rounded bg-gray-100 px-1.5 py-0.5 font-mono text-gray-800">{permissions.table_location}</code>
-          <span className="ml-2 text-gray-500">— stored in Unity Catalog, persists across deploys</span>
-        </div>
-      )}
-
-      {/* Unified Users table */}
-      <div className="rounded-lg border border-gray-200 bg-white overflow-hidden">
-        <div className="border-b border-gray-100 px-4 py-3">
-          <h4 className="text-sm font-semibold text-gray-800">Users</h4>
-          <p className="mt-0.5 text-xs text-gray-500">
-            Admins can view all data and change app settings. Consumers can view dashboards only.
-          </p>
-        </div>
-
-        {/* Empty state — no explicit users */}
-        {allUsers.length === 0 && (
-          <div className="px-4 py-3 space-y-2">
-            {permissions?.current_user && (
-              <div className="flex items-center gap-2 rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 opacity-70">
-                <span className="rounded bg-[#1B3139]/10 px-1.5 py-0.5 text-[10px] font-semibold text-[#1B3139] uppercase tracking-wide">Admin</span>
-                <span className="text-xs text-gray-800">{permissions.current_user}</span>
-                <span className="text-xs text-gray-500 italic">(you — implicit default admin)</span>
-              </div>
-            )}
-            <p className="text-xs text-gray-500 italic">
-              No users explicitly configured. All users are treated as Consumers by default. Add specific users below to restrict or elevate access.
-            </p>
-          </div>
-        )}
-
-        {/* Users table */}
-        {allUsers.length > 0 && (
-          <div className="overflow-hidden">
-            <table className="min-w-full divide-y divide-gray-100 text-xs">
-              <thead className="bg-gray-50">
-                <tr>
-                  <th className="px-4 py-2 text-left font-medium text-gray-500">User</th>
-                  <th className="px-4 py-2 text-left font-medium text-gray-500">Role</th>
-                  <th className="px-4 py-2 text-right font-medium text-gray-500" />
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-gray-100 bg-white">
-                {allUsers.map(({ email, role }) => (
-                  <tr key={email} className="group hover:bg-gray-50 transition-colors">
-                    <td className="px-4 py-2 text-gray-800">{email}</td>
-                    <td className="px-4 py-2">
-                      <select
-                        value={role}
-                        onChange={e => changeRole(email, e.target.value as "admin" | "consumer")}
-                        disabled={saveMutation.isPending}
-                        className="rounded border border-gray-200 bg-white px-2 py-0.5 text-xs font-medium text-gray-700 focus:border-[#FF3621] focus:outline-none focus:ring-1 focus:ring-[#FF3621] disabled:opacity-50"
-                      >
-                        <option value="admin">Admin</option>
-                        <option value="consumer">Consumer</option>
-                      </select>
-                    </td>
-                    <td className="px-4 py-2 text-right">
-                      <button
-                        onClick={() => removeUser(email)}
-                        disabled={saveMutation.isPending}
-                        className="text-xs text-gray-500 hover:text-red-600 transition-colors disabled:opacity-40"
-                      >
-                        Remove
-                      </button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-
-        {/* Add user row */}
-        <div className="border-t border-gray-100 px-4 py-3">
-          <div className="flex items-center gap-2">
-            <input
-              type="email"
-              placeholder="user@example.com"
-              value={newUserEmail}
-              onChange={e => setNewUserEmail(e.target.value)}
-              onKeyDown={e => e.key === "Enter" && addUser()}
-              className="flex-1 rounded-md border border-gray-300 px-3 py-1.5 text-xs focus:border-[#FF3621] focus:outline-none focus:ring-1 focus:ring-[#FF3621]"
-            />
-            <select
-              value={newUserRole}
-              onChange={e => setNewUserRole(e.target.value as "admin" | "consumer")}
-              className="rounded-md border border-gray-300 px-2 py-1.5 text-xs text-gray-700 bg-white focus:border-[#FF3621] focus:outline-none focus:ring-1 focus:ring-[#FF3621]"
-            >
-              <option value="consumer">Consumer</option>
-              <option value="admin">Admin</option>
-            </select>
-            <button
-              onClick={addUser}
-              disabled={!newUserEmail.trim() || saveMutation.isPending}
-              className="shrink-0 rounded-md px-3 py-1.5 text-xs font-medium text-white transition-colors"
-              style={{ backgroundColor: !newUserEmail.trim() || saveMutation.isPending ? "#FFA390" : "#FF3621" }}
-            >
-              {saveMutation.isPending ? "Saving…" : "Add User"}
-            </button>
-          </div>
-          {saveMutation.isPending && (
-            <div className="flex items-center gap-2 text-xs text-gray-500 pt-1 pl-1">
-              <Spinner size="xs" />
-              <span>Saving — user will appear in the list shortly</span>
-            </div>
-          )}
-        </div>
-      </div>
-
-      {/* ── Auth Mode Panel ── */}
-      <div className="rounded-lg border border-gray-200 bg-white overflow-hidden">
-        <div className="flex items-center justify-between border-b border-gray-100 px-4 py-3">
-          <div className="flex items-center gap-2">
-            <svg className="h-4 w-4 text-gray-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 7a2 2 0 012 2m4 0a6 6 0 01-7.743 5.743L11 17H9v2H7v2H4a1 1 0 01-1-1v-2.586a1 1 0 01.293-.707l5.964-5.964A6 6 0 1121 9z" />
-            </svg>
-            <h4 className="text-sm font-semibold text-gray-800">Query Authentication Mode</h4>
-          </div>
-          <div className="inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-semibold bg-green-50 text-green-700 border border-green-200">
-            <span className="h-1.5 w-1.5 rounded-full bg-green-500" />
-            Service Principal
-          </div>
-        </div>
-
-        <div className="px-4 py-3 space-y-4">
-
-          {/* Current identity */}
-          {authLoading ? (
-            <div className="h-10 animate-pulse rounded-lg bg-gray-100" />
-          ) : authStatus ? (
-            <div className="rounded-lg border border-gray-200 bg-gray-50 px-4 py-3">
-              <p className="text-xs font-medium text-gray-600 mb-2">Running as</p>
-              <div className="flex items-center gap-3 flex-wrap">
-                <span className="inline-flex items-center gap-1.5 rounded-full bg-green-50 border border-green-200 px-3 py-1 text-xs font-semibold text-green-700">
-                  <span className="h-1.5 w-1.5 rounded-full bg-green-500" />
-                  {authStatus.sp_display_name || "Service Principal"}
-                </span>
-                {authStatus.user_email && authStatus.user_email !== "service principal" && (
-                  <span className="text-xs text-gray-500">{authStatus.user_email}</span>
-                )}
-              </div>
-            </div>
-          ) : null}
-
-          {/* SP post-deploy grant status */}
-          <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 space-y-3">
-            <div className="flex items-start gap-2">
-              <svg className="mt-0.5 h-3.5 w-3.5 shrink-0 text-amber-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z" />
-              </svg>
-              <div>
-                <p className="text-xs font-semibold text-amber-800">Re-apply grants when creating a new app</p>
-                <p className="mt-0.5 text-[11px] text-amber-700">
-                  Each new Databricks App gets a new service principal with a new client ID. Grants do not carry over from a previous app. Run this once after creating the app as a metastore or account admin.
-                </p>
-              </div>
-            </div>
-
-            {authStatus?.sp_client_id && (
-              <div className="rounded border border-amber-200 bg-white px-3 py-2 text-xs space-y-1">
-                <div className="flex items-center gap-2">
-                  <span className="text-gray-500 w-28 shrink-0">Current SP ID</span>
-                  <code className="font-mono text-gray-800" title={authStatus.sp_client_id}>
-                    {authStatus.sp_client_id.slice(0, 8)}…
-                  </code>
-                </div>
-                {authStatus.sp_display_name && (
-                  <div className="flex items-center gap-2">
-                    <span className="text-gray-500 w-28 shrink-0">SP display name</span>
-                    <span className="text-gray-700">{authStatus.sp_display_name}</span>
-                  </div>
-                )}
-                <p className="text-xs text-amber-600 italic pt-0.5">
-                  If grants have not been applied to this SP, dashboard data will show 0 until grants are run.
-                </p>
-              </div>
-            )}
-
-            <p className="text-[11px] text-gray-600">
-              Expand <span className="font-medium">SP access to Databricks system tables</span> above to see the exact
-              GRANT SQL for any missing permission, or use the <span className="font-medium">App runtime grants</span> block
-              below. Run it as a metastore admin, then click Re-check.
-            </p>
-          </div>
-
-          {/* SP grants reference — app runtime grants */}
-          {(isSP || noToken) && authStatus && (
-            <details className="rounded-lg border border-gray-200 bg-gray-50">
-              <summary className="cursor-pointer px-4 py-2.5 text-xs font-medium text-gray-700 hover:text-gray-900">
-                App runtime grants — exact SQL (run as metastore admin)
-              </summary>
-              <div className="border-t border-gray-200 px-4 py-3 space-y-3">
-                {(() => {
-                  const spName = authStatus.sp_display_name || authStatus.sp_client_id || "<service-principal>";
-                  const userEmail = authStatus.user_email;
-                  const cat = authStatus.catalog || "<your_catalog>";
-                  const sch = authStatus.schema || "<your_schema>";
-                  const appGrants =
+  const spName = authStatus?.sp_display_name || authStatus?.sp_client_id || "<service-principal>";
+  const cat = authStatus?.catalog || "<your_catalog>";
+  const sch = authStatus?.schema || "<your_schema>";
+  const userEmail = authStatus?.user_email;
+  const appGrants =
 `-- System tables (billing + query history + compute + lakeflow)
--- WHY: The app SP queries these tables to build all dashboards.
 -- WHO: Must be run by a metastore admin or account admin.
 -- WHEN: Required once when the app is first created (SP is tied to the app, not the code).
 GRANT USE CATALOG ON CATALOG system TO \`${spName}\`;
@@ -420,69 +180,133 @@ GRANT USE SCHEMA ON SCHEMA system.serving TO \`${spName}\`;
 GRANT SELECT ON TABLE system.serving.served_entities TO \`${spName}\`;
 
 -- App schema (materialized views)
--- WHY: The SP must be able to create and query app-managed tables in your catalog.
--- WHEN: Required once per deploy.
 GRANT USE CATALOG ON CATALOG \`${cat}\` TO \`${spName}\`;
 GRANT USE SCHEMA ON SCHEMA \`${cat}\`.\`${sch}\` TO \`${spName}\`;
 GRANT CREATE TABLE ON SCHEMA \`${cat}\`.\`${sch}\` TO \`${spName}\`;
 GRANT SELECT ON SCHEMA \`${cat}\`.\`${sch}\` TO \`${spName}\`;`;
-                  return (
-                    <>
-                      <div className="grid grid-cols-3 gap-2 text-xs rounded border border-gray-200 bg-white px-3 py-2">
-                        <div><span className="text-gray-500">Target SP</span><br /><code className="font-mono text-gray-800 break-all">{spName}</code></div>
-                        <div><span className="text-gray-500">Who must run</span><br /><span className="text-gray-700">Metastore or account admin</span></div>
-                        <div><span className="text-gray-500">When</span><br /><span className="text-gray-700">Required once when the app is first created</span></div>
-                      </div>
-                      <div className="rounded border border-amber-200 bg-amber-50 px-3 py-2 text-[11px] text-amber-800">
-                        <strong>Warehouse CAN_USE</strong> cannot be granted via SQL. Grant it via: SQL Warehouses → [warehouse name] → Permissions tab → Add {spName}. The app attempts this automatically on startup.
-                      </div>
-                      <div className="flex items-center justify-between mb-1">
-                        <span className="text-[10px] font-semibold uppercase tracking-wide text-gray-500">Section 1 — App runtime grants</span>
-                        <button
-                          onClick={() => navigator.clipboard.writeText(appGrants)}
-                          className="rounded px-2 py-0.5 text-[10px] font-medium text-gray-500 border border-gray-200 hover:border-gray-400 hover:text-gray-700 transition-colors"
-                        >
-                          Copy
-                        </button>
-                      </div>
-                      <pre className="rounded bg-gray-900 px-4 py-3 text-[11px] text-green-400 overflow-x-auto leading-relaxed whitespace-pre">{appGrants}</pre>
 
-                      {userEmail && userEmail !== spName && (
-                        <>
-                          <div className="flex items-center justify-between mb-1">
-                            <span className="text-[10px] font-semibold uppercase tracking-wide text-gray-500">Section 2 — Optional user read access</span>
-                            <button
-                              onClick={() => navigator.clipboard.writeText(
-`-- User read access (optional — only needed if ${userEmail} should query app tables directly)
--- WHY: Grants the admin user read-only access to app-managed tables outside the app.
--- WHO: Metastore admin.
--- WHEN: One-time, does not rotate with deploys.
-GRANT SELECT ON SCHEMA \`${cat}\`.\`${sch}\` TO \`${userEmail}\`;`
-                              )}
-                              className="rounded px-2 py-0.5 text-[10px] font-medium text-gray-500 border border-gray-200 hover:border-gray-400 hover:text-gray-700 transition-colors"
-                            >
-                              Copy
-                            </button>
-                          </div>
-                          <pre className="rounded bg-gray-900 px-4 py-3 text-[11px] text-green-400 overflow-x-auto leading-relaxed whitespace-pre">{
-`-- User read access (optional — only needed if ${userEmail} should query app tables directly)
--- WHY: Grants the admin user read-only access to app-managed tables outside the app.
--- WHO: Metastore admin.
--- WHEN: One-time, does not rotate with deploys.
-GRANT SELECT ON SCHEMA \`${cat}\`.\`${sch}\` TO \`${userEmail}\`;`
-                          }</pre>
-                        </>
-                      )}
-                    </>
-                  );
-                })()}
-              </div>
-            </details>
-          )}
+  const preStyle: React.CSSProperties = { backgroundColor: "#11171C", color: "#E8ECF0", borderRadius: 6, padding: 10, fontFamily: MONO, fontSize: 11.5, overflowX: "auto", whiteSpace: "pre", margin: 0 };
+
+  return (
+    <div>
+      {/* ── Readiness banner ── */}
+      <div style={{ marginBottom: 20 }}>
+        <div style={{ border: `1px solid ${bannerTone.border}`, backgroundColor: bannerTone.bg, borderRadius: 8, padding: "10px 14px", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 0 }}>
+            <span style={{ width: 8, height: 8, borderRadius: 999, backgroundColor: bannerTone.fg, flexShrink: 0 }} />
+            <span style={{ fontSize: 13, color: bannerTone.fg, fontWeight: 500 }}>{bannerLabel}</span>
+          </div>
+          <div style={{ display: "flex", alignItems: "center", gap: 12, flexShrink: 0 }}>
+            <LinkButton onClick={handleReadinessRecheck}>Re-check</LinkButton>
+            <LinkButton onClick={() => setReadinessOpen(o => !o)}>{readinessOpen ? "Hide checks" : "View checks"}</LinkButton>
+          </div>
         </div>
+        {readinessOpen && (
+          <div style={{ border: `1px solid ${T.borderGroup}`, borderTop: "none", borderRadius: "0 0 8px 8px", padding: "12px 14px" }}>
+            <ReadinessChecks
+              result={readiness ?? null}
+              loading={readinessLoading}
+              fetchError={readinessQueryError ? String(readinessQueryError) : null}
+              onRecheck={handleReadinessRecheck}
+            />
+          </div>
+        )}
       </div>
 
+      {/* ── Users ── */}
+      <div style={{ fontSize: 13, fontWeight: 600, color: T.text, marginBottom: 4, display: "flex", alignItems: "baseline", justifyContent: "space-between" }}>
+        <span>Users</span>
+        <span style={{ fontSize: 12, fontWeight: 400, color: T.textSecondary }}>Anyone not listed is a Consumer (dashboards only)</span>
+      </div>
+      <div style={{ border: `1px solid ${T.borderGroup}`, borderRadius: 8, overflow: "hidden" }}>
+        {allUsers.length === 0 ? (
+          <div style={{ padding: "12px 16px", fontSize: 12, color: T.textSecondary, fontStyle: "italic" }}>
+            {permissions?.current_user ? `${permissions.current_user} (you) is the implicit default admin. ` : ""}
+            No users explicitly configured — everyone is a Consumer. Add users below to elevate access.
+          </div>
+        ) : (
+          allUsers.map(({ email, role }, i) => (
+            <div key={email} className="flex items-center justify-between gap-4" style={{ padding: "10px 16px", borderTop: i === 0 ? "none" : `1px solid ${T.borderRow}` }}>
+              <span style={{ fontSize: 13, color: T.text, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis" }}>{email}</span>
+              <div className="flex items-center gap-3 shrink-0">
+                <Select value={role} onChange={(v) => changeRole(email, v as "admin" | "consumer")}
+                  options={[{ value: "admin", label: "Admin" }, { value: "consumer", label: "Consumer" }]} disabled={saveMutation.isPending} />
+                <LinkButton onClick={() => removeUser(email)}>Remove</LinkButton>
+              </div>
+            </div>
+          ))
+        )}
+        {/* Add-user row */}
+        <div className="flex items-center gap-2" style={{ padding: "10px 16px", borderTop: `1px solid ${T.borderRow}`, backgroundColor: T.navBg }}>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <input
+              type="email" placeholder="user@example.com" value={newUserEmail}
+              onChange={e => setNewUserEmail(e.target.value)}
+              onKeyDown={e => { if (e.key === "Enter") addUser(); }}
+              style={{ width: "100%", height: 32, borderRadius: 4, border: `1px solid ${T.borderControl}`, padding: "0 10px", fontSize: 13, color: T.text }}
+            />
+          </div>
+          <Select value={newUserRole} onChange={(v) => setNewUserRole(v as "admin" | "consumer")}
+            options={[{ value: "consumer", label: "Consumer" }, { value: "admin", label: "Admin" }]} />
+          <SecondaryButton onClick={addUser} disabled={!newUserEmail.trim() || saveMutation.isPending}>
+            {saveMutation.isPending ? "Saving…" : "Add user"}
+          </SecondaryButton>
+        </div>
+      </div>
+      {permissions?.table_location && (
+        <p style={{ fontSize: 11, color: T.textSecondary, margin: "6px 2px 20px" }}>
+          Roles are stored in <MonoChip>{permissions.table_location}</MonoChip> and persist across deploys.
+        </p>
+      )}
+
+      {/* ── Query authentication ── */}
+      <div style={{ marginTop: 20 }}>
+        <Group label="Query authentication">
+          <Row first label="Mode" helper="How the app authenticates to the SQL warehouse."
+            control={<span style={{ display: "inline-flex", alignItems: "center", gap: 6, borderRadius: 999, backgroundColor: T.successBg, border: `1px solid ${T.successBorder}`, color: T.successFg, padding: "2px 10px", fontSize: 12, fontWeight: 600 }}><span style={{ width: 6, height: 6, borderRadius: 999, backgroundColor: T.successFg }} />Service principal</span>} />
+          <Row label="Running as" helper="The service principal this app queries as."
+            control={<MonoChip>{authStatus?.sp_display_name || authStatus?.sp_client_id || "Service principal"}</MonoChip>} />
+        </Group>
+
+        {(isSP || noToken) && authStatus && (
+          <>
+            {overall && overall !== "ready" && (
+              <div style={{ marginBottom: 12 }}>
+                <Callout tone="warning">
+                  <div style={{ fontWeight: 600, marginBottom: 4 }}>System-table grants pending</div>
+                  <div style={{ marginBottom: 8 }}>Each new app deploy gets a fresh service principal, so grants don't carry over. Until they run, affected metrics show <em>unavailable</em> (never $0.00). Run this as a metastore admin, then re-check.</div>
+                  <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 6 }}>
+                    <LinkButton onClick={() => { navigator.clipboard?.writeText(appGrants); toast("GRANT SQL copied"); }}>Copy SQL</LinkButton>
+                  </div>
+                  <pre style={preStyle}>{appGrants}</pre>
+                </Callout>
+              </div>
+            )}
+            <div style={{ border: `1px solid ${T.borderGroup}`, borderRadius: 8, overflow: "hidden" }}>
+              <button type="button" onClick={() => setGrantsOpen(o => !o)}
+                style={{ width: "100%", display: "flex", alignItems: "center", justifyContent: "space-between", padding: "10px 14px", background: "none", border: "none", cursor: "pointer", fontSize: 13, fontWeight: 500, color: T.text }}>
+                App runtime grants — exact SQL (run as metastore admin)
+                <span style={{ color: T.textSecondary }}>{grantsOpen ? "▲" : "▼"}</span>
+              </button>
+              {grantsOpen && (
+                <div style={{ borderTop: `1px solid ${T.borderRow}`, padding: "12px 14px", display: "flex", flexDirection: "column", gap: 8 }}>
+                  <div style={{ fontSize: 12, color: T.textSecondary }}>Target SP: <MonoChip>{spName}</MonoChip> · Warehouse <strong>CAN_USE</strong> can't be granted via SQL — set it in SQL Warehouses → Permissions (the app also attempts this on startup).</div>
+                  <div style={{ display: "flex", justifyContent: "flex-end" }}>
+                    <LinkButton onClick={() => { navigator.clipboard?.writeText(appGrants); toast("GRANT SQL copied"); }}>Copy SQL</LinkButton>
+                  </div>
+                  <pre style={preStyle}>{appGrants}</pre>
+                  {userEmail && userEmail !== spName && (
+                    <>
+                      <div style={{ fontSize: 12, color: T.textSecondary, marginTop: 4 }}>Optional — user read access for {userEmail}:</div>
+                      <pre style={preStyle}>{`GRANT SELECT ON SCHEMA \`${cat}\`.\`${sch}\` TO \`${userEmail}\`;`}</pre>
+                    </>
+                  )}
+                </div>
+              )}
+            </div>
+          </>
+        )}
+      </div>
     </div>
   );
 }
-

@@ -2263,3 +2263,264 @@ async def get_account_price_multiplier() -> dict[str, Any]:
                     "message": "system.billing.account_prices not available (private preview)"}
         logger.warning(f"Account price multiplier computation failed: {e}")
         return {"multiplier": 1.0, "available": False, "sku_count": 0, "discount_percent": 0}
+
+
+# ── Unified app settings (Phase 2 aggregator) ─────────────────────────────────
+# ONE app-wide prefs table (app_settings) for values that had no home. The
+# per-domain tables (app_alert_thresholds, app_webhook_settings, app_pricing_settings,
+# app_schedule_settings, app_user_permissions) stay the source of truth for their
+# domains — the aggregator composes them and PUT dispatches writes back to them.
+
+_DEFAULT_TAB_VISIBILITY: dict = {
+    "dbu": True, "infra": True, "optimizer": True, "kpis": True, "aiml": True,
+    "sql": True, "apps": True, "tagging": True, "use-cases": False, "users-groups": True,
+}
+
+_APP_SETTINGS_DEFAULTS: dict = {
+    "company_name": "",
+    "app_display_name": "",
+    "default_date_range_days": 30,
+    "default_landing_tab": "dbu",
+    "auto_refresh_minutes": 0,
+    "density": "comfortable",
+    "theme": "light",
+    "show_workspace_names": True,
+    "anomaly_sensitivity": "medium",
+    "exp_setup_wizard_link": False,
+    "exp_debugger_link": False,
+    "enable_use_case_tracking": False,
+    "enable_accuracy_checks": False,
+    "tab_visibility": _DEFAULT_TAB_VISIBILITY,
+}
+
+# Keys the client may write into app_settings (env-bound values are never accepted).
+_APP_SETTINGS_ALLOWED = set(_APP_SETTINGS_DEFAULTS.keys())
+
+APP_SETTINGS_FILE = os.path.join(SETTINGS_DIR, "app_settings.json")
+
+
+def _ensure_app_settings_table() -> None:
+    _ensure_config_table(
+        f"CREATE TABLE IF NOT EXISTS {_config_table('app_settings')} "
+        f"(id STRING NOT NULL, settings_json STRING, updated_at TIMESTAMP) USING DELTA"
+    )
+
+
+def get_app_settings() -> dict:
+    """App-wide prefs — Delta first (survives redeploys), file fallback, then defaults."""
+    try:
+        from backend.db import execute_query
+        table = _config_table("app_settings")
+        rows = execute_query(f"SELECT settings_json FROM {table} WHERE id = 'app' LIMIT 1", None, no_cache=True)
+        if rows and rows[0].get("settings_json"):
+            return {**_APP_SETTINGS_DEFAULTS, **json.loads(rows[0]["settings_json"])}
+    except Exception as e:
+        if _table_missing(e):
+            logger.debug("app_settings table not yet created: %s", e)
+        else:
+            logger.warning("Could not load app_settings from Delta: %s", e)
+    try:
+        if os.path.exists(APP_SETTINGS_FILE):
+            with open(APP_SETTINGS_FILE) as f:
+                data = json.load(f)
+            return {**_APP_SETTINGS_DEFAULTS, **data}
+    except (json.JSONDecodeError, IOError):
+        pass
+    return dict(_APP_SETTINGS_DEFAULTS)
+
+
+def save_app_settings(partial: dict) -> dict:
+    """Merge a partial into app_settings and persist (Delta + file). Returns the merged object."""
+    current = get_app_settings()
+    clean = {k: v for k, v in (partial or {}).items() if k in _APP_SETTINGS_ALLOWED}
+    merged = {**current, **clean}
+    try:
+        from backend.db import execute_write
+        _ensure_app_settings_table()
+        table = _config_table("app_settings")
+        execute_write(f"DELETE FROM {table} WHERE id = 'app'", None)
+        execute_write(
+            f"INSERT INTO {table} (id, settings_json, updated_at) VALUES ('app', :s, current_timestamp())",
+            {"s": json.dumps(merged)},
+        )
+    except Exception as e:
+        logger.warning("Could not persist app_settings to Delta: %s", e)
+    try:
+        os.makedirs(SETTINGS_DIR, exist_ok=True)
+        with open(APP_SETTINGS_FILE, "w") as f:
+            json.dump(merged, f, indent=2)
+    except OSError:
+        pass
+    return merged
+
+
+def workspace_names_enabled() -> bool:
+    """Whether resolved workspace display names should be shown (else IDs). Default True."""
+    try:
+        return bool(get_app_settings().get("show_workspace_names", True))
+    except Exception:
+        return True
+
+
+# Sensitivity → spike-threshold multiplier. High = more sensitive => lower threshold.
+_ANOMALY_MULTIPLIER = {"low": 1.5, "medium": 1.0, "high": 0.5}
+
+
+def anomaly_spike_threshold() -> float:
+    """Effective day-over-day spike threshold (%) = base threshold × sensitivity multiplier."""
+    base = float(_load_alert_thresholds().get("spike_threshold_percent", 20) or 20)
+    sens = str(get_app_settings().get("anomaly_sensitivity", "medium")).lower()
+    return round(base * _ANOMALY_MULTIPLIER.get(sens, 1.0), 2)
+
+
+def _is_admin(request: Request) -> bool:
+    """Non-raising admin check (mirrors _require_admin's rule)."""
+    email = request.headers.get("X-Forwarded-Email", os.getenv("USER", "dev@local"))
+    admins = _load_user_permissions().get("admins", [])
+    return (not admins) or (email in admins)
+
+
+# Cheap capability probes cached in-process (avoid a SQL round-trip on every settings load).
+_cap_cache: dict[str, tuple[float, bool]] = {}
+_CAP_TTL = 10 * 60
+
+
+def _cached_probe(key: str, sql: str) -> bool:
+    hit = _cap_cache.get(key)
+    if hit and (time.time() - hit[0]) < _CAP_TTL:
+        return hit[1]
+    ok = False
+    try:
+        from backend.db import execute_query
+        execute_query(sql, None, no_cache=True)
+        ok = True
+    except Exception:
+        ok = False
+    _cap_cache[key] = (time.time(), ok)
+    return ok
+
+
+def _capabilities(request: Request) -> dict:
+    return {
+        "smtp_configured": bool(os.getenv("SMTP_HOST")),
+        "workspace_names_available": _cached_probe("ws_names", "SELECT 1 FROM system.access.workspaces_latest LIMIT 1"),
+        "account_prices_available": _cached_probe("acct_prices", "SELECT 1 FROM system.billing.account_prices LIMIT 1"),
+        "is_admin": _is_admin(request),
+    }
+
+
+def _webhook_masked() -> dict:
+    settings = _load_webhook_settings()
+    url = settings.get("slack_webhook_url", "")
+    masked = ("https://hooks.slack.com/services/****" if "hooks.slack.com" in url else "****") if url else None
+    return {"configured": bool(url), "masked_url": masked}
+
+
+def _settings_snapshot(request: Request) -> dict:
+    """Compose the full settings object from the per-domain stores + app_settings."""
+    app = get_app_settings()
+    thresholds = _load_alert_thresholds()
+    general_keys = (
+        "company_name", "app_display_name", "default_date_range_days", "default_landing_tab",
+        "auto_refresh_minutes", "density", "theme", "show_workspace_names",
+        "enable_use_case_tracking", "enable_accuracy_checks",
+    )
+    return {
+        "general": {k: app.get(k) for k in general_keys},
+        "tab_visibility": app.get("tab_visibility", _DEFAULT_TAB_VISIBILITY),
+        "thresholds": {
+            "spike_threshold_percent": thresholds.get("spike_threshold_percent", 20),
+            "daily_budget": thresholds.get("daily_budget", 50000),
+            "workspace_budget": thresholds.get("workspace_budget", 10000),
+            "anomaly_sensitivity": app.get("anomaly_sensitivity", "medium"),
+        },
+        "webhook": _webhook_masked(),
+        "pricing": {"use_account_prices": bool(_load_pricing_settings().get("use_account_prices", False))},
+        "schedule": load_schedule_settings(),
+        "experimental": {
+            "exp_setup_wizard_link": bool(app.get("exp_setup_wizard_link", False)),
+            "exp_debugger_link": bool(app.get("exp_debugger_link", False)),
+        },
+        "capabilities": _capabilities(request),
+    }
+
+
+@router.get("")
+async def get_unified_settings(request: Request) -> dict:
+    """Aggregated settings for the settings modal (Phase 2). Read-only; safe for all users."""
+    return await asyncio.to_thread(_settings_snapshot, request)
+
+
+@router.put("")
+async def put_unified_settings(request: Request) -> dict:
+    """Partial settings update — dispatches each sub-object to its domain store. Admin-only."""
+    _require_admin(request)
+    body = await request.json()
+
+    def _apply() -> dict:
+        # app_settings-backed groups (general prefs, tab visibility, experimental, sensitivity)
+        app_partial: dict = {}
+        general = body.get("general")
+        if isinstance(general, dict):
+            for k in (
+                "company_name", "app_display_name", "default_date_range_days", "default_landing_tab",
+                "auto_refresh_minutes", "density", "theme", "show_workspace_names",
+                "enable_use_case_tracking", "enable_accuracy_checks",
+            ):
+                if k in general:
+                    app_partial[k] = general[k]
+        exp = body.get("experimental")
+        if isinstance(exp, dict):
+            for k in ("exp_setup_wizard_link", "exp_debugger_link"):
+                if k in exp:
+                    app_partial[k] = bool(exp[k])
+        tv = body.get("tab_visibility")
+        if isinstance(tv, dict):
+            merged_tv = {**_DEFAULT_TAB_VISIBILITY, **{k: bool(v) for k, v in tv.items() if k in _DEFAULT_TAB_VISIBILITY}}
+            if not any(merged_tv.values()):
+                raise HTTPException(status_code=400, detail="At least one dashboard tab must remain visible.")
+            app_partial["tab_visibility"] = merged_tv
+
+        thresholds = body.get("thresholds")
+        if isinstance(thresholds, dict):
+            if "anomaly_sensitivity" in thresholds:
+                s = str(thresholds["anomaly_sensitivity"]).lower()
+                app_partial["anomaly_sensitivity"] = s if s in _ANOMALY_MULTIPLIER else "medium"
+            if any(k in thresholds for k in ("spike_threshold_percent", "daily_budget", "workspace_budget")):
+                cur = _load_alert_thresholds()
+                _save_alert_thresholds({
+                    "spike_threshold_percent": max(1.0, min(500.0, float(thresholds.get("spike_threshold_percent", cur.get("spike_threshold_percent", 20))))),
+                    "daily_budget": max(0.0, float(thresholds.get("daily_budget", cur.get("daily_budget", 50000)))),
+                    "workspace_budget": max(0.0, float(thresholds.get("workspace_budget", cur.get("workspace_budget", 10000)))),
+                })
+
+        if app_partial:
+            save_app_settings(app_partial)
+
+        webhook = body.get("webhook")
+        if isinstance(webhook, dict) and webhook.get("slack_webhook_url"):
+            _save_webhook_settings({"slack_webhook_url": webhook["slack_webhook_url"]})
+
+        pricing = body.get("pricing")
+        if isinstance(pricing, dict) and "use_account_prices" in pricing:
+            _save_pricing_settings({"use_account_prices": bool(pricing["use_account_prices"])})
+
+        schedule = body.get("schedule")
+        if isinstance(schedule, dict):
+            sched = {
+                "enabled": bool(schedule.get("enabled", True)),
+                "frequency": schedule.get("frequency", "nightly") if schedule.get("frequency") in ("nightly", "weekly", "monthly") else "nightly",
+                "hour_utc": max(0, min(23, int(schedule.get("hour_utc", 5)))),
+                "lookback_days": int(schedule.get("lookback_days", 180)) if int(schedule.get("lookback_days", 180)) in (180, 365, 730, 1095) else 180,
+            }
+            _save_schedule_to_table(sched)
+            try:
+                os.makedirs(SETTINGS_DIR, exist_ok=True)
+                with open(SCHEDULE_SETTINGS_FILE, "w") as f:
+                    json.dump(sched, f, indent=2)
+            except OSError:
+                pass
+
+        return _settings_snapshot(request)
+
+    return await asyncio.to_thread(_apply)

@@ -143,14 +143,14 @@ export function MvSourcesSection() {
   };
 
   const selectClass =
-    "w-full rounded-md border border-gray-300 px-2 py-1.5 text-sm text-gray-900 focus:border-[#FF3621] focus:outline-none focus:ring-1 focus:ring-[#FF3621] disabled:bg-gray-100 disabled:text-gray-500";
+    "w-full rounded-md border border-gray-300 px-2 py-1.5 text-sm text-gray-900 focus:border-[#2272B4] focus:outline-none focus:ring-1 focus:ring-[#2272B4] disabled:bg-gray-100 disabled:text-gray-500";
 
   return (
     <div className="mb-3 rounded-lg border border-gray-200 bg-white p-3">
       <div className="mb-1 flex items-center justify-between">
         <h4 className="text-sm font-semibold text-gray-900">Additional data (shared views)</h4>
         {!open && (
-          <button onClick={() => setOpen(true)} className="text-xs font-medium text-[#FF3621] hover:underline">
+          <button onClick={() => setOpen(true)} className="text-xs font-medium text-[#2272B4] hover:underline">
             + Add source
           </button>
         )}
@@ -225,7 +225,7 @@ export function MvSourcesSection() {
                                 : new Set(presentTables.filter((t) => t.status === "match").map((t) => t.table))
                             )
                           }
-                          className="text-[10px] font-medium text-[#FF3621] hover:underline"
+                          className="text-[10px] font-medium text-[#2272B4] hover:underline"
                         >
                           {selected.size === matchableCount ? "Clear all" : "Select all"}
                         </button>
@@ -244,7 +244,7 @@ export function MvSourcesSection() {
                               disabled={!isMatch}
                               checked={selected.has(t.table)}
                               onChange={() => toggle(t.table)}
-                              className="h-3.5 w-3.5 rounded border-gray-300 text-[#FF3621] focus:ring-[#FF3621]"
+                              className="h-3.5 w-3.5 rounded border-gray-300 text-[#2272B4] focus:ring-[#2272B4]"
                             />
                             <span className="min-w-0 flex-1 truncate font-mono text-gray-700">{t.table}</span>
                             {isMatch ? (
@@ -269,7 +269,7 @@ export function MvSourcesSection() {
               value={label}
               onChange={(e) => setLabel(e.target.value)}
               placeholder="e.g. EU workspace"
-              className="w-full rounded-md border border-gray-300 px-2 py-1.5 text-sm text-gray-900 placeholder-gray-400 focus:border-[#FF3621] focus:outline-none focus:ring-1 focus:ring-[#FF3621]"
+              className="w-full rounded-md border border-gray-300 px-2 py-1.5 text-sm text-gray-900 placeholder-gray-400 focus:border-[#2272B4] focus:outline-none focus:ring-1 focus:ring-[#2272B4]"
             />
             <p className="text-[10px] text-gray-500">Used to tag this source's rows so you can filter by it in the dashboard.</p>
           </div>
@@ -284,7 +284,7 @@ export function MvSourcesSection() {
               onClick={addSource}
               disabled={!canAdd}
               className="rounded-md px-3 py-1.5 text-xs font-bold text-white transition-colors disabled:cursor-not-allowed"
-              style={{ backgroundColor: canAdd ? "#FF3621" : "#FFA390" }}
+              style={{ backgroundColor: canAdd ? "#2272B4" : "#A9C6DC" }}
             >
               {busy ? "Adding…" : "Add source"}
             </button>

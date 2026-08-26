@@ -1413,13 +1413,22 @@ async def get_workspace_list(
         _background_tasks.add(_t)
         _t.add_done_callback(_background_tasks.discard)
 
+    # Admin pref: when workspace display names are off, return IDs (name=null) even
+    # where a name resolved. `historical` still reflects true name availability so the
+    # toggle never mislabels a live workspace.
+    try:
+        from backend.routers.settings import workspace_names_enabled
+        show_names = workspace_names_enabled()
+    except Exception:
+        show_names = True
+
     try:
         rows = await asyncio.wait_for(asyncio.to_thread(_fetch_rows), timeout=30.0)
         return {
             "workspaces": [
                 {
                     "id": r["workspace_id"],
-                    "name": r["workspace_name"],
+                    "name": (r["workspace_name"] if show_names else None),
                     # No name resolvable from any source => workspace no longer exists.
                     "historical": not (r.get("workspace_name") and str(r["workspace_name"]).strip()),
                 }
@@ -1696,6 +1705,14 @@ def _format_workspaces(results: list[dict[str, Any]] | None, params: dict[str, s
         return {"workspaces": [], "total_spend": 0, "start_date": params["start_date"], "end_date": params["end_date"]}
 
     total_spend = sum(float(row.get("total_spend") or 0) for row in results)
+    # Admin pref: when workspace display names are turned off, show IDs even where a
+    # name resolved. `historical` still reflects true name availability (computed from
+    # the resolved name), so the toggle never mislabels a live workspace as historical.
+    try:
+        from backend.routers.settings import workspace_names_enabled
+        show_names = workspace_names_enabled()
+    except Exception:
+        show_names = True
     workspaces = []
     for row in results:
         wid = row.get("workspace_id")
@@ -1705,14 +1722,14 @@ def _format_workspaces(results: list[dict[str, Any]] | None, params: dict[str, s
             continue
         wid = str(wid)
         raw_name = row.get("workspace_name")
-        name = raw_name if (raw_name and str(raw_name).strip()) else None
+        resolved = raw_name if (raw_name and str(raw_name).strip()) else None
         spend = float(row.get("total_spend") or 0)
         workspaces.append({
             "workspace_id": wid,
-            "workspace_name": name,
+            "workspace_name": resolved if show_names else None,
             # No display name in billing history => the workspace no longer exists
             # in the account (deleted); surface it as "historical" in dropdowns.
-            "historical": name is None,
+            "historical": resolved is None,
             "total_dbus": float(row.get("total_dbus") or 0),
             "total_spend": spend,
             "top_products": _ensure_list(row.get("top_products")),
@@ -2138,20 +2155,32 @@ async def get_spend_anomalies(
 
     results = await asyncio.to_thread(execute_query, SPEND_ANOMALIES, params)
 
+    # Effective spike threshold folds in the admin's anomaly-sensitivity setting
+    # (low/medium/high → base threshold × 1.5/1.0/0.5). Additive: each row is flagged
+    # is_spike so consumers can highlight true anomalies without a contract change.
+    try:
+        from backend.routers.settings import anomaly_spike_threshold
+        spike_threshold = anomaly_spike_threshold()
+    except Exception:
+        spike_threshold = 20.0
+
     anomalies = []
 
     for row in results:
+        change_percent = float(row.get("change_percent") or 0)
         anomaly = {
             "usage_date": str(row.get("usage_date")),
             "daily_spend": float(row.get("daily_spend") or 0),
             "prev_day_spend": float(row.get("prev_day_spend") or 0),
             "change_amount": float(row.get("change_amount") or 0),
-            "change_percent": float(row.get("change_percent") or 0),
+            "change_percent": change_percent,
+            "is_spike": abs(change_percent) >= spike_threshold,
         }
         anomalies.append(anomaly)
 
     return {
         "anomalies": anomalies,
+        "spike_threshold_percent": spike_threshold,
         "start_date": params["start_date"],
         "end_date": params["end_date"],
     }

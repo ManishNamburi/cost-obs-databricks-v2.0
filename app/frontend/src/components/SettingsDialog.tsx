@@ -1,10 +1,16 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { createPortal } from "react-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { SettingsConfig, SettingsGeneral, SettingsTabs, SettingsAccuracyChecks, SettingsPermissions, SettingsDebugger } from "./settings";
-import type { ScheduleSettings } from "./settings/SettingsGeneral";
-import { SetupWizard } from "./SetupWizard";
+import { SettingsAccuracyChecks, SettingsDebugger } from "./settings";
 import { READINESS_QUERY_KEY } from "@/hooks/useFeatureAvailability";
+import { SetupWizard } from "./SetupWizard";
+import {
+  ToastProvider, useToast, Badge, T,
+} from "./settings/dubois";
+import {
+  GeneralSection, DashboardTabsSection, AlertsSection, DataTablesSection,
+  AccessSection, ResourcesSection, ExperimentalSection,
+} from "./settings/sections";
 
 export interface TabVisibility {
   dbu: boolean;
@@ -22,18 +28,8 @@ export interface TabVisibility {
 }
 
 const DEFAULT_VISIBILITY: TabVisibility = {
-  dbu: true,
-  infra: true,
-  optimizer: true,
-  kpis: true,
-  "ai-gateway": true,
-  genie: true,
-  sql: true,
-  apps: true,
-  tagging: true,
-  "use-cases": false,
-  "users-groups": true,
-  conversational: true,
+  dbu: true, infra: true, optimizer: true, kpis: true, "ai-gateway": true, genie: true,
+  sql: true, apps: true, tagging: true, "use-cases": false, "users-groups": true, conversational: true,
 };
 
 const STORAGE_KEY = "coc-tab-visibility";
@@ -41,12 +37,8 @@ const STORAGE_KEY = "coc-tab-visibility";
 export function loadTabVisibility(): TabVisibility {
   try {
     const stored = localStorage.getItem(STORAGE_KEY);
-    if (stored) {
-      return { ...DEFAULT_VISIBILITY, ...JSON.parse(stored) };
-    }
-  } catch {
-    // ignore parse errors
-  }
+    if (stored) return { ...DEFAULT_VISIBILITY, ...JSON.parse(stored) };
+  } catch { /* ignore */ }
   return DEFAULT_VISIBILITY;
 }
 
@@ -54,11 +46,19 @@ function saveTabVisibility(visibility: TabVisibility) {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(visibility));
 }
 
-// ── App Settings (General tab) ──────────────────────────────────────────
+// ── App Settings ────────────────────────────────────────────────────────────
 export interface AppSettings {
   defaultDateRangeDays: 7 | 14 | 30 | 60 | 90;
   refreshIntervalMinutes: 0 | 5 | 15 | 30;
-  compactMode: boolean;
+  compactMode: boolean;              // deprecated — migrated to `density`
+  darkMode: boolean;                 // deprecated — migrated to `theme`
+  density: "comfortable" | "compact";
+  theme: "light" | "dark" | "system";
+  defaultLandingTab: string;
+  showWorkspaceNames: boolean;
+  anomalySensitivity: "low" | "medium" | "high";
+  expSetupWizardLink: boolean;
+  expDebuggerLink: boolean;
   companyName: string;
   appDisplayName: string;
   monthlyBudget: number;
@@ -70,7 +70,6 @@ export interface AppSettings {
   enableAppHostingComparison: boolean;
   enableUseCaseTracking: boolean;
   enableAccuracyChecks: boolean;
-  darkMode: boolean;
   anonymizeUsers: boolean;
 }
 
@@ -78,6 +77,14 @@ const DEFAULT_APP_SETTINGS: AppSettings = {
   defaultDateRangeDays: 30,
   refreshIntervalMinutes: 0,
   compactMode: false,
+  darkMode: false,
+  density: "comfortable",
+  theme: "light",
+  defaultLandingTab: "dbu",
+  showWorkspaceNames: true,
+  anomalySensitivity: "medium",
+  expSetupWizardLink: false,
+  expDebuggerLink: false,
   companyName: "",
   appDisplayName: "",
   monthlyBudget: 0,
@@ -89,7 +96,6 @@ const DEFAULT_APP_SETTINGS: AppSettings = {
   enableAppHostingComparison: false,
   enableUseCaseTracking: false,
   enableAccuracyChecks: false,
-  darkMode: false,
   anonymizeUsers: false,
 };
 
@@ -99,16 +105,39 @@ export function loadAppSettings(): AppSettings {
   try {
     const stored = localStorage.getItem(APP_SETTINGS_KEY);
     if (stored) {
-      return { ...DEFAULT_APP_SETTINGS, ...JSON.parse(stored) };
+      const parsed = JSON.parse(stored);
+      const merged = { ...DEFAULT_APP_SETTINGS, ...parsed } as AppSettings;
+      // Migrate deprecated boolean toggles into the new selects (only when the new
+      // keys are absent, so an explicit new choice always wins).
+      if (parsed.theme === undefined) merged.theme = parsed.darkMode ? "dark" : "light";
+      if (parsed.density === undefined) merged.density = parsed.compactMode ? "compact" : "comfortable";
+      return merged;
     }
-  } catch {
-    // ignore parse errors
-  }
+  } catch { /* ignore */ }
   return { ...DEFAULT_APP_SETTINGS };
 }
 
 function saveAppSettings(settings: AppSettings) {
-  localStorage.setItem(APP_SETTINGS_KEY, JSON.stringify(settings));
+  // Keep the deprecated booleans in sync so any un-migrated reader still works.
+  const out = { ...settings, darkMode: settings.theme === "dark", compactMode: settings.density === "compact" };
+  localStorage.setItem(APP_SETTINGS_KEY, JSON.stringify(out));
+}
+
+type NavKey = "general" | "tabs" | "alerts" | "data" | "access" | "resources" | "experimental";
+type Overlay = "setup" | "debugger" | "accuracy" | null;
+
+export interface SettingsCapabilities {
+  smtp_configured: boolean;
+  workspace_names_available: boolean;
+  account_prices_available: boolean;
+  is_admin: boolean;
+}
+interface UnifiedSettings {
+  general?: Record<string, unknown>;
+  tab_visibility?: Partial<TabVisibility>;
+  thresholds?: { spike_threshold_percent?: number; daily_budget?: number; workspace_budget?: number; anomaly_sensitivity?: "low" | "medium" | "high" };
+  experimental?: { exp_setup_wizard_link?: boolean; exp_debugger_link?: boolean };
+  capabilities?: SettingsCapabilities;
 }
 
 interface SettingsDialogProps {
@@ -120,342 +149,319 @@ interface SettingsDialogProps {
   appSettings: AppSettings;
 }
 
-export function SettingsDialog({ isOpen, onClose, onTabVisibilityChange, onSettingsChange, tabVisibility, appSettings }: SettingsDialogProps) {
+export function SettingsDialog(props: SettingsDialogProps) {
+  if (!props.isOpen) return null;
+  return createPortal(
+    <ToastProvider>
+      <SettingsShell {...props} />
+    </ToastProvider>,
+    document.body,
+  );
+}
+
+function SettingsShell({ onClose, onTabVisibilityChange, onSettingsChange, tabVisibility, appSettings }: SettingsDialogProps) {
   const rqClient = useQueryClient();
-  const [activeSection, setActiveSection] = useState<"tabs" | "general" | "config" | "accuracy-checks" | "permissions" | "debugger" | "setup">("general");
+  const toast = useToast();
+  const [nav, setNav] = useState<NavKey>("general");
+  const [overlay, setOverlay] = useState<Overlay>(null);
   const [localVisibility, setLocalVisibility] = useState<TabVisibility>(tabVisibility);
   const [localSettings, setLocalSettings] = useState<AppSettings>(appSettings);
-  const [pendingSchedule, setPendingSchedule] = useState<ScheduleSettings | null>(null);
-  const [saveStatus, setSaveStatus] = useState<string | null>(null);
-  const [generalDirty, setGeneralDirty] = useState(false);
-  const contentScrollRef = useRef<HTMLDivElement>(null);
+  const [dirty, setDirty] = useState(false);
 
-  // ── Queries ──────────────────────────────────────────────────────────
   const { data: permissions } = useQuery<{ admins: string[]; current_user?: string | null }>({
     queryKey: ["user-permissions"],
-    queryFn: async () => {
-      const res = await fetch("/api/settings/user-permissions");
-      if (!res.ok) throw new Error("Failed to fetch");
-      return res.json();
-    },
-    enabled: isOpen,
+    queryFn: () => fetch("/api/settings/user-permissions").then(r => { if (!r.ok) throw new Error(); return r.json(); }),
+    staleTime: 60 * 1000,
+  });
+  const isAdmin = !permissions || !permissions.admins?.length || (!!permissions.current_user && permissions.admins.includes(permissions.current_user));
+
+  const { data: appConfig } = useQuery<import("./settings/SettingsConfig").AppConfigInfo>({
+    queryKey: ["app-config"],
+    queryFn: () => fetch("/api/settings/config").then(r => { if (!r.ok) throw new Error(); return r.json(); }),
+  });
+
+  // Friendly SP name for the header (identity.display_name from /config is just the
+  // SP client-id UUID; sp_display_name is the human label).
+  const { data: authStatus } = useQuery<{ sp_display_name?: string } | null>({
+    queryKey: ["settings-auth-status"],
+    queryFn: () => fetch("/api/settings/auth-status").then(r => r.ok ? r.json() : null).catch(() => null),
     staleTime: 60 * 1000,
   });
 
-  // Mirror backend logic: empty admins list = everyone is admin (fresh deploy)
-  const isAdmin = !permissions || !permissions.admins?.length || (
-    !!permissions.current_user && permissions.admins.includes(permissions.current_user)
-  );
-
-  const { data: appConfig, isLoading: configLoading } = useQuery<{
-    warehouse: { id: string; name: string | null; size: string | null; state: string; source?: "app_resource" | "http_path" | "none" } | null;
-    identity: { display_name: string | null; user_name: string | null } | null;
-    storage_location: { catalog: string; schema: string; catalog_source?: "env_var" | "default"; schema_source?: "env_var" | "default" } | null;
-    version?: { commit_sha: string };
-  }>({
-    queryKey: ["app-config"],
-    queryFn: async () => {
-      const res = await fetch("/api/settings/config");
-      if (!res.ok) throw new Error("Failed to fetch");
-      return res.json();
-    },
-    enabled: isOpen,
+  // Unified settings aggregator (Phase 2). Seeds the modal from the server; falls back
+  // to localStorage/defaults when unavailable so the modal still works pre-migration.
+  const { data: unified } = useQuery<UnifiedSettings | null>({
+    queryKey: ["unified-settings"],
+    queryFn: () => fetch("/api/settings").then(r => r.ok ? r.json() : null).catch(() => null),
+    staleTime: 60 * 1000,
   });
-
-  // ── Effects ──────────────────────────────────────────────────────────
+  const caps = unified?.capabilities;
+  const seededRef = useRef(false);
   useEffect(() => {
-    if (isOpen) {
-      setLocalVisibility(tabVisibility);
-      setLocalSettings(appSettings);
-      setGeneralDirty(false);
-      setPendingSchedule(null);
-    }
-  }, [isOpen, tabVisibility, appSettings]);
+    if (!unified || dirty || seededRef.current) return;
+    seededRef.current = true;
+    const g = (unified.general || {}) as Record<string, unknown>;
+    const num = (v: unknown, d: number) => (typeof v === "number" ? v : d);
+    setLocalSettings((prev) => ({
+      ...prev,
+      companyName: (g.company_name as string) ?? prev.companyName,
+      appDisplayName: (g.app_display_name as string) ?? prev.appDisplayName,
+      defaultDateRangeDays: (num(g.default_date_range_days, prev.defaultDateRangeDays) as AppSettings["defaultDateRangeDays"]),
+      defaultLandingTab: (g.default_landing_tab as string) ?? prev.defaultLandingTab,
+      refreshIntervalMinutes: (num(g.auto_refresh_minutes, prev.refreshIntervalMinutes) as AppSettings["refreshIntervalMinutes"]),
+      density: (g.density as AppSettings["density"]) ?? prev.density,
+      theme: (g.theme as AppSettings["theme"]) ?? prev.theme,
+      showWorkspaceNames: typeof g.show_workspace_names === "boolean" ? g.show_workspace_names : prev.showWorkspaceNames,
+      enableUseCaseTracking: typeof g.enable_use_case_tracking === "boolean" ? g.enable_use_case_tracking : prev.enableUseCaseTracking,
+      enableAccuracyChecks: typeof g.enable_accuracy_checks === "boolean" ? g.enable_accuracy_checks : prev.enableAccuracyChecks,
+      alertSpikePercent: num(unified.thresholds?.spike_threshold_percent, prev.alertSpikePercent),
+      alertDailyBudget: num(unified.thresholds?.daily_budget, prev.alertDailyBudget),
+      alertWorkspaceBudget: num(unified.thresholds?.workspace_budget, prev.alertWorkspaceBudget),
+      anomalySensitivity: unified.thresholds?.anomaly_sensitivity ?? prev.anomalySensitivity,
+      expSetupWizardLink: unified.experimental?.exp_setup_wizard_link ?? prev.expSetupWizardLink,
+      expDebuggerLink: unified.experimental?.exp_debugger_link ?? prev.expDebuggerLink,
+    }));
+    if (unified.tab_visibility) setLocalVisibility((prev) => ({ ...prev, ...unified.tab_visibility }));
+  }, [unified, dirty]);
 
-  // Kick non-admins off the setup tab if permissions load and they're not admin
+  // Prefer a real display name; never show the raw SP client-id UUID. Falls back to
+  // the app's product name.
+  const isUuid = (s?: string | null) => !!s && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(s.trim());
+  const spName = authStatus?.sp_display_name;
+  const idName = appConfig?.identity?.display_name;
+  const appName =
+    localSettings.appDisplayName ||
+    (spName && !isUuid(spName) ? spName : "") ||
+    (idName && !isUuid(idName) ? idName : "") ||
+    "cost-obs-v2";
+  const version = appConfig?.version?.commit_sha;
+
   useEffect(() => {
-    if (activeSection === "setup" && permissions && !isAdmin) {
-      setActiveSection("general");
-    }
-  }, [permissions, isAdmin, activeSection]);
+    setLocalVisibility(tabVisibility);
+    setLocalSettings(appSettings);
+    setDirty(false);
+  }, [tabVisibility, appSettings]);
 
-  const handleKeyDown = useCallback((e: KeyboardEvent) => {
-    if (e.key === "Escape") onClose();
-  }, [onClose]);
+  // Kick non-admins out of admin-only sections/overlays.
+  useEffect(() => {
+    const adminSections: NavKey[] = ["alerts", "data", "access", "experimental"];
+    if (permissions && !isAdmin && adminSections.includes(nav)) setNav("general");
+    if (permissions && !isAdmin && overlay) setOverlay(null);
+  }, [permissions, isAdmin, nav, overlay]);
+
+  const requestClose = useCallback(() => {
+    if (dirty && !window.confirm("You have unsaved changes. Discard them?")) return;
+    onClose();
+  }, [dirty, onClose]);
 
   useEffect(() => {
-    if (isOpen) {
-      document.addEventListener("keydown", handleKeyDown);
-      document.body.style.overflow = "hidden";
-    }
-    return () => {
-      document.removeEventListener("keydown", handleKeyDown);
-      document.body.style.overflow = "";
-    };
-  }, [isOpen, handleKeyDown]);
-
-  if (!isOpen) return null;
-
-  // ── Handlers ─────────────────────────────────────────────────────────
-  const toggleTab = (key: keyof TabVisibility) => {
-    const updated = { ...localVisibility, [key]: !localVisibility[key] };
-    if (Object.values(updated).some(Boolean)) setLocalVisibility(updated);
-  };
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") requestClose(); };
+    document.addEventListener("keydown", onKey);
+    document.body.style.overflow = "hidden";
+    return () => { document.removeEventListener("keydown", onKey); document.body.style.overflow = ""; };
+  }, [requestClose]);
 
   const updateSetting = <K extends keyof AppSettings>(key: K, value: AppSettings[K]) => {
     setLocalSettings((prev) => ({ ...prev, [key]: value }));
-    setGeneralDirty(true);
+    setDirty(true);
+  };
+  const toggleTab = (key: keyof TabVisibility) => {
+    setLocalVisibility((prev) => {
+      const updated = { ...prev, [key]: !prev[key] };
+      if (!Object.values(updated).some(Boolean)) return prev;
+      return updated;
+    });
+    setDirty(true);
   };
 
   const handleSave = () => {
+    // Landing-tab fallback: if the chosen tab is now hidden, use the first visible.
+    let settings = localSettings;
+    const landingHidden = !localVisibility[localSettings.defaultLandingTab as keyof TabVisibility];
+    if (landingHidden) {
+      const firstVisible = (Object.keys(localVisibility) as (keyof TabVisibility)[]).find((k) => localVisibility[k]);
+      if (firstVisible) settings = { ...localSettings, defaultLandingTab: firstVisible };
+    }
+    saveAppSettings(settings);
     saveTabVisibility(localVisibility);
+    onSettingsChange(settings);
     onTabVisibilityChange(localVisibility);
-    onClose();
+    setLocalSettings(settings);
+    // One Save = one PUT to the unified aggregator, which dispatches each sub-object
+    // to its domain store (app_settings / alert-thresholds / webhook). Price basis and
+    // refresh schedule save immediately via their own controls, so they're omitted here.
+    const body: Record<string, unknown> = {
+      general: {
+        company_name: settings.companyName, app_display_name: settings.appDisplayName,
+        default_date_range_days: settings.defaultDateRangeDays, default_landing_tab: settings.defaultLandingTab,
+        auto_refresh_minutes: settings.refreshIntervalMinutes, density: settings.density, theme: settings.theme,
+        show_workspace_names: settings.showWorkspaceNames,
+        enable_use_case_tracking: settings.enableUseCaseTracking, enable_accuracy_checks: settings.enableAccuracyChecks,
+      },
+      tab_visibility: localVisibility,
+      thresholds: {
+        spike_threshold_percent: settings.alertSpikePercent, daily_budget: settings.alertDailyBudget,
+        workspace_budget: settings.alertWorkspaceBudget, anomaly_sensitivity: settings.anomalySensitivity,
+      },
+      experimental: { exp_setup_wizard_link: settings.expSetupWizardLink, exp_debugger_link: settings.expDebuggerLink },
+    };
+    if (settings.slackWebhookUrl && settings.slackWebhookUrl !== appSettings.slackWebhookUrl) {
+      body.webhook = { slack_webhook_url: settings.slackWebhookUrl };
+    }
+    fetch("/api/settings", {
+      method: "PUT", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body), signal: AbortSignal.timeout(10000),
+    }).then(() => rqClient.invalidateQueries({ queryKey: ["unified-settings"] })).catch(() => {});
+    setDirty(false);
+    toast(landingHidden ? "Settings saved — landing tab reset to first visible" : "Settings saved");
   };
 
-  const handleSaveGeneral = () => {
-    saveAppSettings(localSettings);
-    onSettingsChange(localSettings);
-    setGeneralDirty(false);
-    if (pendingSchedule) {
-      rqClient.setQueryData(["settings-schedule"], pendingSchedule);
-      fetch("/api/settings/schedule", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(pendingSchedule),
-        signal: AbortSignal.timeout(10000),
-      }).catch(() => {});
-      setPendingSchedule(null);
-    }
-    fetch("/api/settings/alert-thresholds", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
+  const handleReset = () => {
+    if (!window.confirm("Reset all settings to defaults?")) return;
+    const d = DEFAULT_APP_SETTINGS;
+    setLocalSettings({ ...d });
+    setLocalVisibility({ ...DEFAULT_VISIBILITY });
+    saveAppSettings({ ...d });
+    saveTabVisibility({ ...DEFAULT_VISIBILITY });
+    onSettingsChange({ ...d });
+    onTabVisibilityChange({ ...DEFAULT_VISIBILITY });
+    // Persist the reset to the server too, so it survives reopen (the modal re-seeds
+    // from GET /api/settings). Admin-only on the server; no-op for consumers.
+    seededRef.current = true; // don't let the in-flight GET re-seed over the reset
+    fetch("/api/settings", {
+      method: "PUT", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        spike_threshold_percent: localSettings.alertSpikePercent,
-        daily_budget: localSettings.alertDailyBudget,
-        workspace_budget: localSettings.alertWorkspaceBudget,
+        general: {
+          company_name: d.companyName, app_display_name: d.appDisplayName,
+          default_date_range_days: d.defaultDateRangeDays, default_landing_tab: d.defaultLandingTab,
+          auto_refresh_minutes: d.refreshIntervalMinutes, density: d.density, theme: d.theme,
+          show_workspace_names: d.showWorkspaceNames,
+          enable_use_case_tracking: d.enableUseCaseTracking, enable_accuracy_checks: d.enableAccuracyChecks,
+        },
+        tab_visibility: DEFAULT_VISIBILITY,
+        thresholds: {
+          spike_threshold_percent: d.alertSpikePercent, daily_budget: d.alertDailyBudget,
+          workspace_budget: d.alertWorkspaceBudget, anomaly_sensitivity: d.anomalySensitivity,
+        },
+        experimental: { exp_setup_wizard_link: d.expSetupWizardLink, exp_debugger_link: d.expDebuggerLink },
       }),
       signal: AbortSignal.timeout(10000),
-    }).catch(() => {});
-    if (localSettings.slackWebhookUrl !== appSettings.slackWebhookUrl) {
-      fetch("/api/settings/webhook", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ slack_webhook_url: localSettings.slackWebhookUrl }),
-        signal: AbortSignal.timeout(10000),
-      }).catch(() => {});
-    }
-    onClose();
+    }).then(() => rqClient.invalidateQueries({ queryKey: ["unified-settings"] })).catch(() => {});
+    setDirty(false);
+    toast("Settings reset to defaults");
   };
 
-  const visibleCount = Object.values(localVisibility).filter(Boolean).length;
+  const navItems: { key: NavKey; label: string; admin?: boolean }[] = [
+    { key: "general", label: "General" },
+    { key: "tabs", label: "Dashboard tabs" },
+    { key: "alerts", label: "Alerts & notifications", admin: true },
+    { key: "data", label: "Data & tables", admin: true },
+    { key: "access", label: "Access", admin: true },
+    { key: "resources", label: "Resources" },
+    { key: "experimental", label: "Experimental", admin: true },
+  ];
+  const visibleNav = navItems.filter((n) => !n.admin || isAdmin);
 
-  // ── Render ───────────────────────────────────────────────────────────
-  return createPortal(
-    <div className="animate-backdrop fixed inset-0 z-50 overflow-y-auto bg-black/30" onClick={(e) => e.target === e.currentTarget && onClose()}>
-      <div className="flex min-h-full items-center justify-center p-4" onClick={(e) => e.target === e.currentTarget && onClose()}>
-        <div className="animate-dialog relative flex h-[90vh] w-full max-w-6xl flex-col rounded-lg bg-white shadow-xl border border-gray-200" onClick={(e) => e.stopPropagation()}>
-          {/* Header */}
-          <div className="shrink-0 border-b border-gray-200 px-6 py-4">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-3">
-                <div className="flex h-10 w-10 items-center justify-center rounded-lg" style={{ backgroundColor: '#FF3621' }}>
-                  <svg className="h-5 w-5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.066 2.573c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.573 1.066c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.066-2.573c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-                  </svg>
-                </div>
-                <h3 className="text-lg font-semibold text-gray-900">App Settings</h3>
-              </div>
-              <button onClick={onClose} className="rounded-full p-1 text-gray-500 hover:bg-gray-100 hover:text-gray-500">
-                <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                </svg>
-              </button>
+  const navBtn = (key: NavKey, label: string, badge?: React.ReactNode) => {
+    const active = nav === key && !overlay;
+    return (
+      <button key={key} onClick={() => { setOverlay(null); setNav(key); }}
+        style={{
+          display: "flex", alignItems: "center", gap: 6, width: "100%", textAlign: "left",
+          padding: "7px 10px", borderRadius: 6, fontSize: 13, fontWeight: active ? 600 : 500,
+          color: active ? T.text : T.textSecondary, backgroundColor: active ? "#FFFFFF" : "transparent",
+          border: active ? `1px solid ${T.borderGroup}` : "1px solid transparent", cursor: "pointer",
+        }}>
+        {label}{badge}
+      </button>
+    );
+  };
+
+  return (
+    <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/30 p-4" onClick={(e) => e.target === e.currentTarget && requestClose()}>
+      <div style={{ width: "100%", maxWidth: 1120, height: "min(760px, 90vh)", backgroundColor: "#FFFFFF", borderRadius: 8, border: `1px solid ${T.borderGroup}`, boxShadow: "0 20px 60px rgba(0,0,0,0.25)", display: "flex", flexDirection: "column", overflow: "hidden" }} onClick={(e) => e.stopPropagation()}>
+        {/* Header */}
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "16px 20px", borderBottom: `1px solid ${T.borderGroup}` }}>
+          <div>
+            <div style={{ fontSize: 16, fontWeight: 600, color: T.text }}>Settings</div>
+            <div style={{ fontSize: 12, color: T.textSecondary, fontFamily: undefined }}>{appName} · Databricks App</div>
+          </div>
+          <button onClick={requestClose} style={{ padding: 4, borderRadius: 6, color: T.textSecondary, background: "none", border: "none", cursor: "pointer" }} aria-label="Close">
+            <svg style={{ width: 20, height: 20 }} fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
+          </button>
+        </div>
+
+        <div style={{ flex: 1, minHeight: 0, display: "flex" }}>
+          {/* Left nav */}
+          <div style={{ width: 208, flexShrink: 0, backgroundColor: T.navBg, borderRight: `1px solid ${T.borderGroup}`, display: "flex", flexDirection: "column", padding: 12 }}>
+            <div style={{ display: "flex", flexDirection: "column", gap: 2, flex: 1 }}>
+              {visibleNav.map((n) => navBtn(n.key, n.label))}
             </div>
-
-            <div className="mt-4 flex items-center justify-between">
-              <div className="flex flex-wrap gap-1">
-                {(["general", "permissions", "config", "tabs"] as const).map((section) => (
-                  <button
-                    key={section}
-                    onClick={() => setActiveSection(section)}
-                    className={`rounded-lg px-4 py-2 text-sm font-medium transition-colors ${
-                      activeSection === section ? "text-white" : "text-gray-600 hover:bg-gray-100"
-                    }`}
-                    style={activeSection === section ? { backgroundColor: '#1B3139' } : {}}
-                  >
-                    {section === "general" ? "General" : section === "tabs" ? "Visibility" : section === "permissions" ? "Permissions" : "Configuration"}
-                  </button>
-                ))}
-                {localSettings.enableAccuracyChecks && (
-                  <button
-                    onClick={() => setActiveSection("accuracy-checks")}
-                    className={`inline-flex items-center gap-1.5 rounded-lg px-4 py-2 text-sm font-medium transition-colors ${
-                      activeSection === "accuracy-checks" ? "text-white" : "text-gray-600 hover:bg-gray-100"
-                    }`}
-                    style={activeSection === "accuracy-checks" ? { backgroundColor: '#1B3139' } : {}}
-                  >
-                    <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
-                    </svg>
-                    Accuracy Checks
-                  </button>
-                )}
-                <button
-                  onClick={() => setActiveSection("debugger")}
-                  className={`inline-flex items-center gap-1.5 rounded-lg px-4 py-2 text-sm font-medium transition-colors ${
-                    activeSection === "debugger" ? "text-white" : "text-gray-600 hover:bg-gray-100"
-                  }`}
-                  style={activeSection === "debugger" ? { backgroundColor: '#1B3139' } : {}}
-                >
-                  <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
-                  </svg>
-                  Debugger
-                </button>
-                {isAdmin && (
-                  <button
-                    onClick={() => setActiveSection("setup")}
-                    className={`inline-flex items-center gap-1.5 rounded-lg px-4 py-2 text-sm font-medium transition-colors ${
-                      activeSection === "setup" ? "text-white" : "text-gray-600 hover:bg-gray-100"
-                    }`}
-                    style={activeSection === "setup" ? { backgroundColor: '#1B3139' } : {}}
-                  >
-                    <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-                    </svg>
-                    Setup Wizard
-                    <span className="rounded-full bg-amber-100 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wide text-amber-700">
-                      Admin
-                    </span>
-                  </button>
-                )}
-              </div>
-              <div className="relative group">
-                <button
-                  onClick={() => {
-                    setLocalSettings({ ...DEFAULT_APP_SETTINGS });
-                    setLocalVisibility({ ...DEFAULT_VISIBILITY });
-                    saveAppSettings({ ...DEFAULT_APP_SETTINGS });
-                    saveTabVisibility({ ...DEFAULT_VISIBILITY });
-                    onSettingsChange({ ...DEFAULT_APP_SETTINGS });
-                    onTabVisibilityChange({ ...DEFAULT_VISIBILITY });
-                    localStorage.removeItem("coc-permissions-dont-show-again");
-                    setGeneralDirty(false);
-                    setSaveStatus("All settings reset to defaults");
-                    setTimeout(() => setSaveStatus(null), 3000);
-                  }}
-                  className="rounded-lg border border-red-200 px-3 py-1.5 text-xs font-medium text-red-600 transition-colors hover:bg-red-50"
-                >
-                  Reset to Default
-                </button>
-                <div className="pointer-events-none absolute right-0 top-full z-50 mt-2 w-56 rounded-lg bg-gray-900 px-3 py-2 text-xs text-gray-200 opacity-0 shadow-lg transition-opacity group-hover:opacity-100">
-                  Resets all General settings (date range, refresh, budget, alerts), re-enables all tabs, clears company name, and restores the permissions dialog.
-                </div>
-              </div>
+            <div style={{ borderTop: `1px solid ${T.borderGroup}`, paddingTop: 10, marginTop: 10, display: "flex", flexDirection: "column", gap: 4 }}>
+              {isAdmin && localSettings.expSetupWizardLink && (
+                <button onClick={() => setOverlay("setup")} style={footerLink(overlay === "setup")}>Setup wizard <Badge>Experimental</Badge></button>
+              )}
+              {isAdmin && localSettings.expDebuggerLink && (
+                <button onClick={() => setOverlay("debugger")} style={footerLink(overlay === "debugger")}>Debugger <Badge>Experimental</Badge></button>
+              )}
+              {localSettings.enableAccuracyChecks && (
+                <button onClick={() => setOverlay("accuracy")} style={footerLink(overlay === "accuracy")}>Accuracy checks</button>
+              )}
+              <div style={{ fontSize: 11, color: T.textFaint, padding: "4px 10px", fontFamily: undefined }}>cost-obs-v2{version ? ` · ${version.slice(0, 7)}` : ""}</div>
             </div>
           </div>
 
           {/* Content */}
-          <div ref={contentScrollRef} className={`flex-1 min-h-0 overflow-y-auto ${activeSection === "setup" ? "p-0" : "px-6 py-4"}`}>
-            {activeSection === "config" && (
-              <SettingsConfig
-                configLoading={configLoading}
-                appConfig={appConfig}
-                saveStatus={saveStatus}
-                localSettings={localSettings}
-                updateSetting={updateSetting}
-              />
-            )}
-            {activeSection === "general" && (
-              <SettingsGeneral
-                localSettings={localSettings}
-                updateSetting={updateSetting}
-                saveStatus={saveStatus}
-                setSaveStatus={setSaveStatus}
-                onScheduleChange={(s) => { setPendingSchedule(s); setGeneralDirty(true); }}
-              />
-            )}
-            {activeSection === "tabs" && (
-              <SettingsTabs
-                localVisibility={localVisibility}
-                toggleTab={toggleTab}
-                visibleCount={visibleCount}
-                enableUseCaseTracking={localSettings.enableUseCaseTracking}
-              />
-            )}
-            {activeSection === "accuracy-checks" && (
-              <SettingsAccuracyChecks />
-            )}
-            {activeSection === "permissions" && (
-              <SettingsPermissions />
-            )}
-            {activeSection === "debugger" && (
-              <SettingsDebugger onGoToConfig={() => {
-                setActiveSection("config");
-                setTimeout(() => {
-                  const el = contentScrollRef.current?.querySelector("#storage-location-tables");
-                  if (el) el.scrollIntoView({ behavior: "smooth", block: "start" });
-                }, 50);
-              }} />
-            )}
-            {activeSection === "setup" && (
-              isAdmin
-                ? <SetupWizard embedded onComplete={() => {
-                    rqClient.invalidateQueries({ queryKey: ["app-config"] });
-                    rqClient.invalidateQueries({ queryKey: ["settings-tables-status"] });
-                    rqClient.invalidateQueries({ queryKey: READINESS_QUERY_KEY });
-                    onClose();
-                  }} />
-                : (
-                  <div className="flex flex-col items-center justify-center py-16 text-center">
-                    <svg className="mb-3 h-8 w-8 text-gray-300" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
-                    </svg>
-                    <p className="text-sm font-medium text-gray-700">Admin access required</p>
-                    <p className="mt-1 text-xs text-gray-500">Only admins can run the Setup Wizard.</p>
-                  </div>
-                )
-            )}
-          </div>
+          <div style={{ flex: 1, minHeight: 0, overflowY: "auto", backgroundColor: "#FFFFFF" }}>
+            <div style={{ maxWidth: 720, padding: "20px 24px" }}>
+              {overlay === "setup" && isAdmin && (
+                <SetupWizard embedded onComplete={() => {
+                  rqClient.invalidateQueries({ queryKey: ["app-config"] });
+                  rqClient.invalidateQueries({ queryKey: ["settings-tables-status"] });
+                  rqClient.invalidateQueries({ queryKey: READINESS_QUERY_KEY });
+                  setOverlay(null);
+                }} />
+              )}
+              {overlay === "debugger" && isAdmin && (
+                <SettingsDebugger onGoToConfig={() => { setOverlay(null); setNav("data"); }} />
+              )}
+              {overlay === "accuracy" && <SettingsAccuracyChecks />}
 
-          {/* Footer */}
-          <div className="flex shrink-0 items-center justify-end gap-3 border-t border-gray-200 px-6 py-4">
-            {(activeSection === "general" || activeSection === "tabs" || activeSection === "config") && (
-              <button onClick={onClose} className="rounded-lg border border-gray-300 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50">
-                Cancel
-              </button>
-            )}
-            {activeSection === "tabs" && (
-              <button
-                onClick={handleSave}
-                className="btn-brand inline-flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-medium text-white transition-colors"
-              >
-                Save Settings
-              </button>
-            )}
-            {(activeSection === "general" || activeSection === "config") && (
-              <button
-                onClick={handleSaveGeneral}
-                disabled={!generalDirty}
-                className="btn-brand inline-flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-medium text-white transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-              >
-                Save Settings
-              </button>
-            )}
-            {(activeSection === "accuracy-checks" || activeSection === "permissions" || activeSection === "debugger") && (
-              <button
-                onClick={onClose}
-                className="btn-brand inline-flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-medium text-white transition-colors"
-              >
-                Done
-              </button>
-            )}
+              {!overlay && nav === "general" && <GeneralSection localSettings={localSettings} updateSetting={updateSetting} tabVisibility={localVisibility} caps={caps} />}
+              {!overlay && nav === "tabs" && <DashboardTabsSection localVisibility={localVisibility} toggleTab={toggleTab} enableUseCaseTracking={localSettings.enableUseCaseTracking} />}
+              {!overlay && nav === "alerts" && <AlertsSection localSettings={localSettings} updateSetting={updateSetting} caps={caps} />}
+              {!overlay && nav === "data" && <DataTablesSection localSettings={localSettings} updateSetting={updateSetting} caps={caps} />}
+              {!overlay && nav === "access" && <AccessSection />}
+              {!overlay && nav === "resources" && <ResourcesSection />}
+              {!overlay && nav === "experimental" && <ExperimentalSection localSettings={localSettings} updateSetting={updateSetting} />}
+            </div>
+          </div>
+        </div>
+
+        {/* Footer */}
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "12px 20px", borderTop: `1px solid ${T.borderGroup}` }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+            <button onClick={handleReset} style={{ fontSize: 13, color: T.textSecondary, background: "none", border: "none", cursor: "pointer" }}>Reset to defaults</button>
+            {dirty && <span style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 12, color: T.warningFg }}><span style={{ width: 6, height: 6, borderRadius: 999, backgroundColor: "#E0A82E" }} />Unsaved changes</span>}
+          </div>
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <button onClick={requestClose} style={{ height: 32, borderRadius: 4, padding: "0 14px", fontSize: 13, fontWeight: 500, color: T.text, backgroundColor: "#FFFFFF", border: `1px solid ${T.borderControl}`, cursor: "pointer" }}>Cancel</button>
+            <button onClick={handleSave} disabled={!dirty}
+              style={{ height: 32, borderRadius: 4, padding: "0 14px", fontSize: 13, fontWeight: 500, color: "#FFFFFF", backgroundColor: dirty ? T.primary : "#A9C6DC", cursor: dirty ? "pointer" : "not-allowed", border: "none" }}>
+              Save changes
+            </button>
           </div>
         </div>
       </div>
-    </div>,
-    document.body
+    </div>
   );
+}
+
+function footerLink(active: boolean): React.CSSProperties {
+  return {
+    display: "flex", alignItems: "center", gap: 6, width: "100%", textAlign: "left",
+    padding: "6px 10px", borderRadius: 6, fontSize: 12.5, fontWeight: active ? 600 : 500,
+    color: active ? T.text : T.textSecondary, backgroundColor: active ? "#FFFFFF" : "transparent",
+    border: active ? `1px solid ${T.borderGroup}` : "1px solid transparent", cursor: "pointer",
+  };
 }

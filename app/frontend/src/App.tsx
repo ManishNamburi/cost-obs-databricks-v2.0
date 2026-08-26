@@ -211,7 +211,15 @@ function Dashboard() {
   const [appSettings, setAppSettings] = useState<AppSettings>(loadAppSettings);
   const defaultRange = useDefaultDateRange(appSettings.defaultDateRangeDays);
   const [dateRange, setDateRange] = useState<DateRange>(defaultRange);
-  const [activeTab, setActiveTab] = useState<ViewTab>("dbu");
+  const [activeTab, setActiveTab] = useState<ViewTab>(() => {
+    // Start on the configured default landing tab, falling back to the first visible
+    // tab when that tab is hidden or unknown.
+    const v = loadTabVisibility();
+    const want = appSettings.defaultLandingTab as ViewTab;
+    if (want && v[want as keyof TabVisibility]) return want;
+    const first = (Object.keys(v) as ViewTab[]).find((k) => v[k as keyof TabVisibility]);
+    return first ?? "dbu";
+  });
   const [showExportDialog, setShowExportDialog] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const [showConversational, setShowConversational] = useState(false);
@@ -323,15 +331,25 @@ function Dashboard() {
     return () => clearInterval(interval);
   }, [appSettings.refreshIntervalMinutes, rqClient]);
 
-  // Compact mode - toggle CSS class on root
+  // Density → compact-mode CSS class on root
   useEffect(() => {
-    document.documentElement.classList.toggle("compact-mode", appSettings.compactMode);
-  }, [appSettings.compactMode]);
+    document.documentElement.classList.toggle("compact-mode", appSettings.density === "compact");
+  }, [appSettings.density]);
 
-  // Dark mode - toggle CSS class on root
+  // Theme → dark-mode CSS class on root ("system" follows prefers-color-scheme).
   useEffect(() => {
-    document.documentElement.classList.toggle("dark-mode", appSettings.darkMode);
-  }, [appSettings.darkMode]);
+    const apply = () => {
+      const dark = appSettings.theme === "dark" ||
+        (appSettings.theme === "system" && window.matchMedia("(prefers-color-scheme: dark)").matches);
+      document.documentElement.classList.toggle("dark-mode", dark);
+    };
+    apply();
+    if (appSettings.theme === "system") {
+      const mq = window.matchMedia("(prefers-color-scheme: dark)");
+      mq.addEventListener("change", apply);
+      return () => mq.removeEventListener("change", apply);
+    }
+  }, [appSettings.theme]);
 
   const { data: user } = useQuery<User>({
     queryKey: ["user"],
@@ -563,8 +581,9 @@ function Dashboard() {
   const wsFilterList = useMemo(
     () => (wsListData?.workspaces ?? []).map(w => {
       const name = workspaceNameMap[w.id] || w.name || null;
-      // No resolvable name => workspace no longer exists in the account.
-      return { workspace_id: w.id, workspace_name: name, historical: !name };
+      // Trust the server's `historical` (computed from the true resolved name), so the
+      // "workspace display names" toggle nulling names never mislabels a live workspace.
+      return { workspace_id: w.id, workspace_name: name, historical: w.historical ?? !name };
     }),
     [wsListData?.workspaces, workspaceNameMap],
   );
@@ -769,7 +788,7 @@ function Dashboard() {
 
   return (
     <SpNameMapContext.Provider value={spNameMap}>
-    <div className="min-h-screen" style={{ backgroundColor: appSettings.darkMode ? '#1B1F23' : '#F9F7F4' }}>
+    <div className="min-h-screen" style={{ backgroundColor: (appSettings.theme === "dark" || (appSettings.theme === "system" && typeof window !== "undefined" && window.matchMedia("(prefers-color-scheme: dark)").matches)) ? '#1B1F23' : '#F9F7F4' }}>
       <TopProgressBar />
       {/* Setup incomplete banner — non-dismissable, shown when wizard was closed without finishing */}
       {setupIncomplete && (

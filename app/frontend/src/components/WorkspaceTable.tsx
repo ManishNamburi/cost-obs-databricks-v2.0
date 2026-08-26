@@ -141,7 +141,10 @@ export const WorkspaceTable = memo(function WorkspaceTable({ data, isLoading, ho
   // badged when shown — keeping the default row count aligned with the active-workspace
   // KPI. Mirrors the backend `historical` flag (workspace_name is None).
   const isHistoricalWs = (ws: typeof data.workspaces[0]) =>
-    !ws.workspace_id || !(workspaceNameMap?.[ws.workspace_id] || ws.workspace_name);
+    !ws.workspace_id ||
+    (typeof ws.historical === "boolean"
+      ? ws.historical
+      : !(workspaceNameMap?.[ws.workspace_id] || ws.workspace_name));
   const historicalCount = validWorkspaces.filter((ws) => isHistoricalWs(ws)).length;
   // When all workspaces lack names (workspace_name is unavailable), show everything rather than a blank table.
   const allHistorical = historicalCount === validWorkspaces.length;
