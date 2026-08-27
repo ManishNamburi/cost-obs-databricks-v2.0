@@ -1,11 +1,33 @@
 import { useState, useEffect } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
+import awsLogo from "@/assets/aws.png";
+import azureLogo from "@/assets/azure.png";
+import gcpLogo from "@/assets/gcp.svg";
+
+type Cloud = "gcp" | "aws" | "azure";
 
 interface MvSource {
   label: string;
   catalog: string;
   schema: string;
   tables?: string[];
+  cloud?: Cloud;
+  added_at?: string;
+  share_last_updated?: string;
+}
+
+// Cloud → { logo, label font color } per spec: Google red, AWS gold, Azure light green.
+const CLOUD_META: Record<Cloud, { logo: string; color: string; name: string }> = {
+  gcp: { logo: gcpLogo, color: "#D93025", name: "Google Cloud" },
+  aws: { logo: awsLogo, color: "#B8860B", name: "AWS" },
+  azure: { logo: azureLogo, color: "#3E9C3E", name: "Azure" },
+};
+
+function fmtTs(ts?: string): string | null {
+  if (!ts) return null;
+  try {
+    return new Date(ts).toLocaleString(undefined, { month: "short", day: "numeric", year: "numeric", hour: "2-digit", minute: "2-digit" });
+  } catch { return ts; }
 }
 
 interface PreviewTable {
@@ -28,9 +50,12 @@ interface PreviewResult {
 export function MvSourcesSection() {
   const queryClient = useQueryClient();
 
+  // detail=1 asks the server for each source's share_last_updated (DESCRIBE DETAIL).
+  // The top-nav SourceLabelFilter fetches ["mv-sources"] WITHOUT detail, so this
+  // heavier query is separate and only runs in the settings modal.
   const { data, isLoading } = useQuery<{ sources: MvSource[]; local_label: string }>({
-    queryKey: ["mv-sources"],
-    queryFn: () => fetch("/api/settings/mv-sources").then((r) => r.json()).catch(() => ({ sources: [], local_label: "" })),
+    queryKey: ["mv-sources", "detail"],
+    queryFn: () => fetch("/api/settings/mv-sources?detail=1").then((r) => r.json()).catch(() => ({ sources: [], local_label: "" })),
     staleTime: 30 * 1000,
   });
   const sources = data?.sources ?? [];
@@ -147,40 +172,56 @@ export function MvSourcesSection() {
 
   return (
     <div className="mb-3 rounded-lg border border-gray-200 bg-white p-3">
-      <h4 className="mb-2 text-sm font-semibold text-gray-900">Additional data (shared views)</h4>
+      {/* Header: title + subtitle on the left, primary Browse button top-right. */}
+      <div className="mb-2 flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <h4 className="text-sm font-semibold text-gray-900">Additional data (shared views)</h4>
+          <p className="mt-0.5 text-xs text-gray-500">Add cost data from other workspaces/clouds through OpenSharing</p>
+        </div>
+        {!open && (
+          <button
+            onClick={() => setOpen(true)}
+            className="inline-flex shrink-0 items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-semibold text-white transition-colors"
+            style={{ backgroundColor: "#2272B4" }}
+          >
+            <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" />
+            </svg>
+            Browse
+          </button>
+        )}
+      </div>
 
       {isLoading ? (
         <div className="text-xs text-gray-500">Loading…</div>
       ) : sources.length > 0 ? (
         <div className="space-y-1.5">
-          {sources.map((s) => (
-            <div key={s.label} className="flex items-center gap-2 rounded-md border border-gray-100 bg-gray-50 px-2.5 py-1.5">
-              <span className="rounded-full border border-amber-200 bg-amber-50 px-1.5 py-0.5 text-[10px] font-medium text-amber-700">{s.label}</span>
-              <span className="min-w-0 flex-1 truncate font-mono text-xs text-gray-600">{s.catalog}.{s.schema}</span>
-              <span className="shrink-0 text-[10px] text-gray-500">
-                {s.tables ? `${s.tables.length} view${s.tables.length === 1 ? "" : "s"}` : "all views"}
-              </span>
-              <button onClick={() => removeSource(s.label)} disabled={busy} className="shrink-0 text-xs font-medium text-gray-500 hover:text-red-600 disabled:opacity-50">
-                Remove
-              </button>
-            </div>
-          ))}
+          {sources.map((s) => {
+            const meta = s.cloud ? CLOUD_META[s.cloud] : null;
+            const added = fmtTs(s.added_at);
+            const shareUpd = fmtTs(s.share_last_updated);
+            return (
+              <div key={s.label} className="flex items-center gap-2.5 rounded-md border border-gray-100 bg-gray-50 px-2.5 py-2">
+                {meta && <img src={meta.logo} alt={meta.name} title={meta.name} className="h-4 w-4 shrink-0 object-contain" />}
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center gap-2">
+                    <span className="shrink-0 text-xs font-bold" style={meta ? { color: meta.color } : undefined}>{s.label}</span>
+                    <span className="min-w-0 truncate font-mono text-xs text-gray-500">{s.catalog}.{s.schema}</span>
+                  </div>
+                  <div className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[10px] text-gray-500">
+                    <span>{s.tables ? `${s.tables.length} view${s.tables.length === 1 ? "" : "s"}` : "all views"}</span>
+                    {added && <><span className="text-gray-300">·</span><span>Added {added}</span></>}
+                    {shareUpd && <><span className="text-gray-300">·</span><span>Share updated {shareUpd}</span></>}
+                  </div>
+                </div>
+                <button onClick={() => removeSource(s.label)} disabled={busy} className="shrink-0 self-start text-xs font-medium text-gray-500 hover:text-red-600 disabled:opacity-50">
+                  Remove
+                </button>
+              </div>
+            );
+          })}
         </div>
       ) : null}
-
-      {/* Browse is the primary affordance for adding a Delta-shared source. */}
-      {!open && (
-        <button
-          onClick={() => setOpen(true)}
-          className="mt-2 inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-semibold text-white transition-colors"
-          style={{ backgroundColor: "#2272B4" }}
-        >
-          <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" />
-          </svg>
-          Browse{sources.length > 0 ? " for another source" : ""}
-        </button>
-      )}
 
       {open && (
         <div className="mt-2 space-y-2 rounded-lg border border-gray-200 bg-gray-50 p-3">

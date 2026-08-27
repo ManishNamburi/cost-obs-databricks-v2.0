@@ -500,6 +500,10 @@ def save_mv_sources(sources: list[dict]) -> None:
             picked = [str(t).strip() for t in s["tables"] if str(t).strip()]
             if picked:
                 entry["tables"] = picked
+        if s.get("cloud"):
+            entry["cloud"] = str(s["cloud"]).strip().lower()
+        if s.get("added_at"):
+            entry["added_at"] = str(s["added_at"])
         clean.append(entry)
     os.makedirs(os.path.dirname(_MV_SOURCES_FILE), exist_ok=True)
     with open(_MV_SOURCES_FILE, "w") as f:
@@ -519,16 +523,24 @@ def _mv_sources_table() -> str:
 
 
 def _ensure_mv_sources_table() -> None:
-    """Create the durable MV-sources table if it doesn't exist."""
+    """Create the durable MV-sources table if it doesn't exist, and add the cloud /
+    added_at columns to a pre-existing table (migration for deployments created before
+    those columns were introduced)."""
     table = _mv_sources_table()
     if not table:
         return
     execute_write(
         f"CREATE TABLE IF NOT EXISTS {table} "
         f"(label STRING NOT NULL, catalog STRING NOT NULL, schema STRING NOT NULL, "
-        f"tables STRING, updated_at TIMESTAMP) USING DELTA",
+        f"tables STRING, cloud STRING, added_at STRING, updated_at TIMESTAMP) USING DELTA",
         None,
     )
+    # Best-effort column adds for tables created before cloud/added_at existed.
+    for col in ("cloud STRING", "added_at STRING"):
+        try:
+            execute_write(f"ALTER TABLE {table} ADD COLUMNS ({col})", None)
+        except Exception:
+            pass  # column already present
 
 
 def read_delta_mv_sources() -> list[dict]:
@@ -538,7 +550,7 @@ def read_delta_mv_sources() -> list[dict]:
         if not table:
             return []
         _ensure_mv_sources_table()
-        rows = execute_query(f"SELECT label, catalog, schema, tables FROM {table}", None, no_cache=True)
+        rows = execute_query(f"SELECT label, catalog, schema, tables, cloud, added_at FROM {table}", None, no_cache=True)
         out: list[dict] = []
         for r in (rows or []):
             entry = {"label": r.get("label"), "catalog": r.get("catalog"), "schema": r.get("schema")}
@@ -550,6 +562,10 @@ def read_delta_mv_sources() -> list[dict]:
                         entry["tables"] = [str(x) for x in parsed]
                 except (json.JSONDecodeError, TypeError):
                     pass
+            if r.get("cloud"):
+                entry["cloud"] = r["cloud"]
+            if r.get("added_at"):
+                entry["added_at"] = r["added_at"]
             out.append(entry)
         return out
     except Exception as e:
@@ -558,7 +574,10 @@ def read_delta_mv_sources() -> list[dict]:
 
 
 def write_delta_mv_sources(sources: list[dict]) -> None:
-    """Persist MV sources to the durable Delta table (replace-all). Best-effort."""
+    """Persist MV sources to the durable Delta table (replace-all). Best-effort.
+    `added_at` is carried on each source so its original add-time survives the
+    replace-all rewrite; only genuinely new sources get a fresh timestamp (set by
+    the caller)."""
     try:
         table = _mv_sources_table()
         if not table:
@@ -567,11 +586,13 @@ def write_delta_mv_sources(sources: list[dict]) -> None:
         execute_write(f"DELETE FROM {table}", None)
         for s in sources:
             execute_write(
-                f"INSERT INTO {table} (label, catalog, schema, tables, updated_at) "
-                f"VALUES (:label, :catalog, :schema, :tables, current_timestamp())",
+                f"INSERT INTO {table} (label, catalog, schema, tables, cloud, added_at, updated_at) "
+                f"VALUES (:label, :catalog, :schema, :tables, :cloud, :added_at, current_timestamp())",
                 {
                     "label": s["label"], "catalog": s["catalog"], "schema": s["schema"],
                     "tables": json.dumps(s["tables"]) if isinstance(s.get("tables"), list) else None,
+                    "cloud": s.get("cloud"),
+                    "added_at": s.get("added_at"),
                 },
             )
         logger.info("MV sources persisted to Delta table (%d source(s))", len(sources))
@@ -796,9 +817,16 @@ def _ensure_response_cache_table() -> bool:
 
 
 def bundle_cache_key(endpoint: str, start_date: str, end_date: str, workspace_ids: list[str] | None) -> str:
-    """Stable MD5 cache key for a bundle request."""
+    """Stable MD5 cache key for a bundle request.
+
+    Includes the active source-label selection so the data-source filter actually
+    changes the cached result — without it, every filter selection hashed to the
+    same key and the cached combined (all-sources) bundle was served regardless.
+    """
     ws_part = ",".join(sorted(workspace_ids)) if workspace_ids else ""
-    raw = f"{endpoint}:{start_date}:{end_date}:{ws_part}"
+    labels = sorted(str(x) for x in _source_labels.get() if str(x).strip())
+    src_part = ",".join(labels)
+    raw = f"{endpoint}:{start_date}:{end_date}:{ws_part}:{src_part}"
     return hashlib.md5(raw.encode()).hexdigest()
 
 

@@ -1122,12 +1122,64 @@ def _invalidate_mv_caches() -> None:
         pass
 
 
+def _detect_source_cloud(catalog: str) -> str | None:
+    """Best-effort detect which cloud a Delta-shared catalog originates from
+    ('gcp' | 'aws' | 'azure'), via its provider's cloud/region. None if unknown."""
+    try:
+        from backend.db import get_workspace_client
+        w = get_workspace_client()
+        provider_name = getattr(w.catalogs.get(catalog), "provider_name", None)
+        if not provider_name:
+            return None
+        prov = w.providers.get(provider_name)
+        hint = " ".join(str(getattr(prov, a, "") or "") for a in ("cloud", "region")).lower()
+        # recipient_profile can also carry a region/endpoint hint
+        rp = getattr(prov, "recipient_profile", None)
+        if rp:
+            hint += " " + str(getattr(rp, "endpoint", "") or "").lower()
+        if "gcp" in hint or "google" in hint:
+            return "gcp"
+        if "azure" in hint:
+            return "azure"
+        if "aws" in hint or "amazon" in hint:
+            return "aws"
+    except Exception as e:
+        logger.debug("Source cloud detection failed for %s (non-fatal): %s", catalog, e)
+    return None
+
+
+def _share_last_updated(catalog: str, schema: str, tables: list[str] | None) -> str | None:
+    """Best-effort latest lastModified across the source's shared tables (ISO string)."""
+    from backend.db import execute_query
+    from backend.materialized_views import _MV_TABLES
+    probe = (tables or _MV_TABLES)[:1]  # one representative table is enough + cheap
+    for t in probe:
+        try:
+            rows = execute_query(f"DESCRIBE DETAIL `{catalog}`.`{schema}`.`{t}`", None, no_cache=True)
+            if rows and rows[0].get("lastModified"):
+                return str(rows[0]["lastModified"])
+        except Exception:
+            continue
+    return None
+
+
 @router.get("/mv-sources")
-async def get_mv_sources_endpoint() -> dict:
+async def get_mv_sources_endpoint(detail: bool = False) -> dict:
     """Additional MV source locations unioned into every MV read, plus this
-    workspace's own label (used for its rows in the source_label column)."""
+    workspace's own label (used for its rows in the source_label column).
+
+    `detail=1` (used by the settings modal, not the top-nav filter) adds each
+    source's `share_last_updated` via a DESCRIBE DETAIL probe — kept off the default
+    path so the frequently-polled nav filter stays fast."""
     from backend.db import get_mv_sources, get_local_source_label
-    return {"sources": get_mv_sources(), "local_label": get_local_source_label()}
+    sources = get_mv_sources()
+    if detail:
+        def _enrich():
+            for s in sources:
+                s["share_last_updated"] = _share_last_updated(s.get("catalog"), s.get("schema"), s.get("tables"))
+            return sources
+        sources = await asyncio.to_thread(_enrich)
+    return {"sources": sources, "local_label": get_local_source_label()}
 
 
 @router.get("/mv-sources/preview")
@@ -1190,9 +1242,14 @@ async def add_mv_source(request: Request, body: dict) -> dict:
             raise HTTPException(status_code=400, detail="Select at least one view to include.")
 
     sources = [s for s in get_mv_sources() if s.get("label") != label]
-    entry = {"label": label, "catalog": catalog, "schema": schema}
+    from datetime import datetime, timezone
+    entry = {"label": label, "catalog": catalog, "schema": schema,
+             "added_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")}
     if tables is not None:
         entry["tables"] = tables
+    cloud = await asyncio.to_thread(_detect_source_cloud, catalog)
+    if cloud:
+        entry["cloud"] = cloud
     sources.append(entry)
     save_mv_sources(sources)
     summary = await asyncio.to_thread(rebuild_unified_views)

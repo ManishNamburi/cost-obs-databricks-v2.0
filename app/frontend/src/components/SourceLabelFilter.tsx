@@ -43,7 +43,8 @@ export function SourceLabelFilter() {
   const allSelected = selected.size === allLabels.length;
 
   const apply = async (next: Set<string>) => {
-    // Empty selection is treated as "all" so the dashboard never goes blank.
+    // At least one source is always selected (the toggle enforces it); a full
+    // selection means "all" (empty filter = every source).
     const effective = next.size === 0 || next.size === allLabels.length ? [] : Array.from(next);
     // Skip the refetch when the effective selection hasn't changed (e.g. closing
     // the dropdown without edits).
@@ -69,7 +70,13 @@ export function SourceLabelFilter() {
   const toggle = (label: string) => {
     setSelected((prev) => {
       const next = new Set(prev);
-      next.has(label) ? next.delete(label) : next.add(label);
+      if (next.has(label)) {
+        // At least one source must always stay selected — refuse to clear the last one.
+        if (next.size <= 1) return prev;
+        next.delete(label);
+      } else {
+        next.add(label);
+      }
       return next;
     });
   };
@@ -108,11 +115,8 @@ export function SourceLabelFilter() {
         <div className="absolute right-0 z-20 mt-2 min-w-[220px] rounded-lg border border-gray-200 bg-white p-3 shadow-lg">
           <div className="mb-2 flex items-center justify-between">
             <span className="text-xs font-semibold uppercase tracking-wide text-gray-500">Data source</span>
-            <div className="flex gap-2">
-              <button onClick={() => setSelected(new Set(allLabels))} className="text-xs text-gray-500 hover:text-gray-800">All</button>
-              <span className="text-gray-300">·</span>
-              <button onClick={() => setSelected(new Set())} className="text-xs text-gray-500 hover:text-gray-800">Clear</button>
-            </div>
+            {/* No "Clear" — at least one source must stay selected. "All" selects every source. */}
+            <button onClick={() => setSelected(new Set(allLabels))} className="text-xs text-gray-500 hover:text-gray-800">All</button>
           </div>
           <div className="max-h-60 space-y-1 overflow-y-auto">
             {allLabels.map((lbl) => {

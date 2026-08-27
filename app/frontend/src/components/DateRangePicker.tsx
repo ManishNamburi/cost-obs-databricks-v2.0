@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useUpdatingIndicator, UPDATING_SPINNER_PATH } from "@/hooks/useUpdatingIndicator";
 import { format, parseISO, subDays, subMonths, startOfMonth } from "date-fns";
 import type { DateRange } from "@/types/billing";
 
@@ -21,6 +22,7 @@ const PRESETS = [
 ];
 
 export function DateRangePicker({ value, onChange }: DateRangePickerProps) {
+  const { updating, arm } = useUpdatingIndicator();
   const [isOpen, setIsOpen] = useState(false);
   const [customStart, setCustomStart] = useState(value.startDate);
   const [customEnd, setCustomEnd] = useState(value.endDate);
@@ -38,11 +40,13 @@ export function DateRangePicker({ value, onChange }: DateRangePickerProps) {
     onChange(dates);
     setCustomStart(dates.startDate);
     setCustomEnd(dates.endDate);
+    arm();
     setIsOpen(false);
   };
 
   const handleCustomApply = () => {
     onChange({ startDate: customStart, endDate: customEnd });
+    arm();
     setIsOpen(false);
   };
 
@@ -52,11 +56,18 @@ export function DateRangePicker({ value, onChange }: DateRangePickerProps) {
         onClick={() => setIsOpen(!isOpen)}
         className="flex w-80 items-center gap-2 rounded-full border border-gray-200 bg-white px-4 py-1.5 text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors"
       >
-        <svg className="h-4 w-4 shrink-0 text-gray-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
-        </svg>
+        {updating ? (
+          <svg className="h-4 w-4 shrink-0 animate-spin text-[#FF3621]" viewBox="0 0 24 24" fill="none">
+            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+            <path className="opacity-75" fill="currentColor" d={UPDATING_SPINNER_PATH} />
+          </svg>
+        ) : (
+          <svg className="h-4 w-4 shrink-0 text-gray-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
+          </svg>
+        )}
         <span className="flex-1 text-center">
-          {formatDisplayDate(value.startDate)} – {formatDisplayDate(value.endDate)}
+          {updating ? "Updating…" : `${formatDisplayDate(value.startDate)} – ${formatDisplayDate(value.endDate)}`}
         </span>
         <svg className={`h-4 w-4 shrink-0 text-gray-500 transition-transform ${isOpen ? "rotate-180" : ""}`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />

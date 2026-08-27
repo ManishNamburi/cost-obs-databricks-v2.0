@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect } from "react";
+import { useUpdatingIndicator, UPDATING_SPINNER_PATH } from "@/hooks/useUpdatingIndicator";
 
 interface Workspace {
   workspace_id: string | null;
@@ -22,6 +23,7 @@ interface WorkspaceFilterProps {
 }
 
 export function WorkspaceFilter({ workspaces, selectedIds, onChange, isLoading }: WorkspaceFilterProps) {
+  const { updating, arm } = useUpdatingIndicator();
   const [isOpen, setIsOpen] = useState(false);
   const [search, setSearch] = useState("");
   // Draft state — reflects checkbox clicks but is NOT applied until "Apply" is clicked.
@@ -84,6 +86,7 @@ export function WorkspaceFilter({ workspaces, selectedIds, onChange, isLoading }
   function handleApply() {
     if (!applyEnabled) return;
     onChange(draftAll ? [] : draftIds);
+    arm();
     setIsOpen(false);
   }
 
@@ -108,10 +111,17 @@ export function WorkspaceFilter({ workspaces, selectedIds, onChange, isLoading }
         onClick={() => setIsOpen((o) => !o)}
         className="inline-flex items-center gap-2 rounded-full border border-gray-200 bg-white px-3 py-1.5 text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors"
       >
-        <svg className="h-4 w-4 shrink-0 text-gray-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4" />
-        </svg>
-        <span className="max-w-[140px] truncate">{label()}</span>
+        {updating ? (
+          <svg className="h-4 w-4 shrink-0 animate-spin text-[#FF3621]" viewBox="0 0 24 24" fill="none">
+            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+            <path className="opacity-75" fill="currentColor" d={UPDATING_SPINNER_PATH} />
+          </svg>
+        ) : (
+          <svg className="h-4 w-4 shrink-0 text-gray-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4" />
+          </svg>
+        )}
+        <span className="max-w-[140px] truncate">{updating ? "Updating…" : label()}</span>
         {!allSelected && (
           <button
             onClick={(e) => { e.stopPropagation(); onChange([]); }}
