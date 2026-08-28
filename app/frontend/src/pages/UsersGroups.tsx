@@ -33,20 +33,22 @@ function InfoTooltip({ text }: { text: string }) {
 import type { UserSpend } from "@/hooks/useBillingData";
 import type { DateRange } from "@/types/billing";
 import { formatIdentity, isServicePrincipal, useSpNameMap } from "@/utils/identity";
+import { C } from "@/theme";
+import { PageHero, Chip } from "@/components/brand";
 
-const COLORS = ["#1B5162", "#06B6D4", "#10B981", "#14B8A6", "#F59E0B", "#06B6D4", "#EC4899", "#EF4444", "#6B7280", "#3B82F6"];
+const COLORS = [C.s2, C.s5, C.s3, C.s3, C.s4, C.s5, C.s1, C.lava, C.slate, C.s5];
 
 const PRODUCT_COLORS: Record<string, string> = {
-  "ETL - Batch": "#1B5162",
-  "ETL - Streaming": "#06B6D4",
-  "Interactive": "#10B981",
-  "SQL": "#14B8A6",
-  "Serverless": "#F59E0B",
-  "Model Serving": "#06B6D4",
-  "Fine-Tuning": "#EC4899",
-  "AI Search": "#EF4444",
-  "AI Functions": "#FF3621",
-  "Other": "#6B7280",
+  "ETL - Batch": C.s2,
+  "ETL - Streaming": C.s5,
+  "Interactive": C.s3,
+  "SQL": C.s3,
+  "Serverless": C.s4,
+  "Model Serving": C.s5,
+  "Fine-Tuning": C.s1,
+  "AI Search": C.lava,
+  "AI Functions": C.lava,
+  "Other": C.slate,
 };
 
 function fmt(n: number) {
@@ -67,8 +69,6 @@ function formatNumber(n: number) {
 function UserDetailModal({ user, onClose }: { user: UserSpend; onClose: () => void }) {
   const spNameMap = useSpNameMap();
   const [detail, setDetail] = useState<{ permission_grants: { type: string; value: string }[] } | null>(null);
-  
-
   useEffect(() => {
     fetch(`/api/users-groups/user-detail/${encodeURIComponent(user.user_email)}`)
       .then(r => r.json())
@@ -124,7 +124,7 @@ function UserDetailModal({ user, onClose }: { user: UserSpend; onClose: () => vo
                         <span className="font-medium text-gray-800">{fmt(p.spend)}</span>
                       </div>
                       <div className="h-1.5 w-full rounded-full bg-gray-100">
-                        <div className="h-1.5 rounded-full" style={{ width: `${pct}%`, backgroundColor: PRODUCT_COLORS[p.product] || '#999' }} />
+                        <div className="h-1.5 rounded-full" style={{ width: `${pct}%`, backgroundColor: PRODUCT_COLORS[p.product] || C.muted }} />
                       </div>
                     </div>
                   );
@@ -175,10 +175,10 @@ function ProductDrilldown({ topUsers }: { topUsers: UserSpend[] }) {
     : [];
 
   return (
-    <div className="rounded-lg bg-white p-6 border " style={{ borderColor: '#E5E5E5' }}>
+    <div className="rounded-lg bg-white p-6 border " style={{ borderColor: C.hairline }}>
       <div className="mb-4 flex items-center justify-between">
         <h3 className="text-lg font-medium text-gray-900">User Spend by Product</h3>
-        <span className="text-xs font-medium" style={{ color: '#FF3621' }}>Click a row to drill down ↓</span>
+        <span className="text-xs font-medium" style={{ color: C.lava }}>Click a row to drill down ↓</span>
       </div>
       <div className="space-y-2.5">
         {sorted.map(([product, spend]) => {
@@ -191,14 +191,14 @@ function ProductDrilldown({ topUsers }: { topUsers: UserSpend[] }) {
                 onClick={() => setSelectedProduct(isSelected ? null : product)}
               >
                 <div className="flex justify-between text-xs mb-1">
-                  <span className={`font-medium ${isSelected ? 'text-[#FF3621]' : 'text-gray-600 group-hover:text-gray-900'}`}>
+                  <span className={`font-medium ${isSelected ? 'text-lava' : 'text-gray-600 group-hover:text-gray-900'}`}>
                     {product}
                     <span className="ml-1 text-gray-500 text-[10px]">{isSelected ? '▲' : '▼'}</span>
                   </span>
                   <span className="font-medium text-gray-800">{fmt(spend)} <span className="text-gray-500">({pct.toFixed(1)}%)</span></span>
                 </div>
                 <div className="h-2 w-full rounded-full bg-gray-100">
-                  <div className="h-2 rounded-full transition-all" style={{ width: `${pct}%`, backgroundColor: isSelected ? '#FF3621' : (PRODUCT_COLORS[product] || '#999') }} />
+                  <div className="h-2 rounded-full transition-all" style={{ width: `${pct}%`, backgroundColor: isSelected ? C.lava : (PRODUCT_COLORS[product] || C.muted) }} />
                 </div>
               </button>
               {isSelected && top5.length > 0 && (
@@ -258,7 +258,8 @@ export default function UsersGroups({ startDate, endDate, dateRange, anonymizeUs
   });
   const handleMinimizeToggle = (v: boolean) => {
     setInfoMinimized(v);
-    v ? localStorage.setItem("cost-obs-minimize-users-info", "true") : localStorage.removeItem("cost-obs-minimize-users-info");
+    if (v) localStorage.setItem("cost-obs-minimize-users-info", "true");
+    else localStorage.removeItem("cost-obs-minimize-users-info");
   };
 
   useEffect(() => {
@@ -275,8 +276,6 @@ export default function UsersGroups({ startDate, endDate, dateRange, anonymizeUs
   }, []);
 
   const { data, isLoading } = useUsersGroupsBundle(dateRange, workspaceIds);
-  
-
   const summary = data?.summary;
   const topUsers = data?.top_users ?? [];
   const uniqueProducts = Array.from(new Set(topUsers.map(u => u.primary_product).filter(Boolean))).sort() as string[];
@@ -341,7 +340,7 @@ export default function UsersGroups({ startDate, endDate, dateRange, anonymizeUs
   if (isLoading) {
     return (
       <div className="flex h-64 flex-col items-center justify-center gap-3">
-        <div className="h-12 w-12 animate-spin rounded-full border-4 border-gray-200" style={{ borderTopColor: '#FF3621' }} />
+        <div className="h-12 w-12 animate-spin rounded-full border-4 border-gray-200" style={{ borderTopColor: C.lava }} />
         <p className="text-sm text-gray-500">Loading user spend data…</p>
       </div>
     );
@@ -350,24 +349,24 @@ export default function UsersGroups({ startDate, endDate, dateRange, anonymizeUs
   return (
     <div className="space-y-6">
       {/* Header */}
-      <div className="flex items-center gap-3">
-        <div className="rounded-lg p-2" style={{ backgroundColor: '#FF3621' }}>
-          <svg className="h-6 w-6 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+      <PageHero
+        icon={
+          <svg fill="none" viewBox="0 0 24 24" stroke="currentColor">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z" />
           </svg>
-        </div>
-        <div>
-          <h1 className="text-2xl font-bold text-gray-900">Users</h1>
-          <div className="flex items-center gap-2 flex-wrap">
-            <p className="text-sm text-gray-500">User spend attribution and top consumers by product</p>
+        }
+        title="Users"
+        subtitle={
+          <>
+            User spend attribution and top consumers by product
             {workspaceIds && workspaceIds.length > 0 && (
-              <span className="rounded bg-[#1B3139]/10 px-2 py-0.5 text-[10px] font-medium text-[#1B3139]">
+              <Chip kind="workspace">
                 {workspaceIds.length === 1 ? (workspaceNameMap?.[workspaceIds[0]] || workspaceIds[0]) : `${workspaceIds.length} workspaces`}
-              </span>
+              </Chip>
             )}
-          </div>
-        </div>
-      </div>
+          </>
+        }
+      />
 
       {/* Best Practices Banner */}
       <div className="rounded-lg border border-orange-200 bg-orange-50 p-4">
@@ -413,7 +412,7 @@ export default function UsersGroups({ startDate, endDate, dateRange, anonymizeUs
         {/* Active users */}
         <div className="rounded-xl border border-gray-200 bg-white p-6 shadow-sm cursor-pointer hover:shadow-md hover:scale-[1.01] transition-all" onClick={() => startDate && endDate && setSelectedKPI({kpi: "total_users", label: "Daily Unique Active Users", variant: "platform"})}>
           <div className="flex items-center gap-3">
-            <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-lg bg-orange-100 text-[#FF3621]">
+            <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-lg bg-orange-100 text-lava">
               <svg className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" /></svg>
             </div>
             <div className="min-w-0">
@@ -423,14 +422,14 @@ export default function UsersGroups({ startDate, endDate, dateRange, anonymizeUs
               </p>
               <p className="text-2xl font-semibold text-gray-900">{summary?.user_count?.toLocaleString() ?? "—"}</p>
               <p className="text-xs text-gray-500">across {summary?.workspace_count ?? "—"} workspaces</p>
-              <p className="mt-1 text-xs font-medium" style={{ color: '#FF3621' }}>Click to see trend →</p>
+              <p className="mt-1 text-xs font-medium" style={{ color: C.lava }}>See trend →</p>
             </div>
           </div>
         </div>
         {/* User Spend */}
         <div className="rounded-xl border border-gray-200 bg-white p-6 shadow-sm cursor-pointer hover:shadow-md hover:scale-[1.01] transition-all" onClick={() => startDate && endDate && setSelectedKPI({kpi: "avg_spend_per_user", label: "Daily Per-User Spend"})}>
           <div className="flex items-center gap-3">
-            <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-lg bg-orange-100 text-[#FF3621]">
+            <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-lg bg-orange-100 text-lava">
               <svg className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" /></svg>
             </div>
             <div className="min-w-0">
@@ -440,28 +439,31 @@ export default function UsersGroups({ startDate, endDate, dateRange, anonymizeUs
               </p>
               <p className="text-2xl font-semibold text-gray-900">{summary ? fmt(summary.avg_spend_per_user) : "—"}</p>
               <p className="text-xs text-gray-500">Per-user spend over {daysDiff} days</p>
-              <p className="mt-1 text-xs font-medium" style={{ color: '#FF3621' }}>Click to see trend →</p>
+              <p className="mt-1 text-xs font-medium" style={{ color: C.lava }}>See trend →</p>
             </div>
           </div>
         </div>
         {/* Power Users */}
         <div className="rounded-xl border border-gray-200 bg-white p-6 shadow-sm cursor-pointer hover:shadow-md hover:scale-[1.01] transition-all" onClick={() => startDate && endDate && setSelectedKPI({kpi: "power_user_spend", label: "Power User Daily Spend"})}>
           <div className="flex items-center gap-3">
-            <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-lg bg-orange-100 text-[#FF3621]">
+            <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-lg bg-orange-100 text-lava">
               <svg className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 3v4M3 5h4M6 17v4m-2-2h4m5-16l2.286 6.857L21 12l-5.714 2.143L13 21l-2.286-6.857L5 12l5.714-2.143L13 3z" /></svg>
             </div>
             <div className="min-w-0">
-              <p className="text-sm text-gray-500 flex items-center">Power Users<InfoTooltip text="Users whose spend accounts for ≥10% of total spend in the selected period. These high-impact users drive the majority of platform costs." /></p>
+              <p className="text-sm text-gray-500 flex items-center">
+                Power Users
+                <InfoTooltip text="Users whose spend accounts for ≥10% of total spend in the selected period. These high-impact users drive the majority of platform costs." />
+              </p>
               <p className="text-2xl font-semibold text-gray-900">{powerUsers.length}</p>
               <p className="text-xs text-gray-500">{fmt(powerUsersSpend)} spend over {daysDiff} days</p>
-              <p className="mt-1 text-xs font-medium" style={{ color: '#FF3621' }}>Click to see trend →</p>
+              <p className="mt-1 text-xs font-medium" style={{ color: C.lava }}>See trend →</p>
             </div>
           </div>
         </div>
         {/* User Spend Growth */}
         <div className="rounded-xl border border-gray-200 bg-white p-6 shadow-sm cursor-pointer hover:shadow-md hover:scale-[1.01] transition-all" onClick={() => startDate && endDate && setSelectedKPI({kpi: "user_spend", label: "Daily User Spend"})}>
           <div className="flex items-center gap-3">
-            <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-lg bg-orange-100 text-[#FF3621]">
+            <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-lg bg-orange-100 text-lava">
               <svg className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6" /></svg>
             </div>
             <div className="min-w-0">
@@ -474,10 +476,10 @@ export default function UsersGroups({ startDate, endDate, dateRange, anonymizeUs
                   {summary.spend_growth_pct >= 0 ? "+" : ""}{summary.spend_growth_pct}%
                 </p>
               ) : (
-                <p className="text-2xl font-semibold text-gray-500">—</p>
+                <p className="text-2xl font-semibold" style={{ color: C.muted }}>—</p>
               )}
               <p className="text-[11px] text-gray-500">{summary?.user_count?.toLocaleString() ?? "—"} total users · {daysDiff} days</p>
-              <p className="mt-1 text-xs font-medium" style={{ color: '#FF3621' }}>Click to see trend →</p>
+              <p className="mt-1 text-xs font-medium" style={{ color: C.lava }}>See trend →</p>
             </div>
           </div>
         </div>
@@ -499,15 +501,15 @@ export default function UsersGroups({ startDate, endDate, dateRange, anonymizeUs
       {/* Charts row */}
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
         {/* Top users bar chart */}
-        <div className="rounded-lg bg-white p-6 border " style={{ borderColor: '#E5E5E5' }}>
+        <div className="rounded-lg bg-white p-6 border " style={{ borderColor: C.hairline }}>
           <div className="mb-4 flex items-center justify-between">
             <h3 className="text-lg font-medium text-gray-900">Top Users by Spend</h3>
-            <span className="text-xs font-medium" style={{ color: '#FF3621' }}>Click a bar to drill down ↓</span>
+            <span className="text-xs font-medium" style={{ color: C.lava }}>Click a bar to drill down ↓</span>
           </div>
           <ResponsiveContainer width="100%" height={320}>
             <BarChart data={barData} layout="vertical" margin={{ left: 8, right: 24, top: 0, bottom: 0 }}>
-              <XAxis type="number" tickFormatter={v => fmt(v)} stroke="#9ca3af" fontSize={12} tickMargin={8} />
-              <YAxis type="category" dataKey="user" width={140} stroke="#9ca3af" fontSize={12} tickMargin={8} interval={0} />
+              <XAxis type="number" tickFormatter={v => fmt(v)} stroke={C.muted} fontSize={12} tickMargin={8} />
+              <YAxis type="category" dataKey="user" width={140} stroke={C.muted} fontSize={12} tickMargin={8} interval={0} />
               <Tooltip formatter={(v: number | undefined) => fmt(v ?? 0)} />
               <Bar dataKey="spend" radius={[0, 4, 4, 0]} isAnimationActive={false} onClick={(d: unknown) => {
                 const rawEmail = (d as { rawEmail?: string }).rawEmail;
@@ -529,7 +531,7 @@ export default function UsersGroups({ startDate, endDate, dateRange, anonymizeUs
       {/* User growth charts — always last 6 months */}
       {data?.user_growth && data.user_growth.length > 1 && (
         <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
-          <div className="rounded-lg bg-white p-6 border " style={{ borderColor: '#E5E5E5' }}>
+          <div className="rounded-lg bg-white p-6 border " style={{ borderColor: C.hairline }}>
             <h3 className="text-lg font-medium text-gray-900 mb-1 flex items-center">
               Monthly Active Users
               <InfoTooltip text="Distinct users (humans + service principals) with any DBU spend in that calendar month. Always shows the last 6 months regardless of the date filter above." />
@@ -537,16 +539,16 @@ export default function UsersGroups({ startDate, endDate, dateRange, anonymizeUs
             <p className="text-xs text-gray-500 mb-4">Last 6 months</p>
             <ResponsiveContainer width="100%" height={300}>
               <BarChart data={data!.user_growth} margin={{ left: 0, right: 16, top: 20, bottom: 0 }}>
-                <XAxis dataKey="month" stroke="#9ca3af" fontSize={12} tickMargin={8} tickFormatter={m => { const months = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"]; const parts = m.split("-"); return months[parseInt(parts[1], 10) - 1] || m; }} />
-                <YAxis stroke="#9ca3af" fontSize={12} tickMargin={4} allowDecimals={false} />
+                <XAxis dataKey="month" stroke={C.muted} fontSize={12} tickMargin={8} tickFormatter={m => { const months = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"]; const parts = m.split("-"); return months[parseInt(parts[1], 10) - 1] || m; }} />
+                <YAxis stroke={C.muted} fontSize={12} tickMargin={4} allowDecimals={false} />
                 <Tooltip labelFormatter={l => String(l)} />
-                <Bar dataKey="active_users" name="Active users" fill="#FF3621" radius={[4, 4, 0, 0]} isAnimationActive={false}>
-                  <LabelList dataKey="active_users" position="top" style={{ fontSize: 10, fill: '#6b7280' }} />
+                <Bar dataKey="active_users" name="Active users" fill={C.lava} radius={[4, 4, 0, 0]} isAnimationActive={false}>
+                  <LabelList dataKey="active_users" position="top" style={{ fontSize: 10, fill: C.slate }} />
                 </Bar>
               </BarChart>
             </ResponsiveContainer>
           </div>
-          <div className="rounded-lg bg-white p-6 border " style={{ borderColor: '#E5E5E5' }}>
+          <div className="rounded-lg bg-white p-6 border " style={{ borderColor: C.hairline }}>
             <h3 className="text-lg font-medium text-gray-900 mb-1 flex items-center">
               Monthly User Growth
               <InfoTooltip text="Counts distinct users whose earliest recorded DBU spend falls within each calendar month — i.e., users appearing for the first time that month. Always shows the last 6 months regardless of the date filter above." />
@@ -554,11 +556,11 @@ export default function UsersGroups({ startDate, endDate, dateRange, anonymizeUs
             <p className="text-xs text-gray-500 mb-4">New users appearing for the first time each month — last 6 months</p>
             <ResponsiveContainer width="100%" height={300}>
               <BarChart data={data!.user_growth} margin={{ left: 0, right: 16, top: 20, bottom: 0 }}>
-                <XAxis dataKey="month" stroke="#9ca3af" fontSize={12} tickMargin={8} tickFormatter={m => { const months = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"]; const parts = m.split("-"); return months[parseInt(parts[1], 10) - 1] || m; }} />
-                <YAxis stroke="#9ca3af" fontSize={12} tickMargin={4} allowDecimals={false} />
+                <XAxis dataKey="month" stroke={C.muted} fontSize={12} tickMargin={8} tickFormatter={m => { const months = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"]; const parts = m.split("-"); return months[parseInt(parts[1], 10) - 1] || m; }} />
+                <YAxis stroke={C.muted} fontSize={12} tickMargin={4} allowDecimals={false} />
                 <Tooltip labelFormatter={l => String(l)} />
-                <Bar dataKey="new_users" name="New users" fill="#1B5162" radius={[4, 4, 0, 0]} isAnimationActive={false}>
-                  <LabelList dataKey="new_users" position="top" style={{ fontSize: 10, fill: '#6b7280' }} />
+                <Bar dataKey="new_users" name="New users" fill={C.s2} radius={[4, 4, 0, 0]} isAnimationActive={false}>
+                  <LabelList dataKey="new_users" position="top" style={{ fontSize: 10, fill: C.slate }} />
                 </Bar>
               </BarChart>
             </ResponsiveContainer>
@@ -575,7 +577,7 @@ export default function UsersGroups({ startDate, endDate, dateRange, anonymizeUs
             <div className="relative" ref={typeFilterRef}>
               <button
                 onClick={() => setTypeFilterOpen(o => !o)}
-                className={`flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-medium transition-colors ${typeFilter.length > 0 && typeFilter.length < 2 ? "border-[#FF3621] text-[#FF3621]" : "border-gray-300 text-gray-700 hover:bg-gray-50"}`}
+                className={`flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-medium transition-colors ${typeFilter.length > 0 && typeFilter.length < 2 ? "border-lava text-lava" : "border-gray-300 text-gray-700 hover:bg-gray-50"}`}
               >
                 {typeFilter.length === 0
                   ? "Type"
@@ -584,7 +586,7 @@ export default function UsersGroups({ startDate, endDate, dateRange, anonymizeUs
                   : typeFilter[0] === "users"
                   ? "Users"
                   : "Service Principals"}
-                <svg className={`h-3 w-3 transition-transform ${typeFilterOpen ? "rotate-180" : ""}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" /></svg>
+                <svg className={`h-3 w-3 transition-transform ${typeFilterOpen ? "rotate-180" : ""}`} fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" /></svg>
               </button>
               {typeFilterOpen && (
                 <div className="absolute left-0 top-full z-[9999] mt-1 w-52 rounded-lg border border-gray-200 bg-white shadow-lg">
@@ -605,7 +607,7 @@ export default function UsersGroups({ startDate, endDate, dateRange, anonymizeUs
                       <div className={`flex h-4 w-4 shrink-0 items-center justify-center rounded border ${typeFilter.includes(t) ? "border-orange-500 bg-orange-500" : "border-gray-300"}`}>
                         {typeFilter.includes(t) && <svg className="h-3 w-3 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" /></svg>}
                       </div>
-                      <span className="truncate text-gray-700">{t === "users" ? "Users" : "Service Principals"}</span>
+                      <span className="text-gray-700">{t === "users" ? "Users" : "Service Principals"}</span>
                     </button>
                   ))}
                 </div>
@@ -615,7 +617,7 @@ export default function UsersGroups({ startDate, endDate, dateRange, anonymizeUs
             <div className="relative" ref={productFilterRef}>
               <button
                 onClick={() => setProductFilterOpen(o => !o)}
-                className={`flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-medium transition-colors ${productFilter.length > 0 && productFilter.length < uniqueProducts.length ? "border-[#FF3621] text-[#FF3621]" : "border-gray-300 text-gray-700 hover:bg-gray-50"}`}
+                className={`flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-medium transition-colors ${productFilter.length > 0 && productFilter.length < uniqueProducts.length ? "border-lava text-lava" : "border-gray-300 text-gray-700 hover:bg-gray-50"}`}
               >
                 {productFilter.length === 0
                   ? "Product"
@@ -624,10 +626,10 @@ export default function UsersGroups({ startDate, endDate, dateRange, anonymizeUs
                   : productFilter.length === uniqueProducts.length
                   ? "Product"
                   : `${productFilter.length} products`}
-                <svg className={`h-3 w-3 transition-transform ${productFilterOpen ? "rotate-180" : ""}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" /></svg>
+                <svg className={`h-3 w-3 transition-transform ${productFilterOpen ? "rotate-180" : ""}`} fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" /></svg>
               </button>
               {productFilterOpen && (
-                <div className="absolute left-0 top-full z-[9999] mt-1 min-w-[200px] max-h-64 overflow-y-auto rounded-lg border border-gray-200 bg-white shadow-lg">
+                <div className="absolute left-0 top-full z-[9999] mt-1 w-52 overflow-y-auto rounded-lg border border-gray-200 bg-white shadow-lg" style={{ maxHeight: 260 }}>
                   <div className="sticky top-0 flex items-center justify-between border-b border-gray-100 bg-white px-3 py-2">
                     <span className="text-[10px] font-semibold uppercase tracking-wider text-gray-500">Product</span>
                     <div className="flex items-center gap-2 text-xs">
@@ -660,7 +662,7 @@ export default function UsersGroups({ startDate, endDate, dateRange, anonymizeUs
                 placeholder="Search users..."
                 value={searchQuery}
                 onChange={e => { setSearchQuery(e.target.value); setPage(0); }}
-                className="w-full rounded-full border border-gray-200 bg-white py-1.5 pl-9 pr-4 text-xs placeholder:text-gray-400 focus:border-[#FF3621] focus:outline-none focus:ring-1 focus:ring-[#FF3621]"
+                className="w-full rounded-full border border-gray-200 bg-white py-1.5 pl-9 pr-4 text-xs placeholder:text-gray-400 focus:border-lava focus:outline-none focus:ring-1 focus:ring-lava"
               />
             </div>
           </div>

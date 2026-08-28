@@ -9,9 +9,14 @@ import {
   YAxis,
   Tooltip,
   ResponsiveContainer,
+  CartesianGrid,
 } from "recharts";
 import { useKPITrend, usePlatformKPITrend, useAppsKPITrend } from "@/hooks/useKPITrend";
 import { formatCurrency, formatNumber, formatBytesNoDecimal, formatRowCount, formatComputeSecondsCompact } from "@/utils/formatters";
+import { C, FONT_MONO } from "@/theme";
+import { changeTone } from "@/components/brand";
+import { InkTooltip, axisTick, gridStroke, baselineStroke } from "@/components/chartTheme";
+import { Spinner } from "@/components/Spinner";
 
 interface KPITrendModalProps {
   kpi: string;
@@ -81,143 +86,115 @@ export function KPITrendModal({
 
   if (!isOpen) return null;
 
-  const trendColor = "#FF3621";
-  const gradientId = `kpiTrendGradient-${variant}`;
-
   const formattedStart = format(parseISO(startDate), "MMM d, yyyy");
   const formattedEnd = format(parseISO(endDate), "MMM d, yyyy");
+  const changePct = data?.summary?.change_percent ?? 0;
+  const tone = changeTone(changePct);
 
   return createPortal(
     <div
-      className="animate-backdrop fixed inset-0 z-50 overflow-y-auto bg-black/50"
+      className="animate-backdrop fixed inset-0 z-50 overflow-y-auto"
+      style={{ background: "rgba(11,32,38,.45)" }}
       onClick={(e) => e.target === e.currentTarget && onClose()}
     >
       <div className="flex min-h-full items-center justify-center p-4" onClick={(e) => e.target === e.currentTarget && onClose()}>
       <div
-        className="animate-dialog relative w-full max-w-4xl rounded-xl bg-white shadow-2xl"
+        className="animate-dialog relative w-full max-w-4xl bg-white"
+        style={{ borderRadius: 12, boxShadow: "var(--sh-modal)" }}
         onClick={(e) => e.stopPropagation()}
       >
-        {/* Header */}
-        <div className="flex items-center justify-between border-b border-gray-200 px-6 py-4">
+        <div className="flex items-center justify-between px-6 py-4" style={{ borderBottom: `1px solid ${C.hairline}` }}>
           <div>
-            <h2 className="text-xl font-semibold text-gray-900">{kpiLabel}</h2>
-            <p className="text-sm text-gray-500">Trend Analysis</p>
+            <h2 className="text-xl font-semibold" style={{ color: C.ink }}>{kpiLabel}</h2>
+            <p className="text-sm" style={{ color: C.slate }}>Trend Analysis</p>
           </div>
           <button
             onClick={onClose}
-            className="rounded-lg p-2 text-gray-500 hover:bg-gray-100 hover:text-gray-600 transition-colors"
+            className="rounded-lg p-2 transition-colors"
+            style={{ color: C.slate }}
           >
             <X className="h-5 w-5" />
           </button>
         </div>
 
-        {/* Content */}
         <div className="p-6">
           {isLoading ? (
             <div className="flex h-80 items-center justify-center">
-              <div className="h-10 w-10 animate-spin rounded-full border-4 border-gray-200" style={{ borderTopColor: '#FF3621' }} />
+              <Spinner size="md" />
             </div>
           ) : data?.data_points && data.data_points.length > 0 ? (
             <>
-              {/* Stats Row */}
               <div className="mb-6 grid grid-cols-4 gap-4">
-                <div className="rounded-lg border border-gray-200 bg-gray-50 p-4">
-                  <p className="text-xs font-medium uppercase text-gray-500">Start</p>
-                  <p className="mt-1 text-lg font-semibold text-gray-900">
-                    {fmt(data.summary.period_start_value, kpi)}
-                  </p>
-                </div>
-                <div className="rounded-lg border border-gray-200 bg-gray-50 p-4">
-                  <p className="text-xs font-medium uppercase text-gray-500">End</p>
-                  <p className="mt-1 text-lg font-semibold text-gray-900">
-                    {fmt(data.summary.period_end_value, kpi)}
-                  </p>
-                </div>
-                <div className="rounded-lg border border-gray-200 bg-gray-50 p-4">
-                  <p className="text-xs font-medium uppercase text-gray-500">Average</p>
-                  <p className="mt-1 text-lg font-semibold text-gray-900">
-                    {fmt(data.summary.avg_value, kpi)}
-                  </p>
-                </div>
-                <div
-                  className="rounded-lg border p-4"
-                  style={{
-                    backgroundColor: `${trendColor}10`,
-                    borderColor: `${trendColor}30`
-                  }}
-                >
-                  <p className="text-xs font-medium uppercase text-gray-500">Change</p>
-                  <p className="mt-1 text-lg font-semibold" style={{ color: trendColor }}>
-                    {data.summary.change_percent > 0 ? "+" : ""}
-                    {data.summary.change_percent.toFixed(1)}%
+                {[
+                  ["Start", fmt(data.summary.period_start_value, kpi)],
+                  ["End", fmt(data.summary.period_end_value, kpi)],
+                  ["Average", fmt(data.summary.avg_value, kpi)],
+                ].map(([label, value]) => (
+                  <div key={label} className="p-4" style={{ background: C.oatPage, borderRadius: 8 }}>
+                    <p className="text-[11px] font-bold uppercase tracking-wide" style={{ color: C.slate }}>{label}</p>
+                    <p className="mt-1 text-[22px] font-medium" style={{ color: C.ink, fontFamily: FONT_MONO }}>{value}</p>
+                  </div>
+                ))}
+                <div className="p-4" style={{ background: tone.bg, borderRadius: 8 }}>
+                  <p className="text-[11px] font-bold uppercase tracking-wide" style={{ color: C.slate }}>Change</p>
+                  <p className="mt-1 text-[22px] font-medium" style={{ color: tone.fg, fontFamily: FONT_MONO }}>
+                    {tone.label === "±0.0%" ? "±0.0%" : `${changePct > 0 ? "+" : ""}${changePct.toFixed(1)}%`}
                   </p>
                 </div>
               </div>
 
-              {/* Chart */}
               <div className="h-64">
                 <ResponsiveContainer width="100%" height="100%">
                   <AreaChart data={data.data_points} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
-                    <defs>
-                      <linearGradient id={gradientId} x1="0" y1="0" x2="0" y2="1">
-                        <stop offset="5%" stopColor="#FF3621" stopOpacity={0.3}/>
-                        <stop offset="95%" stopColor="#FF3621" stopOpacity={0}/>
-                      </linearGradient>
-                    </defs>
+                    <CartesianGrid vertical={false} stroke={gridStroke} />
                     <XAxis
                       dataKey="date"
                       tickFormatter={(value) => format(parseISO(value), "MMM d")}
-                      tick={{ fontSize: 11, fill: "#6b7280" }}
-                      axisLine={{ stroke: "#e5e7eb" }}
+                      tick={axisTick}
+                      axisLine={{ stroke: baselineStroke }}
                     />
                     <YAxis
                       tickFormatter={(value) => fmt(value, kpi)}
-                      tick={{ fontSize: 11, fill: "#6b7280" }}
-                      axisLine={{ stroke: "#e5e7eb" }}
+                      tick={axisTick}
+                      axisLine={{ stroke: baselineStroke }}
                       width={80}
                     />
-                    <Tooltip
-                      formatter={(value: number | undefined) => [fmt(value ?? 0, kpi), kpiLabel]}
-                      labelFormatter={(label) => format(parseISO(label), "MMM d, yyyy")}
-                      contentStyle={{
-                        borderRadius: "8px",
-                        border: "1px solid #e5e7eb",
-                        boxShadow: "0 4px 6px -1px rgba(0, 0, 0, 0.1)"
-                      }}
-                    />
+                    <Tooltip content={<InkTooltip formatter={(v) => fmt(v, kpi)} />} />
                     <Area isAnimationActive={false}
                       type="monotone"
                       dataKey="value"
-                      stroke="#FF3621"
-                      strokeWidth={2}
-                      fill={`url(#${gradientId})`}
+                      stroke={C.lava}
+                      strokeWidth={2.2}
+                      fill={C.lava}
+                      fillOpacity={0.16}
+                      dot={false}
+                      activeDot={{ r: 3 }}
                     />
                   </AreaChart>
                 </ResponsiveContainer>
               </div>
 
-              {/* Trend Indicator */}
-              <div className="mt-4 flex items-center gap-2 rounded-lg bg-gray-50 px-4 py-3">
+              <div className="mt-4 flex items-center gap-2 px-4 py-3" style={{ background: tone.bg, borderRadius: 8 }}>
                 {data.summary.trend === "increasing" && (
                   <>
-                    <TrendingUp className="h-5 w-5" style={{ color: '#FF3621' }} />
-                    <span className="text-sm font-medium text-gray-700">
+                    <TrendingUp className="h-5 w-5" style={{ color: C.lavaHover }} />
+                    <span className="text-sm font-medium" style={{ color: C.ink }}>
                       Trending upward by {data.summary.change_percent.toFixed(1)}% from {formattedStart} to {formattedEnd}
                     </span>
                   </>
                 )}
                 {data.summary.trend === "decreasing" && (
                   <>
-                    <TrendingDown className="h-5 w-5" style={{ color: '#FF3621' }} />
-                    <span className="text-sm font-medium text-gray-700">
+                    <TrendingDown className="h-5 w-5" style={{ color: C.greenInk }} />
+                    <span className="text-sm font-medium" style={{ color: C.ink }}>
                       Trending downward by {Math.abs(data.summary.change_percent).toFixed(1)}% from {formattedStart} to {formattedEnd}
                     </span>
                   </>
                 )}
                 {data.summary.trend === "flat" && (
                   <>
-                    <Minus className="h-5 w-5" style={{ color: '#FF3621' }} />
-                    <span className="text-sm font-medium text-gray-700">
+                    <Minus className="h-5 w-5" style={{ color: C.slate }} />
+                    <span className="text-sm font-medium" style={{ color: C.ink }}>
                       Relatively stable (±{Math.abs(data.summary.change_percent).toFixed(1)}%) from {formattedStart} to {formattedEnd}
                     </span>
                   </>
@@ -225,7 +202,7 @@ export function KPITrendModal({
               </div>
             </>
           ) : (
-            <div className="flex h-64 flex-col items-center justify-center text-gray-500">
+            <div className="flex h-64 flex-col items-center justify-center" style={{ color: C.slate }}>
               <p className="text-lg font-medium">No data available</p>
               <p className="text-sm">Try selecting a different date range</p>
             </div>

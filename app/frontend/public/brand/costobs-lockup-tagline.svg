@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 360 72" fill="none">
+  <g transform="translate(0,12)">
+    <path d="M3 24 a21 8 0 0 1 42 0" stroke="#1B3139" stroke-width="2.6" stroke-linecap="round"/>
+    <rect x="11" y="11" width="26" height="26" rx="7" fill="#FF3621"/>
+    <polyline points="15,19 20.5,25 24.5,21.5 31,28.5" stroke="#FFFFFF" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+    <circle cx="31" cy="28.5" r="2.4" fill="#FFFFFF"/>
+    <path d="M3 24 a21 8 0 0 0 42 0" stroke="#1B3139" stroke-width="2.6" stroke-linecap="round"/>
+  </g>
+  <text x="56" y="38" fill="#1B3139" font-family="DM Sans, Helvetica Neue, Arial, sans-serif" font-size="21" font-weight="700">cost-obs</text>
+  <text x="56" y="56" fill="#618794" font-family="DM Sans, Helvetica Neue, Arial, sans-serif" font-size="12.5" font-weight="400">Cost observability for Databricks.</text>
+</svg>

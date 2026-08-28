@@ -11,18 +11,12 @@ const SIZE_CLASS = {
 } as const;
 
 export function Spinner({ size = "md", className = "" }: SpinnerProps) {
-  // Ring color + style are set inline (not via `border-gray-200 border-t-[#FF3621]`
-  // classes) so the visible orange arc never depends on Tailwind cascade order or
-  // arbitrary-value generation — that class combo can resolve to a uniform gray
-  // (invisible) ring in some builds, which reads as a static "empty circle".
-  // Width still comes from SIZE_CLASS; borderTopColor is listed after borderColor
-  // so it wins for the top edge.
   return (
     <div
       role="status"
       aria-label="Loading"
-      style={{ borderStyle: "solid", borderColor: "#E5E7EB", borderTopColor: "#FF3621" }}
-      className={`animate-spin rounded-full shrink-0 ${SIZE_CLASS[size]}${className ? ` ${className}` : ""}`}
+      style={{ borderStyle: "solid", borderColor: "var(--hairline)", borderTopColor: "var(--lava)", animationDuration: "900ms" }}
+      className={`co-arc-spin rounded-full shrink-0 ${SIZE_CLASS[size]}${className ? ` ${className}` : ""}`}
     />
   );
 }

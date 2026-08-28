@@ -4,6 +4,7 @@ import type { WorkspaceBreakdownResponse } from "@/types/billing";
 import { formatCurrency, formatNumber, workspaceUrl } from "@/utils/formatters";
 import { formatIdentity, useSpNameMap } from "@/utils/identity";
 import { VirtualizedList } from "./VirtualizedList";
+import { C } from "@/theme";
 
 interface WorkspaceTableProps {
   data: WorkspaceBreakdownResponse | undefined;
@@ -106,9 +107,9 @@ export const WorkspaceTable = memo(function WorkspaceTable({ data, isLoading, ho
   const itemsPerPage = 10;
   if (isLoading) {
     return (
-      <div className="rounded-lg bg-white p-6 border " style={{ borderColor: '#E5E5E5' }}>
+      <div className="rounded-lg bg-white p-6 border " style={{ borderColor: C.hairline }}>
         <div className="flex h-48 flex-col items-center justify-center gap-3">
-          <div className="h-12 w-12 animate-spin rounded-full border-4 border-gray-200" style={{ borderTopColor: '#FF3621' }} />
+          <div className="h-12 w-12 animate-spin rounded-full border-4 border-gray-200" style={{ borderTopColor: C.lava }} />
           <p className="text-sm text-gray-500">Loading workspaces...</p>
         </div>
       </div>
@@ -117,7 +118,7 @@ export const WorkspaceTable = memo(function WorkspaceTable({ data, isLoading, ho
 
   if (!data || !data.workspaces?.length) {
     return (
-      <div className="rounded-lg bg-white p-6 border " style={{ borderColor: '#E5E5E5' }}>
+      <div className="rounded-lg bg-white p-6 border " style={{ borderColor: C.hairline }}>
         <h3 className="mb-4 text-lg font-semibold text-gray-900">
           Spend by Workspace
         </h3>
@@ -181,7 +182,7 @@ export const WorkspaceTable = memo(function WorkspaceTable({ data, isLoading, ho
   const paginatedData = filteredWorkspaces.slice(startIndex, endIndex);
 
   return (
-    <div className="animate-fade-in rounded-lg bg-white p-6 border " style={{ borderColor: '#E5E5E5' }}>
+    <div className="animate-fade-in rounded-lg bg-white p-6 border " style={{ borderColor: C.hairline }}>
       <div className="mb-4 flex flex-wrap items-center gap-2">
         <div className="shrink-0">
           <h3 className="text-lg font-semibold text-gray-900">
@@ -214,7 +215,7 @@ export const WorkspaceTable = memo(function WorkspaceTable({ data, isLoading, ho
             <div className="relative" ref={productDropdownRef}>
               <button
                 onClick={() => { setProductDropdownOpen((o) => !o); setUserDropdownOpen(false); }}
-                className={`flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-medium transition-colors ${isProductFilterActive ? "border-[#FF3621] text-[#FF3621]" : "border-gray-300 text-gray-700 hover:bg-gray-50"}`}
+                className={`flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-medium transition-colors ${isProductFilterActive ? "border-lava text-lava" : "border-gray-300 text-gray-700 hover:bg-gray-50"}`}
               >
                 {productFilters.length === 1 ? formatProductName(productFilters[0]) : isProductFilterActive ? `${productFilters.length} Products` : "Products"}
                 <svg className={`h-3 w-3 transition-transform ${productDropdownOpen ? "rotate-180" : ""}`} fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" /></svg>
@@ -253,7 +254,7 @@ export const WorkspaceTable = memo(function WorkspaceTable({ data, isLoading, ho
             <div className="relative" ref={userDropdownRef}>
               <button
                 onClick={() => { setUserDropdownOpen((o) => !o); setProductDropdownOpen(false); }}
-                className={`flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-medium transition-colors ${isUserFilterActive ? "border-[#FF3621] text-[#FF3621]" : "border-gray-300 text-gray-700 hover:bg-gray-50"}`}
+                className={`flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-medium transition-colors ${isUserFilterActive ? "border-lava text-lava" : "border-gray-300 text-gray-700 hover:bg-gray-50"}`}
               >
                 {userFilters.length === 1 ? formatIdentity(userFilters[0], spNameMap) : isUserFilterActive ? `${userFilters.length} Users` : "Users"}
                 <svg className={`h-3 w-3 transition-transform ${userDropdownOpen ? "rotate-180" : ""}`} fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" /></svg>
@@ -279,7 +280,7 @@ export const WorkspaceTable = memo(function WorkspaceTable({ data, isLoading, ho
                       value={userSearch}
                       onChange={(e) => setUserSearch(e.target.value)}
                       placeholder="Search users..."
-                      className="w-full rounded border border-gray-200 px-2 py-1 text-xs focus:border-[#FF3621] focus:outline-none focus:ring-1 focus:ring-[#FF3621]"
+                      className="w-full rounded border border-gray-200 px-2 py-1 text-xs focus:border-lava focus:outline-none focus:ring-1 focus:ring-lava"
                       autoFocus
                     />
                   </div>
@@ -316,7 +317,7 @@ export const WorkspaceTable = memo(function WorkspaceTable({ data, isLoading, ho
               placeholder="Search workspaces..."
               value={search}
               onChange={(e) => { setSearch(e.target.value); setCurrentPage(1); }}
-              className="w-44 rounded-full border border-gray-200 bg-white py-1.5 pl-9 pr-4 text-xs placeholder:text-gray-400 focus:border-[#FF3621] focus:outline-none focus:ring-1 focus:ring-[#FF3621]"
+              className="w-44 rounded-full border border-gray-200 bg-white py-1.5 pl-9 pr-4 text-xs placeholder:text-gray-400 focus:border-lava focus:outline-none focus:ring-1 focus:ring-lava"
             />
           </div>
         </div>
@@ -358,7 +359,7 @@ export const WorkspaceTable = memo(function WorkspaceTable({ data, isLoading, ho
                           href={url}
                           target="_blank"
                           rel="noopener noreferrer"
-                          className="group flex items-center gap-1 text-sm font-medium text-[#FF3621] hover:text-[#E02F1C]"
+                          className="group flex items-center gap-1 text-sm font-medium text-lava hover:text-lava-hover"
                         >
                           <span>{workspaceNameMap?.[ws.workspace_id] || ws.workspace_name || `Workspace ${ws.workspace_id}`}</span>
                           <svg className="h-3 w-3 flex-shrink-0 opacity-0 transition-opacity group-hover:opacity-100" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -416,8 +417,8 @@ export const WorkspaceTable = memo(function WorkspaceTable({ data, isLoading, ho
                   <div className="flex items-center justify-end gap-2">
                     <div className="h-2 w-16 overflow-hidden rounded-full bg-gray-200">
                       <div
-                        className="h-full rounded-full bg-[#1B5162]"
-                        style={{ width: `${Math.min(ws.percentage, 100)}%` }}
+                        className="h-full rounded-full"
+                        style={{ width: `${Math.min(ws.percentage, 100)}%`, backgroundColor: C.s2 }}
                       />
                     </div>
                     <span className="w-12 text-right">
@@ -472,7 +473,7 @@ export const WorkspaceTable = memo(function WorkspaceTable({ data, isLoading, ho
                             ? "text-white"
                             : "border border-gray-300 text-gray-700 hover:bg-gray-50"
                         }`}
-                        style={currentPage === page ? { backgroundColor: '#FF3621' } : undefined}
+                        style={currentPage === page ? { backgroundColor: C.lava } : undefined}
                       >
                         {page}
                       </button>

@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48" fill="none" aria-hidden="true">
+  <!-- brick in orbit, 48-unit grid. Back arc (top) behind the brick. -->
+  <path d="M3 24 a21 8 0 0 1 42 0" stroke="#1B3139" stroke-width="2.6" stroke-linecap="round"/>
+  <rect x="11" y="11" width="26" height="26" rx="7" fill="#FF3621"/>
+  <polyline points="15,19 20.5,25 24.5,21.5 31,28.5" stroke="#FFFFFF" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+  <circle cx="31" cy="28.5" r="2.4" fill="#FFFFFF"/>
+  <!-- front arc (bottom) in front of the brick -->
+  <path d="M3 24 a21 8 0 0 0 42 0" stroke="#1B3139" stroke-width="2.6" stroke-linecap="round"/>
+</svg>

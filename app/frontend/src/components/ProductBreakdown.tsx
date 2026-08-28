@@ -12,14 +12,15 @@ import {
 import type { ProductBreakdownResponse, WorkspaceBreakdown } from "@/types/billing";
 import { formatCurrencyCompact as formatCurrency } from "@/utils/formatters";
 import { VirtualizedList } from "./VirtualizedList";
+import { C } from "@/theme";
 
 // Hoisted formatters — see SKUBreakdown for rationale.
 const fmtCurrency = (v: unknown) => formatCurrency(v as number);
 const fmtTooltip = (value: number | undefined) => formatCurrency(value ?? 0);
 const fmtTooltipLabel = (label: unknown) => `Product: ${label}`;
 const fmtYTick = (v: string) => (v.length > 18 ? v.substring(0, 18) + "..." : v);
-const TOOLTIP_STYLE = { backgroundColor: "white", border: "1px solid #e5e7eb", borderRadius: "8px" } as const;
-const LABEL_STYLE = { fontSize: 11, fill: "#6b7280" } as const;
+const TOOLTIP_STYLE = { backgroundColor: C.white, border: `1px solid ${C.hairline}`, borderRadius: "8px" } as const;
+const LABEL_STYLE = { fontSize: 11, fill: C.slate } as const;
 
 interface WsRowProps {
   wsId: string;
@@ -56,24 +57,24 @@ interface ProductBreakdownProps {
 }
 
 const CATEGORY_COLORS: Record<string, string> = {
-  "SQL - DBSQL": "#1B5162",
-  "SQL - Genie": "#06B6D4",
-  SQL: "#1B5162",
-  "ETL - Batch": "#10B981",
-  "ETL - Streaming": "#14B8A6",
-  Interactive: "#F59E0B",
-  Serverless: "#06B6D4",
-  "Model Serving": "#EC4899",
-  "AI Search": "#EF4444",
-  "Fine-Tuning": "#F97316",
-  "AI Functions": "#3B82F6",
-  Other: "#6B7280",
+  "SQL - DBSQL": C.s2,
+  "SQL - Genie": C.s5,
+  SQL: C.s2,
+  "ETL - Batch": C.s3,
+  "ETL - Streaming": C.s3,
+  Interactive: C.s4,
+  Serverless: C.s3,
+  "Model Serving": C.s1,
+  "AI Search": C.s5,
+  "Fine-Tuning": C.s4,
+  "AI Functions": C.s5,
+  Other: C.slate,
 };
 
 const COLOR_ROTATION = [
-  "#1B5162", "#FF3621", "#06B6D4", "#10B981", "#F59E0B",
-  "#3B82F6", "#EC4899", "#EF4444", "#14B8A6", "#6B7280",
-  "#3B82F6", "#F97316",
+  C.s2, C.lava, C.s5, C.s3, C.s4,
+  C.s5, C.s1, C.lava, C.s3, C.slate,
+  C.s5, C.s4,
 ];
 
 export const ProductBreakdown = memo(function ProductBreakdown({ data, isLoading, workspaces, dateRange, workspaceNameMap }: ProductBreakdownProps) {
@@ -216,7 +217,7 @@ export const ProductBreakdown = memo(function ProductBreakdown({ data, isLoading
     <div className="relative" ref={dropdownRef}>
       <button
         onClick={() => setDropdownOpen(!dropdownOpen)}
-        className={`flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-medium transition-colors ${isPartial ? "border-[#FF3621] text-[#FF3621]" : "border-gray-300 text-gray-700 hover:bg-gray-50"}`}
+        className={`flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-medium transition-colors ${isPartial ? "border-lava text-lava" : "border-gray-300 text-gray-700 hover:bg-gray-50"}`}
       >
         {selectedWorkspaceName
           ? selectedWorkspaceName
@@ -243,7 +244,7 @@ export const ProductBreakdown = memo(function ProductBreakdown({ data, isLoading
               value={wsSearch}
               onChange={(e) => setWsSearch(e.target.value)}
               placeholder="Search workspaces..."
-              className="w-full rounded border border-gray-200 px-2 py-1 text-xs focus:border-[#FF3621] focus:outline-none focus:ring-1 focus:ring-[#FF3621]"
+              className="w-full rounded border border-gray-200 px-2 py-1 text-xs focus:border-lava focus:outline-none focus:ring-1 focus:ring-lava"
               autoFocus
             />
           </div>
@@ -280,13 +281,13 @@ export const ProductBreakdown = memo(function ProductBreakdown({ data, isLoading
 
   if (showLoading) {
     return (
-      <div className="rounded-lg bg-white p-6 border " style={{ borderColor: '#E5E5E5' }}>
+      <div className="rounded-lg bg-white p-6 border " style={{ borderColor: C.hairline }}>
         <div className="mb-4 flex items-center justify-between">
           <h3 className="text-lg font-semibold text-gray-900">Spend by Product</h3>
           {workspaceSelector}
         </div>
         <div className="flex h-48 flex-col items-center justify-center gap-3">
-          <div className="h-12 w-12 animate-spin rounded-full border-4 border-gray-200" style={{ borderTopColor: '#FF3621' }} />
+          <div className="h-12 w-12 animate-spin rounded-full border-4 border-gray-200" style={{ borderTopColor: C.lava }} />
           <p className="text-sm text-gray-500">Loading product breakdown...</p>
         </div>
       </div>
@@ -295,12 +296,12 @@ export const ProductBreakdown = memo(function ProductBreakdown({ data, isLoading
 
   if (!displayData || displayData.products.length === 0) {
     return (
-      <div className="rounded-lg bg-white p-6 border " style={{ borderColor: '#E5E5E5' }}>
+      <div className="rounded-lg bg-white p-6 border " style={{ borderColor: C.hairline }}>
         <div className="mb-4 flex items-center justify-between">
           <h3 className="text-lg font-semibold text-gray-900">Spend by Product</h3>
           {workspaceSelector}
         </div>
-        <div className="flex h-80 flex-col items-center justify-center gap-2" style={{ color: '#6B7280' }}>
+        <div className="flex h-80 flex-col items-center justify-center gap-2" style={{ color: C.slate }}>
           <p className="text-base font-medium">No product breakdown available</p>
           <p className="text-sm">Try expanding the date range to capture more billing data</p>
         </div>
@@ -309,7 +310,7 @@ export const ProductBreakdown = memo(function ProductBreakdown({ data, isLoading
   }
 
   return (
-    <div className="animate-fade-in rounded-lg bg-white p-6 border " style={{ borderColor: '#E5E5E5', overflow: 'visible' }}>
+    <div className="animate-fade-in rounded-lg bg-white p-6 border " style={{ borderColor: C.hairline, overflow: 'visible' }}>
       <div className="mb-4 flex items-center justify-between">
         <div>
           <h3 className="text-lg font-semibold text-gray-900">Spend by Product</h3>
@@ -323,12 +324,12 @@ export const ProductBreakdown = memo(function ProductBreakdown({ data, isLoading
       </div>
       <ResponsiveContainer width="100%" height={320}>
         <BarChart data={chartData} layout="vertical" margin={{ left: 0, right: 70 }}>
-          <XAxis type="number" tickFormatter={fmtCurrency} stroke="#9ca3af" fontSize={12} tickMargin={8} />
+          <XAxis type="number" tickFormatter={fmtCurrency} stroke={C.muted} fontSize={12} tickMargin={8} />
           <YAxis
             type="category"
             dataKey="name"
             width={100}
-            stroke="#9ca3af"
+            stroke={C.muted}
             fontSize={12}
             tickMargin={8}
             tickFormatter={fmtYTick}

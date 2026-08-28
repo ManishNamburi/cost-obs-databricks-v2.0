@@ -20,6 +20,8 @@ import { format, parseISO } from "date-fns";
 import type { GranularBreakdownResponse, DBSQLDashboardBundle, QueryCostByWarehouse } from "@/types/billing";
 import { KPITrendModal } from "./KPITrendModal";
 import { VirtualizedList } from "./VirtualizedList";
+import { C } from "@/theme";
+import { PageHero, Chip } from "@/components/brand";
 
 interface SQLWarehousing360Props {
   sqlBreakdownData: GranularBreakdownResponse | undefined;
@@ -36,17 +38,17 @@ interface SQLWarehousing360Props {
 
 // Colors for query source types
 const SOURCE_TYPE_COLORS: Record<string, string> = {
-  "GENIE SPACE": "#3B82F6",
-  "AI/BI DASHBOARD": "#1B5162",
-  "LEGACY DASHBOARD": "#06B6D4",
-  "SQL QUERY": "#10B981",
-  "NOTEBOOK": "#F59E0B",
-  "JOB": "#EF4444",
-  "ALERT": "#EC4899",
-  Unknown: "#6B7280",
+  "GENIE SPACE": C.s5,
+  "AI/BI DASHBOARD": C.s2,
+  "LEGACY DASHBOARD": C.s5,
+  "SQL QUERY": C.s3,
+  "NOTEBOOK": C.s4,
+  "JOB": C.lava,
+  "ALERT": C.s1,
+  Unknown: C.slate,
 };
 
-const COLORS = ["#1B5162", "#06B6D4", "#10B981", "#14B8A6", "#F59E0B", "#3B82F6", "#EC4899", "#EF4444", "#6B7280"];
+const COLORS = [C.s2, C.s5, C.s3, C.s3, C.s4, C.s5, C.s1, C.lava, C.slate];
 
 const COST_TOOLTIP_TEXT = "Costs are estimates: the warehouse's billed DBU-hours are divided across all queries in the period, weighted by task duration. A fast query running during a low-activity window can inherit a large share of the hour's cost.";
 
@@ -57,7 +59,7 @@ const USER_BAR_TICK_FMT = (v: number | string) => formatCurrency(typeof v === "n
 const USER_BAR_TOOLTIP_FMT = (value: unknown) => formatCurrency(value as number);
 const USER_BAR_TOOLTIP_LABEL_FMT = (label: unknown) => `User: ${label}`;
 const USER_BAR_LABEL_FMT = (v: unknown) => `$${Math.round(v as number).toLocaleString()}`;
-const USER_BAR_LABEL_STYLE = { fontSize: 11, fill: "#6b7280" };
+const USER_BAR_LABEL_STYLE = { fontSize: 11, fill: C.slate };
 
 function InfoTooltip({ text, stopClick }: { text: string; stopClick?: boolean }) {
   const [pos, setPos] = useState<{ x: number; y: number } | null>(null);
@@ -416,7 +418,7 @@ export function SQLWarehousing360({ sqlBreakdownData: _sqlBreakdownData, queryDa
   if (isLoading) {
     return (
       <div className="flex h-64 flex-col items-center justify-center gap-3">
-        <div className="h-12 w-12 animate-spin rounded-full border-4 border-gray-200" style={{ borderTopColor: '#FF3621' }} />
+        <div className="h-12 w-12 animate-spin rounded-full border-4 border-gray-200" style={{ borderTopColor: C.lava }} />
         <p className="text-sm text-gray-500">Loading query analytics...</p>
       </div>
     );
@@ -478,48 +480,48 @@ export function SQLWarehousing360({ sqlBreakdownData: _sqlBreakdownData, queryDa
       ) : (
         <>
           {/* Header */}
-          <div className="flex items-center gap-3">
-            <div className="rounded-lg p-2" style={{ backgroundColor: '#FF3621' }}>
-              <svg className="h-6 w-6 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+          <PageHero
+            icon={
+              <svg fill="none" viewBox="0 0 24 24" stroke="currentColor">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 3v2m6-2v2M9 19v2m6-2v2M5 9H3m2 6H3m18-6h-2m2 6h-2M7 19h10a2 2 0 002-2V7a2 2 0 00-2-2H7a2 2 0 00-2 2v10a2 2 0 002 2zM9 9h6v6H9V9z" />
               </svg>
-            </div>
-            <div>
-              <h1 className="text-2xl font-bold text-gray-900">SQL</h1>
-              <div className="flex items-center gap-2 flex-wrap">
-                <p className="text-sm text-gray-500">SQL-level cost attribution and warehouse analytics</p>
+            }
+            title="SQL"
+            subtitle={
+              <>
+                SQL-level cost attribution and warehouse analytics
                 {workspaceIds && workspaceIds.length > 0 && (
-                  <span className="rounded bg-[#1B3139]/10 px-2 py-0.5 text-[10px] font-medium text-[#1B3139]">
+                  <Chip kind="workspace">
                     {workspaceIds.length === 1 ? (workspaceNameMap?.[workspaceIds[0]] || workspaceIds[0]) : `${workspaceIds.length} workspaces`}
-                  </span>
+                  </Chip>
                 )}
-              </div>
-            </div>
-          </div>
+              </>
+            }
+          />
 
           {/* Info Banner */}
-          <div className="rounded-lg border border-orange-200 bg-orange-50 p-4">
+          <div className="p-4" style={{ background: C.oatMed, borderRadius: 10 }}>
             <div className="flex">
-              <div className="flex-shrink-0">
-                <svg className="h-5 w-5 text-orange-400" viewBox="0 0 20 20" fill="currentColor">
+              <div className="flex-shrink-0" style={{ color: C.lava }}>
+                <svg className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
                   <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clipRule="evenodd" />
                 </svg>
               </div>
               <div className="ml-3 flex-1">
                 <button className="flex w-full items-center justify-between" onClick={() => handleMinimizeToggle(!infoMinimized)}>
-                  <h3 className="text-sm font-medium text-orange-800">SQL Warehousing — What's on this tab</h3>
-                  <svg className={`h-4 w-4 text-orange-500 transition-transform ${infoMinimized ? "" : "rotate-180"}`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <h3 className="text-sm font-semibold" style={{ color: C.navy }}>SQL Warehousing — What's on this tab</h3>
+                  <svg className={`h-4 w-4 transition-transform ${infoMinimized ? "" : "rotate-180"}`} style={{ color: C.slate }} fill="none" viewBox="0 0 24 24" stroke="currentColor">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
                   </svg>
                 </button>
                 {!infoMinimized && (
                   <>
-                    <div className="mt-2 text-sm text-orange-700">
-                      <ul className="list-inside list-disc space-y-1">
-                        <li><strong>Spend by Source</strong>: Click any source (Genie, AI/BI, SQL Editor, Jobs, Notebooks) to drill into the top queries from that source</li>
-                        <li><strong>Warehouse Spend</strong>: Breakdown by warehouse type and utilization patterns</li>
-                        <li><strong>SKU Breakdown</strong>: Spend split across Serverless, Pro, Classic, and other SQL SKUs</li>
-                        <li><strong>Top Users by Query Spend</strong>: Human users and service principals ranked by SQL query cost</li>
+                    <div className="mt-2 text-sm" style={{ color: C.body }}>
+                      <ul className="grid grid-cols-1 gap-1 sm:grid-cols-2">
+                        <li><strong style={{ color: C.navy }}>Spend by Source:</strong> Click any source (Genie, AI/BI, SQL Editor, Jobs, Notebooks) to drill into the top queries from that source</li>
+                        <li><strong style={{ color: C.navy }}>Warehouse Spend:</strong> Breakdown by warehouse type and utilization patterns</li>
+                        <li><strong style={{ color: C.navy }}>SKU Breakdown:</strong> Spend split across Serverless, Pro, Classic, and other SQL SKUs</li>
+                        <li><strong style={{ color: C.navy }}>Top Users by Query Spend:</strong> Human users and service principals ranked by SQL query cost</li>
                       </ul>
                     </div>
                     <div className="mt-3 flex justify-start">
@@ -588,7 +590,7 @@ export function SQLWarehousing360({ sqlBreakdownData: _sqlBreakdownData, queryDa
             <div className="rounded-lg bg-white p-6 border shadow-sm cursor-pointer hover:shadow-md hover:scale-[1.01] transition-all" onClick={() => startDate && endDate && setSelectedKPI({kpi: "sql_spend", label: "Daily SQL Spend Trend", variant: "billing"})}>
               <div className="flex items-center">
                 <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-lg bg-orange-100">
-                  <svg className="h-6 w-6 text-[#FF3621]" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <svg className="h-6 w-6 text-lava" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
                   </svg>
                 </div>
@@ -600,14 +602,14 @@ export function SQLWarehousing360({ sqlBreakdownData: _sqlBreakdownData, queryDa
                   <div className="mt-1 text-xs text-gray-500">
                     {summary != null ? `${formatNumber(summary.total_dbus ?? 0)} DBUs · over ${startDate && endDate ? Math.round((new Date(endDate).getTime() - new Date(startDate).getTime()) / 86400000) + 1 : "?"} days` : "—"}
                   </div>
-                  <p className="mt-1 text-xs text-[#FF3621]">Click to see trend →</p>
+                  <p className="mt-1 text-xs text-lava">See trend →</p>
                 </div>
               </div>
             </div>
             <div className="rounded-lg bg-white p-6 border shadow-sm cursor-pointer hover:shadow-md hover:scale-[1.01] transition-all" onClick={() => startDate && endDate && setSelectedKPI({kpi: "sql_queries", label: "Daily SQL Queries", variant: "platform"})}>
               <div className="flex items-center">
                 <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-lg bg-orange-100">
-                  <svg className="h-6 w-6 text-[#FF3621]" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <svg className="h-6 w-6 text-lava" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01" />
                   </svg>
                 </div>
@@ -623,14 +625,14 @@ export function SQLWarehousing360({ sqlBreakdownData: _sqlBreakdownData, queryDa
                       return `${avgPerDay != null ? formatNumber(avgPerDay) + " avg/day · " : ""}${formatCurrency(summary.avg_cost_per_query ?? 0)}/query`;
                     })() : "—"}
                   </div>
-                  <p className="mt-1 text-xs font-medium" style={{ color: '#FF3621' }}>Click to see trend &rarr;</p>
+                  <p className="mt-1 text-xs font-medium" style={{ color: C.lava }}>See trend →</p>
                 </div>
               </div>
             </div>
             <div className="rounded-lg bg-white p-6 border shadow-sm cursor-pointer hover:shadow-md hover:scale-[1.01] transition-all" onClick={() => startDate && endDate && setSelectedKPI({kpi: "sql_users", label: "Daily SQL Users", variant: "platform"})}>
               <div className="flex items-center">
                 <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-lg bg-orange-100">
-                  <svg className="h-6 w-6 text-[#FF3621]" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <svg className="h-6 w-6 text-lava" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z" />
                   </svg>
                 </div>
@@ -642,14 +644,14 @@ export function SQLWarehousing360({ sqlBreakdownData: _sqlBreakdownData, queryDa
                   <div className="mt-1 text-xs text-gray-500">
                     {summary != null ? `across ${formatNumber(summary.unique_warehouses ?? 0)} SQL warehouses` : "—"}
                   </div>
-                  <p className="mt-1 text-xs font-medium" style={{ color: '#FF3621' }}>Click to see trend &rarr;</p>
+                  <p className="mt-1 text-xs font-medium" style={{ color: C.lava }}>See trend →</p>
                 </div>
               </div>
             </div>
             <div className="rounded-lg bg-white p-6 border shadow-sm cursor-pointer hover:shadow-md hover:scale-[1.01] transition-all" onClick={() => startDate && endDate && setSelectedKPI({kpi: "avg_query_duration", label: "Query Duration"})}>
               <div className="flex items-center">
                 <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-lg bg-orange-100">
-                  <svg className="h-6 w-6 text-[#FF3621]" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <svg className="h-6 w-6 text-lava" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
                   </svg>
                 </div>
@@ -661,7 +663,7 @@ export function SQLWarehousing360({ sqlBreakdownData: _sqlBreakdownData, queryDa
                   <div className="mt-1 text-xs text-gray-500">
                     average per query
                   </div>
-                  <p className="mt-1 text-xs font-medium" style={{ color: '#FF3621' }}>Click to see trend &rarr;</p>
+                  <p className="mt-1 text-xs font-medium" style={{ color: C.lava }}>See trend →</p>
                 </div>
               </div>
             </div>
@@ -685,13 +687,13 @@ export function SQLWarehousing360({ sqlBreakdownData: _sqlBreakdownData, queryDa
           {/* Daily Query Costs + Top Users — side by side */}
           <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
             {/* Timeseries Chart */}
-            <div className="rounded-lg bg-white p-6 border " style={{ borderColor: '#E5E5E5' }}>
+            <div className="rounded-lg bg-white p-6 border " style={{ borderColor: C.hairline }}>
               <h3 className="mb-4 text-lg font-semibold text-gray-900">Query Spend by Source</h3>
               {timeseriesData.length > 0 ? (
                 <ResponsiveContainer width="100%" height={300}>
                   <AreaChart data={timeseriesData}>
-                    <XAxis dataKey="date" stroke="#9ca3af" fontSize={12} tickMargin={8} />
-                    <YAxis tickFormatter={(v) => `$${(v / 1000).toFixed(0)}k`} stroke="#9ca3af" fontSize={12} tickMargin={8} />
+                    <XAxis dataKey="date" stroke={C.muted} fontSize={12} tickMargin={8} />
+                    <YAxis tickFormatter={(v) => formatCurrency(v)} stroke={C.muted} fontSize={12} tickMargin={8} />
                     <Tooltip
                       formatter={(value) => formatCurrency(value as number)}
                       labelFormatter={(label) => `Date: ${label}`}
@@ -718,10 +720,10 @@ export function SQLWarehousing360({ sqlBreakdownData: _sqlBreakdownData, queryDa
             </div>
 
             {/* Top Users Bar Chart */}
-            <div className="rounded-lg bg-white p-6 border " style={{ borderColor: '#E5E5E5' }}>
+            <div className="rounded-lg bg-white p-6 border " style={{ borderColor: C.hairline }}>
               <div className="mb-4 flex items-center justify-between">
                 <h3 className="text-lg font-semibold text-gray-900">Top Users by Query Spend</h3>
-                <span className="text-xs font-medium" style={{ color: '#FF3621' }}>Click a bar to drill down ↓</span>
+                <span className="text-xs font-medium" style={{ color: C.lava }}>Click a bar to drill down ↓</span>
               </div>
               {userBarData.length > 0 ? (
                 <ResponsiveContainer width="100%" height={300}>
@@ -731,12 +733,12 @@ export function SQLWarehousing360({ sqlBreakdownData: _sqlBreakdownData, queryDa
                     margin={{ left: 0, right: 70 }}
                     style={{ cursor: "pointer" }}
                   >
-                    <XAxis type="number" tickFormatter={USER_BAR_TICK_FMT} stroke="#9ca3af" fontSize={12} tickMargin={8} />
+                    <XAxis type="number" tickFormatter={USER_BAR_TICK_FMT} stroke={C.muted} fontSize={12} tickMargin={8} />
                     <YAxis
                       type="category"
                       dataKey="user"
                       width={160}
-                      stroke="#9ca3af"
+                      stroke={C.muted}
                       fontSize={12}
                       tickMargin={8}
                     />
@@ -769,7 +771,7 @@ export function SQLWarehousing360({ sqlBreakdownData: _sqlBreakdownData, queryDa
 
           {/* Warehouse Spend by Type + Warehouse Count by Size — side by side */}
           <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
-          <div className="rounded-lg bg-white p-6 border " style={{ borderColor: '#E5E5E5' }}>
+          <div className="rounded-lg bg-white p-6 border " style={{ borderColor: C.hairline }}>
               <h3 className="mb-4 text-lg font-semibold text-gray-900">Warehouse Spend by Type</h3>
               {(() => {
                 const whTypeTs = (queryData as any)?.warehouse_type_timeseries;
@@ -782,7 +784,7 @@ export function SQLWarehousing360({ sqlBreakdownData: _sqlBreakdownData, queryDa
                     </div>
                   );
                 }
-                const typeColors: Record<string, string> = { SERVERLESS: "#1B5162", PRO: "#06B6D4", CLASSIC: "#F59E0B", Unknown: "#9CA3AF" };
+                const typeColors: Record<string, string> = { SERVERLESS: C.s2, PRO: C.s5, CLASSIC: C.s4, Unknown: C.muted };
                 return (
                   <ResponsiveContainer width="100%" height={300}>
                     <AreaChart data={tsData} margin={{ top: 5, right: 10, left: 10, bottom: 5 }}>
@@ -791,15 +793,15 @@ export function SQLWarehousing360({ sqlBreakdownData: _sqlBreakdownData, queryDa
                         tickFormatter={(d) => {
                           try { return format(parseISO(d), "MMM d"); } catch { return d; }
                         }}
-                        stroke="#9ca3af" fontSize={11}
+                        stroke={C.muted} fontSize={11}
                       />
-                      <YAxis tickFormatter={(v) => formatCurrency(v)} stroke="#9ca3af" fontSize={11} width={70} />
+                      <YAxis tickFormatter={(v) => formatCurrency(v)} stroke={C.muted} fontSize={11} width={70} />
                       <Tooltip
                         formatter={(value: number | undefined) => formatCurrency(value ?? 0)}
                         labelFormatter={(label) => {
                           try { return format(parseISO(label as string), "MMM d, yyyy"); } catch { return label as string; }
                         }}
-                        contentStyle={{ backgroundColor: "white", border: "1px solid #e5e7eb", borderRadius: "8px" }}
+                        contentStyle={{ backgroundColor: C.white, border: `1px solid ${C.hairline}`, borderRadius: "8px" }}
                       />
                       <Legend wrapperStyle={{ fontSize: 12 }} />
                       {whTypes.map((wt) => (
@@ -807,8 +809,8 @@ export function SQLWarehousing360({ sqlBreakdownData: _sqlBreakdownData, queryDa
                           key={wt}
                           type="monotone"
                           dataKey={wt}
-                          stroke={typeColors[wt] || "#6B7280"}
-                          fill={typeColors[wt] || "#6B7280"}
+                          stroke={typeColors[wt] || C.slate}
+                          fill={typeColors[wt] || C.slate}
                           fillOpacity={0.15}
                           strokeWidth={2}
                         />
@@ -820,7 +822,7 @@ export function SQLWarehousing360({ sqlBreakdownData: _sqlBreakdownData, queryDa
           </div>
 
           {/* Warehouse Count by Size */}
-          <div className="rounded-lg bg-white p-6 border " style={{ borderColor: '#E5E5E5', overflow: 'visible' }}>
+          <div className="rounded-lg bg-white p-6 border " style={{ borderColor: C.hairline, overflow: 'visible' }}>
               {(() => {
                 const allWh = queryData?.by_warehouse?.warehouses || [];
                 // Build workspace list with names
@@ -846,7 +848,7 @@ export function SQLWarehousing360({ sqlBreakdownData: _sqlBreakdownData, queryDa
                   if (s === "UNKNOWN") continue;
                   bySize[s] = (bySize[s] || 0) + 1;
                 }
-                const sizeColors = ["#1B5162", "#06B6D4", "#10B981", "#F59E0B", "#FF3621", "#3B82F6", "#EC4899", "#EF4444"];
+                const sizeColors = [C.s2, C.s5, C.s3, C.s4, C.lava, C.s5, C.s1, C.lava];
                 const chartData = Object.entries(bySize)
                   .sort((a, b) => b[1] - a[1])
                   .map(([name, count]) => ({ name: name.replace(/_/g, " "), count }));
@@ -867,7 +869,7 @@ export function SQLWarehousing360({ sqlBreakdownData: _sqlBreakdownData, queryDa
                         <div className="relative" ref={whSizeDropdownRef}>
                           <button
                             onClick={() => setWhSizeDropdownOpen(!whSizeDropdownOpen)}
-                            className={`flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-medium transition-colors ${isPartialWs ? "border-[#FF3621] text-[#FF3621]" : "border-gray-300 text-gray-700 hover:bg-gray-50"}`}
+                            className={`flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-medium transition-colors ${isPartialWs ? "border-lava text-lava" : "border-gray-300 text-gray-700 hover:bg-gray-50"}`}
                           >
                             {selectedWsName
                               ? (selectedWsName.length > 20 ? selectedWsName.substring(0, 20) + "…" : selectedWsName)
@@ -899,7 +901,7 @@ export function SQLWarehousing360({ sqlBreakdownData: _sqlBreakdownData, queryDa
                                   value={whSizeWsSearch}
                                   onChange={(e) => setWhSizeWsSearch(e.target.value)}
                                   placeholder="Search workspaces..."
-                                  className="w-full rounded border border-gray-200 px-2 py-1 text-xs focus:border-[#FF3621] focus:outline-none focus:ring-1 focus:ring-[#FF3621]"
+                                  className="w-full rounded border border-gray-200 px-2 py-1 text-xs focus:border-lava focus:outline-none focus:ring-1 focus:ring-lava"
                                   autoFocus
                                 />
                               </div>
@@ -933,14 +935,14 @@ export function SQLWarehousing360({ sqlBreakdownData: _sqlBreakdownData, queryDa
                     {chartData.length > 0 ? (
                       <ResponsiveContainer width="100%" height={300}>
                         <BarChart data={chartData} layout="vertical" margin={{ left: 20, right: 40 }}>
-                          <XAxis type="number" stroke="#9ca3af" fontSize={12} tickMargin={8} />
-                          <YAxis type="category" dataKey="name" width={80} stroke="#9ca3af" fontSize={12} tickMargin={8} />
-                          <Tooltip contentStyle={{ backgroundColor: "white", border: "1px solid #e5e7eb", borderRadius: "8px" }} />
+                          <XAxis type="number" stroke={C.muted} fontSize={12} tickMargin={8} />
+                          <YAxis type="category" dataKey="name" width={80} stroke={C.muted} fontSize={12} tickMargin={8} />
+                          <Tooltip contentStyle={{ backgroundColor: C.white, border: `1px solid ${C.hairline}`, borderRadius: "8px" }} />
                           <Bar dataKey="count" name="Warehouses" radius={[0, 4, 4, 0]}>
                             {chartData.map((_, idx) => (
                               <Cell key={idx} fill={sizeColors[idx % sizeColors.length]} />
                             ))}
-                            <LabelList dataKey="count" position="right" style={{ fontSize: 11, fill: "#6b7280" }} />
+                            <LabelList dataKey="count" position="right" style={{ fontSize: 11, fill: C.slate }} />
                           </Bar>
                         </BarChart>
                       </ResponsiveContainer>
@@ -954,7 +956,7 @@ export function SQLWarehousing360({ sqlBreakdownData: _sqlBreakdownData, queryDa
           </div>
 
           {/* Query Source Breakdown — full width */}
-          <div className="rounded-lg bg-white p-6 border " style={{ borderColor: '#E5E5E5' }}>
+          <div className="rounded-lg bg-white p-6 border " style={{ borderColor: C.hairline }}>
               <h3 className="mb-4 text-lg font-semibold text-gray-900">Query Source Breakdown</h3>
               {queryData?.by_source?.sources && queryData.by_source.sources.length > 0 ? (
                 <div className="overflow-x-auto">
@@ -989,7 +991,7 @@ export function SQLWarehousing360({ sqlBreakdownData: _sqlBreakdownData, queryDa
                             <div className="flex items-center gap-2">
                               <div
                                 className="h-3 w-3 rounded-full"
-                                style={{ backgroundColor: SOURCE_TYPE_COLORS[source.query_source_type] || "#6b7280" }}
+                                style={{ backgroundColor: SOURCE_TYPE_COLORS[source.query_source_type] || C.slate }}
                               />
                               <span className="font-medium text-gray-900">{source.query_source_type}</span>
                               <svg className="h-3 w-3 text-gray-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -1013,7 +1015,7 @@ export function SQLWarehousing360({ sqlBreakdownData: _sqlBreakdownData, queryDa
                                   className="h-full rounded-full"
                                   style={{
                                     width: `${source.percentage}%`,
-                                    backgroundColor: SOURCE_TYPE_COLORS[source.query_source_type] || "#6b7280",
+                                    backgroundColor: SOURCE_TYPE_COLORS[source.query_source_type] || C.slate,
                                   }}
                                 />
                               </div>
@@ -1033,7 +1035,7 @@ export function SQLWarehousing360({ sqlBreakdownData: _sqlBreakdownData, queryDa
           </div>
 
           {/* Top Expensive Queries Table */}
-          <div className="rounded-lg bg-white p-6 border " style={{ borderColor: '#E5E5E5' }}>
+          <div className="rounded-lg bg-white p-6 border " style={{ borderColor: C.hairline }}>
             {/* Single toolbar row: title · show historical · source pills · search */}
             <div className="mb-4 flex flex-wrap items-center gap-2">
               <h3 className="mr-2 text-lg font-semibold text-gray-900 shrink-0">Most Expensive Queries</h3>
@@ -1056,7 +1058,7 @@ export function SQLWarehousing360({ sqlBreakdownData: _sqlBreakdownData, queryDa
                 <div className="relative">
                   <button
                     onClick={() => setQuerySourceDropdownOpen((o) => !o)}
-                    className={`flex items-center gap-2 rounded-full border px-3 py-1 text-xs font-medium transition-colors ${querySourceFilters.length > 0 && querySourceFilters.length < querySourceTypes.length ? "border-[#FF3621] text-[#FF3621]" : "border-gray-300 text-gray-700 hover:bg-gray-50"}`}
+                    className={`flex items-center gap-2 rounded-full border px-3 py-1 text-xs font-medium transition-colors ${querySourceFilters.length > 0 && querySourceFilters.length < querySourceTypes.length ? "border-lava text-lava" : "border-gray-300 text-gray-700 hover:bg-gray-50"}`}
                   >
                     <span className="max-w-[140px] truncate">
                       {querySourceFilters.length === 0 || querySourceFilters.length === querySourceTypes.length
@@ -1108,14 +1110,14 @@ export function SQLWarehousing360({ sqlBreakdownData: _sqlBreakdownData, queryDa
                     placeholder="Search queries..."
                     value={querySearch}
                     onChange={(e) => { setQuerySearch(e.target.value); setQueriesPage(1); }}
-                    className="w-44 rounded-full border border-gray-200 bg-white py-1.5 pl-9 pr-4 text-xs placeholder:text-gray-400 focus:border-[#FF3621] focus:outline-none focus:ring-1 focus:ring-[#FF3621]"
+                    className="w-44 rounded-full border border-gray-200 bg-white py-1.5 pl-9 pr-4 text-xs placeholder:text-gray-400 focus:border-lava focus:outline-none focus:ring-1 focus:ring-lava"
                   />
                 </div>
               </div>
             </div>
             {topQueriesLoading && sortedQueries.length === 0 ? (
               <div className="flex h-32 items-center justify-center gap-3">
-                <div className="h-6 w-6 animate-spin rounded-full border-2 border-gray-200" style={{ borderTopColor: '#FF3621' }} />
+                <div className="h-6 w-6 animate-spin rounded-full border-2 border-gray-200" style={{ borderTopColor: C.lava }} />
                 <span className="text-sm text-gray-500">Loading top queries...</span>
               </div>
             ) : sortedQueries.length > 0 ? (
@@ -1160,8 +1162,8 @@ export function SQLWarehousing360({ sqlBreakdownData: _sqlBreakdownData, queryDa
                           <span
                             className="inline-flex rounded-full px-2 py-1 text-xs font-medium"
                             style={{
-                              backgroundColor: `${SOURCE_TYPE_COLORS[query.query_source_type] || "#6b7280"}20`,
-                              color: SOURCE_TYPE_COLORS[query.query_source_type] || "#6b7280",
+                              backgroundColor: `${SOURCE_TYPE_COLORS[query.query_source_type] || C.slate}20`,
+                              color: SOURCE_TYPE_COLORS[query.query_source_type] || C.slate,
                             }}
                           >
                             {query.query_source_type}
@@ -1227,7 +1229,7 @@ export function SQLWarehousing360({ sqlBreakdownData: _sqlBreakdownData, queryDa
               <div className="flex items-center gap-3">
                 <div
                   className="h-4 w-4 rounded-full"
-                  style={{ backgroundColor: SOURCE_TYPE_COLORS[selectedSource] || "#6b7280" }}
+                  style={{ backgroundColor: SOURCE_TYPE_COLORS[selectedSource] || C.slate }}
                 />
                 <h3 className="text-lg font-semibold text-gray-900">
                   Top 5 Queries — {selectedSource}
@@ -1242,7 +1244,7 @@ export function SQLWarehousing360({ sqlBreakdownData: _sqlBreakdownData, queryDa
 
             {sourceQueriesLoading ? (
               <div className="flex h-40 items-center justify-center">
-                <div className="h-8 w-8 animate-spin rounded-full border-4 border-gray-200" style={{ borderTopColor: '#FF3621' }} />
+                <div className="h-8 w-8 animate-spin rounded-full border-4 border-gray-200" style={{ borderTopColor: C.lava }} />
               </div>
             ) : sourceQueries.length > 0 ? (
               <div className="overflow-x-auto">
@@ -1284,7 +1286,7 @@ export function SQLWarehousing360({ sqlBreakdownData: _sqlBreakdownData, queryDa
                         </td>
                         <td className="whitespace-nowrap px-4 py-3 text-right">
                           {srcHistUrl
-                            ? <a href={srcHistUrl} target="_blank" rel="noopener noreferrer" className="text-xs text-[#FF3621] hover:underline">History ↗</a>
+                            ? <a href={srcHistUrl} target="_blank" rel="noopener noreferrer" className="text-xs text-lava hover:underline">History ↗</a>
                             : <span className="text-xs text-gray-500">—</span>
                           }
                         </td>
@@ -1325,7 +1327,7 @@ export function SQLWarehousing360({ sqlBreakdownData: _sqlBreakdownData, queryDa
 
             {userQueriesLoading ? (
               <div className="flex h-48 items-center justify-center">
-                <div className="h-8 w-8 animate-spin rounded-full border-4 border-gray-200" style={{ borderTopColor: '#FF3621' }} />
+                <div className="h-8 w-8 animate-spin rounded-full border-4 border-gray-200" style={{ borderTopColor: C.lava }} />
               </div>
             ) : (userQueriesData?.queries?.length ?? 0) > 0 ? (
               <div className="overflow-x-auto max-h-[60vh] overflow-y-auto">
@@ -1360,7 +1362,7 @@ export function SQLWarehousing360({ sqlBreakdownData: _sqlBreakdownData, queryDa
                           <td className="whitespace-nowrap px-4 py-3 text-right text-sm font-medium text-gray-900">{formatCurrency(q.cost)}</td>
                           <td className="whitespace-nowrap px-4 py-3 text-right">
                             {histUrl
-                              ? <a href={histUrl} target="_blank" rel="noopener noreferrer" className="text-xs text-[#FF3621] hover:underline">History ↗</a>
+                              ? <a href={histUrl} target="_blank" rel="noopener noreferrer" className="text-xs text-lava hover:underline">History ↗</a>
                               : <span className="text-xs text-gray-500">—</span>}
                           </td>
                         </tr>
@@ -1540,7 +1542,7 @@ export function WarehouseRightsizingView({ host }: { host?: string | null }) {
               <div className="relative" ref={healthIssueDropdownRef}>
                 <button
                   onClick={() => { setHealthIssueDropdownOpen((o) => !o); }}
-                  className={`flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-medium transition-colors ${healthIssueFilter.length > 0 && healthIssueFilter.length < HEALTH_ISSUE_OPTIONS.length ? "border-[#FF3621] text-[#FF3621]" : "border-gray-300 bg-white text-gray-700 hover:bg-gray-50"}`}
+                  className={`flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-medium transition-colors ${healthIssueFilter.length > 0 && healthIssueFilter.length < HEALTH_ISSUE_OPTIONS.length ? "border-lava text-lava" : "border-gray-300 bg-white text-gray-700 hover:bg-gray-50"}`}
                 >
                   {healthIssueFilter.length === 0 || healthIssueFilter.length === HEALTH_ISSUE_OPTIONS.length ? "Issues" : healthIssueFilter.length === 1 ? (HEALTH_ISSUE_OPTIONS.find(o => o.value === healthIssueFilter[0])?.label || healthIssueFilter[0]) : `${healthIssueFilter.length} Issues`}
                   <svg className={`h-3 w-3 transition-transform ${healthIssueDropdownOpen ? "rotate-180" : ""}`} fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" /></svg>
@@ -1576,7 +1578,7 @@ export function WarehouseRightsizingView({ host }: { host?: string | null }) {
                   placeholder="Search warehouses..."
                   value={healthSearch}
                   onChange={(e) => { setHealthSearch(e.target.value); setHealthPage(1); }}
-                  className="w-44 rounded-full border border-gray-200 bg-white py-1.5 pl-9 pr-4 text-xs placeholder:text-gray-400 focus:border-[#FF3621] focus:outline-none focus:ring-1 focus:ring-[#FF3621]"
+                  className="w-44 rounded-full border border-gray-200 bg-white py-1.5 pl-9 pr-4 text-xs placeholder:text-gray-400 focus:border-lava focus:outline-none focus:ring-1 focus:ring-lava"
                 />
               </div>
             </>
@@ -1586,13 +1588,18 @@ export function WarehouseRightsizingView({ host }: { host?: string | null }) {
 
       {healthLoading ? (
         <div className="flex h-24 items-center justify-center">
-          <div className="h-6 w-6 animate-spin rounded-full border-2 border-gray-200" style={{ borderTopColor: "#FF3621" }} />
+          <div className="h-6 w-6 animate-spin rounded-full border-2 border-gray-200" style={{ borderTopColor: C.lava }} />
         </div>
       ) : !warehouseHealth?.available || !warehouseHealth.recommendations.length ? (
-        <div className="rounded-lg border border-gray-100 bg-gray-50 p-4 text-sm text-gray-500">
+        <div className="rounded-lg p-4 text-sm" style={{ background: C.oatPage, color: warehouseHealth?.available === false ? C.slate : C.greenInk }}>
           {warehouseHealth?.available === false
             ? "Warehouse health data unavailable. Requires system.compute.warehouse_events access."
-            : "No rightsizing recommendations — all warehouses appear appropriately sized."}
+            : (
+              <span className="inline-flex items-center gap-2">
+                <svg className="h-4 w-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" /></svg>
+                No rightsizing recommendations — all warehouses appear appropriately sized.
+              </span>
+            )}
         </div>
       ) : (() => {
         const badgeColor: Record<string, string> = {
@@ -1828,7 +1835,7 @@ export function WarehouseIdleTimeView({
                 <div className="relative" ref={idleSizeDropdownRef}>
                   <button
                     onClick={() => { setIdleSizeDropdownOpen(o => !o); setIdleTypeDropdownOpen(false); }}
-                    className={`flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-medium transition-colors ${idleSizeFilter.length > 0 && idleSizeFilter.length < distinctSizes.length ? "border-[#FF3621] text-[#FF3621]" : "border-gray-300 bg-white text-gray-700 hover:bg-gray-50"}`}
+                    className={`flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-medium transition-colors ${idleSizeFilter.length > 0 && idleSizeFilter.length < distinctSizes.length ? "border-lava text-lava" : "border-gray-300 bg-white text-gray-700 hover:bg-gray-50"}`}
                   >
                     {idleSizeFilter.length === 0 || idleSizeFilter.length === distinctSizes.length ? "Sizes" : idleSizeFilter.length === 1 ? idleSizeFilter[0] : `${idleSizeFilter.length} Sizes`}
                     <svg className={`h-3 w-3 transition-transform ${idleSizeDropdownOpen ? "rotate-180" : ""}`} fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" /></svg>
@@ -1860,7 +1867,7 @@ export function WarehouseIdleTimeView({
                 <div className="relative" ref={idleTypeDropdownRef}>
                   <button
                     onClick={() => { setIdleTypeDropdownOpen(o => !o); setIdleSizeDropdownOpen(false); }}
-                    className={`flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-medium transition-colors ${idleTypeFilter.length > 0 && idleTypeFilter.length < distinctTypes.length ? "border-[#FF3621] text-[#FF3621]" : "border-gray-300 bg-white text-gray-700 hover:bg-gray-50"}`}
+                    className={`flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-medium transition-colors ${idleTypeFilter.length > 0 && idleTypeFilter.length < distinctTypes.length ? "border-lava text-lava" : "border-gray-300 bg-white text-gray-700 hover:bg-gray-50"}`}
                   >
                     {idleTypeFilter.length === 0 || idleTypeFilter.length === distinctTypes.length ? "Types" : idleTypeFilter.length === 1 ? (idleTypeFilter[0] === "SERVERLESS" ? "Serverless" : "Classic") : `${idleTypeFilter.length} Types`}
                     <svg className={`h-3 w-3 transition-transform ${idleTypeDropdownOpen ? "rotate-180" : ""}`} fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" /></svg>
@@ -1897,7 +1904,7 @@ export function WarehouseIdleTimeView({
                   placeholder="Search warehouses..."
                   value={idleSearch}
                   onChange={(e) => { setIdleSearch(e.target.value); setIdlePage(1); }}
-                  className="w-44 rounded-full border border-gray-200 bg-white py-1.5 pl-9 pr-4 text-xs placeholder:text-gray-400 focus:border-[#FF3621] focus:outline-none focus:ring-1 focus:ring-[#FF3621]"
+                  className="w-44 rounded-full border border-gray-200 bg-white py-1.5 pl-9 pr-4 text-xs placeholder:text-gray-400 focus:border-lava focus:outline-none focus:ring-1 focus:ring-lava"
                 />
               </div>
             </div>
@@ -1907,7 +1914,7 @@ export function WarehouseIdleTimeView({
 
       {isLoading ? (
         <div className="flex h-24 items-center justify-center">
-          <div className="h-6 w-6 animate-spin rounded-full border-2 border-gray-200" style={{ borderTopColor: "#FF3621" }} />
+          <div className="h-6 w-6 animate-spin rounded-full border-2 border-gray-200" style={{ borderTopColor: C.lava }} />
         </div>
       ) : !data?.available || !data.warehouses.length ? (
         <div className="rounded-lg border border-gray-100 bg-gray-50 p-4 text-sm text-gray-500">
@@ -1982,7 +1989,10 @@ export function WarehouseIdleTimeView({
                       <td className="px-4 py-3 text-right text-gray-700">{fmtHours(wh.idle_minutes)}</td>
                       <td className="px-4 py-3 text-right">
                         <div className="flex items-center justify-end gap-1.5">
-                          <span className={`inline-flex rounded-full px-2 py-0.5 text-xs font-medium ${wh.idle_pct >= 80 ? "bg-red-100 text-red-700" : wh.idle_pct >= 50 ? "bg-amber-100 text-amber-700" : "bg-gray-100 text-gray-700"}`}>
+                          <span
+                            className="inline-flex rounded-full px-2 py-0.5 text-xs font-medium"
+                            style={wh.idle_pct >= 80 ? { background: C.maroonTint, color: C.maroon } : wh.idle_pct >= 50 ? { background: C.amberTint, color: C.amberInk } : { background: C.oatMed, color: C.slate }}
+                          >
                             {wh.idle_pct.toFixed(1)}%
                           </span>
                           {wh.low_confidence && (

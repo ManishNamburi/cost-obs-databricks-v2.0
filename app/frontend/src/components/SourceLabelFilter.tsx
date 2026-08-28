@@ -1,6 +1,7 @@
 import { useState, useEffect, useMemo, useRef } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { setActiveSourceLabels } from "@/hooks/useBillingData";
+import { C } from "@/theme";
 
 interface MvSource {
   label: string;
@@ -92,11 +93,11 @@ export function SourceLabelFilter() {
       {open && <div className="fixed inset-0 z-10" onClick={() => { setOpen(false); apply(selected); }} />}
       <button
         onClick={() => setOpen((o) => !o)}
-        className="flex items-center gap-2 rounded-full border border-gray-200 bg-white px-3 py-1.5 text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors"
+        className="co-filter flex items-center gap-2 whitespace-nowrap px-3"
         title="Filter by data source"
       >
         {applying ? (
-          <svg className="h-4 w-4 shrink-0 animate-spin text-[#FF3621]" viewBox="0 0 24 24" fill="none">
+          <svg className="h-4 w-4 shrink-0 animate-spin text-lava" viewBox="0 0 24 24" fill="none">
             <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
             <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
           </svg>
@@ -112,7 +113,7 @@ export function SourceLabelFilter() {
       </button>
 
       {open && (
-        <div className="absolute right-0 z-20 mt-2 min-w-[220px] rounded-lg border border-gray-200 bg-white p-3 shadow-lg">
+        <div className="co-filter-menu absolute right-0 z-20 mt-2 min-w-[220px] p-3">
           <div className="mb-2 flex items-center justify-between">
             <span className="text-xs font-semibold uppercase tracking-wide text-gray-500">Data source</span>
             {/* No "Clear" — at least one source must stay selected. "All" selects every source. */}
@@ -124,7 +125,7 @@ export function SourceLabelFilter() {
               const isLocal = lbl === data?.local_label;
               return (
                 <label key={lbl} className={`flex cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 ${checked ? "bg-orange-50 hover:bg-orange-100" : "hover:bg-gray-50"}`}>
-                  <input type="checkbox" checked={checked} onChange={() => toggle(lbl)} className="h-3.5 w-3.5 rounded border-gray-300 accent-[#FF3621]" />
+                  <input type="checkbox" checked={checked} onChange={() => toggle(lbl)} className="h-3.5 w-3.5 rounded border-gray-300 accent-lava" />
                   <span className="flex-1 truncate text-sm text-gray-700">{lbl}</span>
                   {isLocal && <span className="shrink-0 rounded-full bg-gray-100 px-1.5 py-0.5 text-[10px] font-medium text-gray-500">this workspace</span>}
                 </label>
@@ -138,7 +139,7 @@ export function SourceLabelFilter() {
               onClick={() => { apply(selected); setOpen(false); }}
               disabled={applying}
               className="flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-medium text-white transition-colors disabled:cursor-not-allowed"
-              style={{ backgroundColor: applying ? "#FFA390" : "#FF3621" }}
+              style={{ backgroundColor: applying ? C.busy : C.lava }}
             >
               {applying && (
                 <svg className="h-3 w-3 animate-spin" viewBox="0 0 24 24" fill="none">

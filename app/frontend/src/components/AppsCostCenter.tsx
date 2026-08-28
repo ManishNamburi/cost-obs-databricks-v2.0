@@ -17,6 +17,8 @@ import { useAppsDashboardBundle } from "@/hooks/useBillingData";
 import { KPITrendModal } from "./KPITrendModal";
 import { VirtualizedList } from "./VirtualizedList";
 import { formatIdentity } from "@/utils/identity";
+import { C } from "@/theme";
+import { PageHero, Chip } from "@/components/brand";
 
 interface AppsCostCenterProps {
   data: AppsDashboardBundle | undefined;
@@ -30,12 +32,12 @@ interface AppsCostCenterProps {
   workspaceNameMap?: Record<string, string>;
 }
 
-const APP_COLORS = ["#1B5162", "#06B6D4", "#10B981", "#14B8A6", "#F59E0B", "#3B82F6", "#EC4899", "#EF4444", "#6B7280", "#3B82F6"];
+const APP_COLORS = [C.s2, C.s5, C.s3, C.s3, C.s4, C.s5, C.s1, C.lava, C.slate, C.s5];
 
 const PIE_COLORS = {
-  active: "#10B981",   // green
-  inactive: "#F59E0B", // amber
-  historical: "#9CA3AF", // gray
+  active: C.s3,   // green
+  inactive: C.s4, // amber
+  historical: C.muted, // gray
 };
 
 const formatCurrency = (value: number) =>
@@ -143,7 +145,7 @@ function AppHostingComparison({
           <div className="h-8 w-full rounded-md bg-gray-100 overflow-hidden">
             <div
               className="flex h-full items-center rounded-md px-3 transition-all duration-500"
-              style={{ width: `${Math.max(databricksBarPct, 5)}%`, backgroundColor: '#FF3621' }}
+              style={{ width: `${Math.max(databricksBarPct, 5)}%`, backgroundColor: C.lava }}
             >
               <span className="text-xs font-medium text-white whitespace-nowrap">
                 All-inclusive
@@ -239,9 +241,9 @@ function AppHostingComparison({
                   <td className="px-4 py-2 text-xs text-gray-500">Includes one-time + recurring</td>
                 </tr>
                 {/* Databricks Apps row */}
-                <tr style={{ backgroundColor: '#FFF7ED' }}>
-                  <td className="px-4 py-2 font-semibold" style={{ color: '#FF3621' }}>Databricks Apps (Actual)</td>
-                  <td className="px-4 py-2 text-right font-semibold" style={{ color: '#FF3621' }}>
+                <tr style={{ backgroundColor: C.coralTint }}>
+                  <td className="px-4 py-2 font-semibold" style={{ color: C.lava }}>Databricks Apps (Actual)</td>
+                  <td className="px-4 py-2 text-right font-semibold" style={{ color: C.lava }}>
                     {formatCurrency(annualDatabricksSpend)}
                   </td>
                   <td className="px-4 py-2 text-xs text-gray-500">Compute, infra, security, data access — all included</td>
@@ -374,6 +376,31 @@ export function AppsCostCenter({ data: initialData, isLoading: initialLoading, h
     return () => document.removeEventListener("mousedown", handleClick);
   }, [artifactAppFilterOpen]);
 
+  const availableArtifactTypes = useMemo(() => {
+    const arts = data?.connected_artifacts || [];
+    return [...new Set(arts.map((a: AppsConnectedArtifact) => a.artifact_type))].filter((t): t is string => !!t && t !== 'UNKNOWN' && t !== 'Unknown').sort();
+  }, [data?.connected_artifacts]);
+  const availableArtifactApps = useMemo(() => {
+    const arts = data?.connected_artifacts || [];
+    return [...new Set(arts.map((a: AppsConnectedArtifact) => a.app_name).filter(Boolean))].sort() as string[];
+  }, [data?.connected_artifacts]);
+
+  useEffect(() => {
+    const seen = artifactTypeSeen.current;
+    const fresh = availableArtifactTypes.filter(x => !seen.has(x));
+    if (fresh.length === 0) return;
+    setArtifactTypeFilters(prev => Array.from(new Set([...prev, ...fresh])));
+    fresh.forEach(x => seen.add(x));
+  }, [availableArtifactTypes]);
+
+  useEffect(() => {
+    const seen = artifactAppSeen.current;
+    const fresh = availableArtifactApps.filter(x => !seen.has(x));
+    if (fresh.length === 0) return;
+    setArtifactAppFilter(prev => Array.from(new Set([...prev, ...fresh])));
+    fresh.forEach(x => seen.add(x));
+  }, [availableArtifactApps]);
+
   // Close artifact type filter dropdown on outside click
   useEffect(() => {
     if (!artifactTypeDropdownOpen) return;
@@ -434,7 +461,7 @@ export function AppsCostCenter({ data: initialData, isLoading: initialLoading, h
       map[name] = APP_COLORS[idx % APP_COLORS.length];
       idx++;
     }
-    map["Other"] = "#D1D5DB";
+    map["Other"] = C.muted;
     return map;
   }, [data?.apps, data?.timeseries]);
 
@@ -471,31 +498,6 @@ export function AppsCostCenter({ data: initialData, isLoading: initialLoading, h
     setSelectedWorkspaces(prev => Array.from(new Set([...prev, ...fresh])));
     fresh.forEach(id => seen.add(id));
   }, [availableWorkspaces]);
-
-  const availableArtifactTypes = useMemo(() => {
-    const arts = data?.connected_artifacts || [];
-    return [...new Set(arts.map((a: AppsConnectedArtifact) => a.artifact_type))].filter((t): t is string => !!t && t !== 'UNKNOWN' && t !== 'Unknown').sort();
-  }, [data?.connected_artifacts]);
-  const availableArtifactApps = useMemo(() => {
-    const arts = data?.connected_artifacts || [];
-    return [...new Set(arts.map((a: AppsConnectedArtifact) => a.app_name).filter(Boolean))].sort() as string[];
-  }, [data?.connected_artifacts]);
-
-  useEffect(() => {
-    const seen = artifactTypeSeen.current;
-    const fresh = availableArtifactTypes.filter(x => !seen.has(x));
-    if (fresh.length === 0) return;
-    setArtifactTypeFilters(prev => Array.from(new Set([...prev, ...fresh])));
-    fresh.forEach(x => seen.add(x));
-  }, [availableArtifactTypes]);
-
-  useEffect(() => {
-    const seen = artifactAppSeen.current;
-    const fresh = availableArtifactApps.filter(x => !seen.has(x));
-    if (fresh.length === 0) return;
-    setArtifactAppFilter(prev => Array.from(new Set([...prev, ...fresh])));
-    fresh.forEach(x => seen.add(x));
-  }, [availableArtifactApps]);
 
   // Selected workspaces as names (workspace_names on apps contains names, not IDs)
   const selectedWorkspaceNames = useMemo(() => {
@@ -578,7 +580,7 @@ export function AppsCostCenter({ data: initialData, isLoading: initialLoading, h
   if (isLoading) {
     return (
       <div className="flex h-64 flex-col items-center justify-center gap-3">
-        <div className="h-12 w-12 animate-spin rounded-full border-4 border-gray-200" style={{ borderTopColor: '#FF3621' }} />
+        <div className="h-12 w-12 animate-spin rounded-full border-4 border-gray-200" style={{ borderTopColor: C.lava }} />
         <p className="text-sm text-gray-500">Loading Apps data...</p>
       </div>
     );
@@ -597,7 +599,7 @@ export function AppsCostCenter({ data: initialData, isLoading: initialLoading, h
           <button
             onClick={() => refetch()}
             className="mt-1 rounded-md px-4 py-2 text-sm font-medium text-white"
-            style={{ backgroundColor: '#FF3621' }}
+            style={{ backgroundColor: C.lava }}
           >
             Retry
           </button>
@@ -633,24 +635,24 @@ export function AppsCostCenter({ data: initialData, isLoading: initialLoading, h
   return (
     <div className="animate-fade-in space-y-6">
       {/* Header */}
-      <div className="flex items-center gap-3">
-        <div className="rounded-lg p-2" style={{ backgroundColor: '#FF3621' }}>
-          <svg className="h-6 w-6 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+      <PageHero
+        icon={
+          <svg fill="none" viewBox="0 0 24 24" stroke="currentColor">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2V6zM14 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2V6zM4 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2v-2zM14 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2v-2z" />
           </svg>
-        </div>
-        <div>
-          <h1 className="text-2xl font-bold text-gray-900">Apps</h1>
-          <div className="flex items-center gap-2 flex-wrap">
-            <p className="text-sm text-gray-500">Databricks Apps compute cost attribution and trends</p>
+        }
+        title="Apps"
+        subtitle={
+          <>
+            Databricks Apps compute cost attribution and trends
             {workspaceIds && workspaceIds.length > 0 && (
-              <span className="rounded bg-[#1B3139]/10 px-2 py-0.5 text-[10px] font-medium text-[#1B3139]">
+              <Chip kind="workspace">
                 {workspaceIds.length === 1 ? (workspaceNameMap?.[workspaceIds[0]] || workspaceIds[0]) : `${workspaceIds.length} workspaces`}
-              </span>
+              </Chip>
             )}
-          </div>
-        </div>
-      </div>
+          </>
+        }
+      />
 
       {/* Info Banner */}
       <div className="rounded-lg border border-orange-200 bg-orange-50 p-4">
@@ -699,12 +701,12 @@ export function AppsCostCenter({ data: initialData, isLoading: initialLoading, h
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <div
           className="rounded-lg bg-white p-6 border shadow-sm cursor-pointer hover:shadow-md hover:scale-[1.01] transition-all"
-          style={{ borderColor: '#E5E5E5' }}
+          style={{ borderColor: C.hairline }}
           onClick={() => startDate && endDate && setSelectedKPI({kpi: "apps_spend", label: "Daily App Spend"})}
         >
           <div className="flex items-center">
             <div className="flex h-12 w-12 items-center justify-center rounded-lg bg-orange-100">
-              <svg className="h-6 w-6 text-[#FF3621]" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <svg className="h-6 w-6 text-lava" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
               </svg>
             </div>
@@ -712,19 +714,19 @@ export function AppsCostCenter({ data: initialData, isLoading: initialLoading, h
               <p className="text-sm font-medium text-gray-500">Total App Spend</p>
               <p className="text-2xl font-semibold text-gray-900">{formatCurrency(summary.total_spend)}</p>
               <p className="mt-1 text-xs text-gray-500">over {summary.days_in_range} days</p>
-              {startDate && endDate && <p className="mt-1 text-xs font-medium" style={{ color: '#FF3621' }}>Click to see trend &rarr;</p>}
+              {startDate && endDate && <p className="mt-1 text-xs font-medium" style={{ color: C.lava }}>See trend →</p>}
             </div>
           </div>
         </div>
 
         <div
           className="rounded-lg bg-white p-6 border shadow-sm cursor-pointer hover:shadow-md hover:scale-[1.01] transition-all"
-          style={{ borderColor: '#E5E5E5' }}
+          style={{ borderColor: C.hairline }}
           onClick={() => startDate && endDate && setSelectedKPI({kpi: "apps_dbus", label: "Daily App DBUs"})}
         >
           <div className="flex items-center">
             <div className="flex h-12 w-12 items-center justify-center rounded-lg bg-orange-100">
-              <svg className="h-6 w-6 text-[#FF3621]" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <svg className="h-6 w-6 text-lava" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 7h6m0 10v-3m-3 3h.01M9 17h.01M9 14h.01M12 14h.01M15 11h.01M12 11h.01M9 11h.01M7 21h10a2 2 0 002-2V5a2 2 0 00-2-2H7a2 2 0 00-2 2v14a2 2 0 002 2z" />
               </svg>
             </div>
@@ -732,19 +734,19 @@ export function AppsCostCenter({ data: initialData, isLoading: initialLoading, h
               <p className="text-sm font-medium text-gray-500">Total App DBUs</p>
               <p className="text-2xl font-semibold text-gray-900">{formatNumber(summary.total_dbus)}</p>
               <p className="mt-1 text-xs text-gray-500">over {summary.days_in_range} days</p>
-              {startDate && endDate && <p className="mt-1 text-xs font-medium" style={{ color: '#FF3621' }}>Click to see trend &rarr;</p>}
+              {startDate && endDate && <p className="mt-1 text-xs font-medium" style={{ color: C.lava }}>See trend →</p>}
             </div>
           </div>
         </div>
 
         <div
           className="rounded-lg bg-white p-6 border shadow-sm cursor-pointer hover:shadow-md hover:scale-[1.01] transition-all"
-          style={{ borderColor: '#E5E5E5' }}
+          style={{ borderColor: C.hairline }}
           onClick={() => startDate && endDate && setSelectedKPI({kpi: "apps_count", label: "Daily Active Apps"})}
         >
           <div className="flex items-center">
             <div className="flex h-12 w-12 items-center justify-center rounded-lg bg-orange-100">
-              <svg className="h-6 w-6 text-[#FF3621]" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <svg className="h-6 w-6 text-lava" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2V6zM14 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2V6zM4 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2v-2zM14 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2v-2z" />
               </svg>
             </div>
@@ -752,19 +754,19 @@ export function AppsCostCenter({ data: initialData, isLoading: initialLoading, h
               <p className="text-sm font-medium text-gray-500 flex items-center gap-1">Active Apps<InfoTooltip text="An app is counted as active on any day it generates compute usage. This shows the daily average — how many apps run on a typical day in the selected period. Apps that are deployed but idle (no compute) are not counted." /></p>
               <p className="text-2xl font-semibold text-gray-900">{formatNumber(summary.avg_daily_apps ?? summary.app_count)}</p>
               <p className="mt-1 text-xs text-gray-500">avg. over {summary.workspace_count} workspaces</p>
-              {startDate && endDate && <p className="mt-1 text-xs font-medium" style={{ color: '#FF3621' }}>Click to see trend &rarr;</p>}
+              {startDate && endDate && <p className="mt-1 text-xs font-medium" style={{ color: C.lava }}>See trend →</p>}
             </div>
           </div>
         </div>
 
         <div
           className="rounded-lg bg-white p-6 border shadow-sm cursor-pointer hover:shadow-md hover:scale-[1.01] transition-all"
-          style={{ borderColor: '#E5E5E5' }}
+          style={{ borderColor: C.hairline }}
           onClick={() => startDate && endDate && setSelectedKPI({kpi: "apps_avg_cost_per_app", label: "Daily Per-App Spend"})}
         >
           <div className="flex items-center">
             <div className="flex h-12 w-12 items-center justify-center rounded-lg bg-orange-100">
-              <svg className="h-6 w-6 text-[#FF3621]" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <svg className="h-6 w-6 text-lava" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6" />
               </svg>
             </div>
@@ -772,7 +774,7 @@ export function AppsCostCenter({ data: initialData, isLoading: initialLoading, h
               <p className="text-sm font-medium text-gray-500">Per-App Spend</p>
               <p className="text-2xl font-semibold text-gray-900">{formatCurrency(summary.avg_cost_per_app ?? 0)}</p>
               <p className="mt-1 text-xs text-gray-500">daily average</p>
-              {startDate && endDate && <p className="mt-1 text-xs font-medium" style={{ color: '#FF3621' }}>Click to see trend &rarr;</p>}
+              {startDate && endDate && <p className="mt-1 text-xs font-medium" style={{ color: C.lava }}>See trend →</p>}
             </div>
           </div>
         </div>
@@ -794,7 +796,7 @@ export function AppsCostCenter({ data: initialData, isLoading: initialLoading, h
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
         {/* App Status Breakdown — Pie Chart */}
         {pieData.length > 0 && (
-          <div className="rounded-lg bg-white p-6 border " style={{ borderColor: '#E5E5E5' }}>
+          <div className="rounded-lg bg-white p-6 border " style={{ borderColor: C.hairline }}>
             <h3 className="mb-4 flex items-center text-lg font-semibold text-gray-900">
               App Status Breakdown
               <InfoTooltip text="Active = apps with compute usage in the last 7 days of the selected range (cumulative count). The Active Apps KPI card above shows the daily average — fewer apps run every single day than appear active over any 7-day window, so the two numbers will differ." />
@@ -825,21 +827,21 @@ export function AppsCostCenter({ data: initialData, isLoading: initialLoading, h
                 <div className="flex items-center gap-3">
                   <div className="h-3 w-3 rounded-full" style={{ backgroundColor: PIE_COLORS.active }} />
                   <div>
-                    <span className="font-medium text-gray-900">{formatNumber(appsData.active_count)} Active</span>
+                    <Chip kind="serverless">{formatNumber(appsData.active_count)} Active</Chip>
                     <p className="text-xs text-gray-500">Apps with compute usage in the last 7 days</p>
                   </div>
                 </div>
                 <div className="flex items-center gap-3">
                   <div className="h-3 w-3 rounded-full" style={{ backgroundColor: PIE_COLORS.inactive }} />
                   <div>
-                    <span className="font-medium text-gray-900">{formatNumber(appsData.inactive_count)} Inactive</span>
+                    <Chip kind="historical">{formatNumber(appsData.inactive_count)} Inactive</Chip>
                     <p className="text-xs text-gray-500">Deployed but no recent compute usage (may still be running at idle)</p>
                   </div>
                 </div>
                 <div className="flex items-center gap-3">
                   <div className="h-3 w-3 rounded-full" style={{ backgroundColor: PIE_COLORS.historical }} />
                   <div>
-                    <span className="font-medium text-gray-900">{formatNumber(unregisteredSummary.count)} Historical</span>
+                    <Chip kind="workspace">{formatNumber(unregisteredSummary.count)} Historical</Chip>
                     <p className="text-xs text-gray-500">Deleted or unregistered — exist in billing system tables only</p>
                   </div>
                 </div>
@@ -849,7 +851,7 @@ export function AppsCostCenter({ data: initialData, isLoading: initialLoading, h
         )}
 
         {/* Spend Over Time — daily */}
-        <div className="rounded-lg bg-white p-6 border " style={{ borderColor: '#E5E5E5' }}>
+        <div className="rounded-lg bg-white p-6 border " style={{ borderColor: C.hairline }}>
           <h3 className="mb-4 text-lg font-semibold text-gray-900">Apps Spend Over Time</h3>
           {dailyTimeseries.length > 0 ? (
             <ResponsiveContainer width="100%" height={250}>
@@ -860,14 +862,14 @@ export function AppsCostCenter({ data: initialData, isLoading: initialLoading, h
                     const d = new Date(date);
                     return d.toLocaleDateString("en-US", { month: "short", day: "numeric" });
                   }}
-                  stroke="#9ca3af"
+                  stroke={C.muted}
                   fontSize={12}
                   tickMargin={8}
                 />
                 <YAxis
                   tickFormatter={(value) => formatCurrency(value)}
                   width={70}
-                  stroke="#9ca3af"
+                  stroke={C.muted}
                   fontSize={12}
                 />
                 <Tooltip
@@ -880,8 +882,8 @@ export function AppsCostCenter({ data: initialData, isLoading: initialLoading, h
                 <Area isAnimationActive={false}
                   type="monotone"
                   dataKey="Total"
-                  stroke="#FF3621"
-                  fill="#FF3621"
+                  stroke={C.lava}
+                  fill={C.lava}
                   fillOpacity={0.15}
                   strokeWidth={2}
                 />
@@ -894,7 +896,7 @@ export function AppsCostCenter({ data: initialData, isLoading: initialLoading, h
       </div>
 
       {/* App Grid — each app is a clickable tile */}
-      <div className="rounded-lg bg-white p-6 border " style={{ borderColor: '#E5E5E5' }}>
+      <div className="rounded-lg bg-white p-6 border " style={{ borderColor: C.hairline }}>
         <div className="mb-4 flex items-center justify-between gap-3">
           <h3 className="shrink-0 text-lg font-semibold text-gray-900">
             Apps by Spend
@@ -908,67 +910,71 @@ export function AppsCostCenter({ data: initialData, isLoading: initialLoading, h
               <div className="relative" data-ws-filter-dropdown>
                 <button
                   onClick={() => { setWsFilterOpen(!wsFilterOpen); setWsFilterSearch(""); }}
-                  className={`flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-medium transition-colors ${selectedWorkspaces.length > 0 && selectedWorkspaces.length < availableWorkspaces.length ? "border-[#FF3621] text-[#FF3621]" : "border-gray-300 text-gray-700 hover:bg-gray-50"}`}
+                  className={`flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-medium transition-colors ${selectedWorkspaces.length > 0 && selectedWorkspaces.length < availableWorkspaces.length ? "border-lava text-lava" : "border-gray-300 text-gray-700 hover:bg-gray-50"}`}
                 >
                   {selectedWorkspaces.length === 0 || selectedWorkspaces.length === availableWorkspaces.length
-                    ? "Workspaces"
+                    ? "Workspace"
                     : selectedWorkspaces.length === 1
                     ? resolveWsName(selectedWorkspaces[0])
                     : `${selectedWorkspaces.length} Workspaces`}
-                  <svg className={`h-3 w-3 transition-transform ${wsFilterOpen ? "rotate-180" : ""}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
-                  </svg>
+                  <svg className={`h-3 w-3 transition-transform ${wsFilterOpen ? "rotate-180" : ""}`} fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" /></svg>
                 </button>
                 {wsFilterOpen && (
-                  <div className="absolute right-0 top-full z-[9999] mt-1 min-w-[200px] max-h-64 overflow-y-auto rounded-lg border border-gray-200 bg-white shadow-lg">
+                  <div className="absolute right-0 top-full z-50 mt-1 w-72 rounded-lg border border-gray-200 bg-white shadow-lg">
                     <div className="p-2">
                       <input
                         type="text"
                         value={wsFilterSearch}
                         onChange={(e) => setWsFilterSearch(e.target.value)}
                         placeholder="Search workspaces..."
-                        className="w-full rounded-md border border-gray-300 px-3 py-1.5 text-sm focus:border-[#FF3621] focus:outline-none focus:ring-1 focus:ring-[#FF3621]"
+                        className="w-full rounded-md border border-gray-300 px-3 py-1.5 text-sm focus:border-orange-500 focus:outline-none focus:ring-1 focus:ring-orange-500"
                         autoFocus
                       />
                     </div>
-                    <div className="sticky top-[52px] flex items-center justify-between border-b border-gray-100 bg-white px-3 py-2">
-                      <span className="text-[10px] font-semibold uppercase tracking-wider text-gray-500">Workspaces</span>
-                      <div className="flex items-center gap-2 text-xs">
-                        <button onClick={(e) => { e.stopPropagation(); setSelectedWorkspaces(availableWorkspaces.map(ws => ws.id)); }} className="text-gray-500 hover:text-gray-800">All</button>
-                        <span className="text-gray-300">·</span>
-                        <button onClick={(e) => { e.stopPropagation(); setSelectedWorkspaces([]); }} className="text-gray-500 hover:text-gray-800">Clear</button>
+                    <div>
+                      <div className="sticky top-0 flex items-center justify-between border-b border-gray-100 bg-white px-3 py-2">
+                        <span className="text-[10px] font-semibold uppercase tracking-wider text-gray-500">Workspaces</span>
+                        <div className="flex items-center gap-2 text-xs">
+                          <button onClick={(e) => { e.stopPropagation(); setSelectedWorkspaces(availableWorkspaces.map(ws => ws.id)); }} className="text-gray-500 hover:text-gray-800">All</button>
+                          <span className="text-gray-300">·</span>
+                          <button onClick={(e) => { e.stopPropagation(); setSelectedWorkspaces([]); }} className="text-gray-500 hover:text-gray-800">Clear</button>
+                        </div>
                       </div>
+                      {(() => {
+                        const filtered = availableWorkspaces.filter(ws => !wsFilterSearch || ws.name.toLowerCase().includes(wsFilterSearch.toLowerCase()));
+                        if (filtered.length === 0) {
+                          return <div className="px-3 py-2 text-sm text-gray-500">No matching workspaces</div>;
+                        }
+                        return (
+                          <VirtualizedList
+                            items={filtered}
+                            itemHeight={40}
+                            maxHeight={240}
+                            getKey={(ws) => ws.id}
+                            renderItem={(ws) => (
+                              <button
+                                onClick={() => handleToggleWorkspace(ws.id)}
+                                className="flex w-full items-center gap-2 px-3 py-2.5 text-left text-sm hover:bg-gray-50"
+                              >
+                                <div className={`flex h-4 w-4 shrink-0 items-center justify-center rounded border ${selectedWorkspaces.includes(ws.id) ? "border-orange-500 bg-orange-500" : "border-gray-300"}`}>
+                                  {selectedWorkspaces.includes(ws.id) && (
+                                    <svg className="h-3 w-3 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
+                                    </svg>
+                                  )}
+                                </div>
+                                <span className="truncate text-xs text-gray-700">{ws.name}</span>
+                                {ws.historical && (
+                                  <span className="ml-auto shrink-0 rounded-full border border-amber-200 bg-amber-50 px-1.5 py-0.5 text-[9px] font-medium text-amber-700" title="This workspace no longer exists in the account — data is historical.">
+                                    historical
+                                  </span>
+                                )}
+                              </button>
+                            )}
+                          />
+                        );
+                      })()}
                     </div>
-                    {(() => {
-                      const filtered = availableWorkspaces.filter(ws => !wsFilterSearch || ws.name.toLowerCase().includes(wsFilterSearch.toLowerCase()));
-                      if (filtered.length === 0) {
-                        return <div className="px-3 py-2 text-sm text-gray-500">No matching workspaces</div>;
-                      }
-                      return (
-                        <VirtualizedList
-                          items={filtered}
-                          itemHeight={40}
-                          maxHeight={240}
-                          getKey={(ws) => ws.id}
-                          renderItem={(ws) => (
-                            <button
-                              onClick={() => handleToggleWorkspace(ws.id)}
-                              className="flex w-full items-center gap-2 px-3 py-2.5 text-left text-xs hover:bg-gray-50"
-                            >
-                              <div className={`flex h-4 w-4 shrink-0 items-center justify-center rounded border ${selectedWorkspaces.includes(ws.id) ? "border-orange-500 bg-orange-500" : "border-gray-300"}`}>
-                                {selectedWorkspaces.includes(ws.id) && <svg className="h-3 w-3 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" /></svg>}
-                              </div>
-                              <span className="truncate text-gray-700">{ws.name}</span>
-                              {ws.historical && (
-                                <span className="ml-auto shrink-0 rounded-full border border-amber-200 bg-amber-50 px-1.5 py-0.5 text-[9px] font-medium text-amber-700" title="This workspace no longer exists in the account — data is historical.">
-                                  historical
-                                </span>
-                              )}
-                            </button>
-                          )}
-                        />
-                      );
-                    })()}
                   </div>
                 )}
               </div>
@@ -983,7 +989,7 @@ export function AppsCostCenter({ data: initialData, isLoading: initialLoading, h
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
                 placeholder="Search apps..."
-                className="w-44 rounded-full border border-gray-200 bg-white py-1.5 pl-9 pr-4 text-xs placeholder:text-gray-400 focus:border-[#FF3621] focus:outline-none focus:ring-1 focus:ring-[#FF3621]"
+                className="w-44 rounded-full border border-gray-200 bg-white py-1.5 pl-9 pr-4 text-xs placeholder:text-gray-400 focus:border-lava focus:outline-none focus:ring-1 focus:ring-lava"
               />
               {searchQuery && (
                 <button
@@ -1011,7 +1017,7 @@ export function AppsCostCenter({ data: initialData, isLoading: initialLoading, h
         {selectedWorkspaces.length > 0 && selectedWorkspaces.length < availableWorkspaces.length && (
           selectedWorkspaces.length > 12 ? (
             <div className="mb-4 flex items-center gap-2 text-xs text-gray-600">
-              <span className="rounded-full bg-orange-50 px-2.5 py-0.5 font-medium text-[#FF3621]">
+              <span className="rounded-full bg-orange-50 px-2.5 py-0.5 font-medium text-lava">
                 {selectedWorkspaces.length} of {availableWorkspaces.length} workspaces selected
               </span>
               <span className="inline-flex items-center gap-2">
@@ -1023,7 +1029,7 @@ export function AppsCostCenter({ data: initialData, isLoading: initialLoading, h
           ) : (
             <div className="mb-4 flex max-h-20 flex-wrap items-center gap-1.5 overflow-y-auto pr-1">
               {selectedWorkspaces.map(wsId => (
-                <span key={wsId} className="inline-flex max-w-[220px] items-center gap-1 rounded-full px-2.5 py-0.5 text-xs font-medium text-white" style={{ backgroundColor: '#FF3621' }}>
+                <span key={wsId} className="inline-flex max-w-[220px] items-center gap-1 rounded-full px-2.5 py-0.5 text-xs font-medium text-white" style={{ backgroundColor: C.lava }}>
                   <span className="truncate">{resolveWsName(wsId)}</span>
                   <button onClick={() => handleToggleWorkspace(wsId)} className="ml-0.5 inline-flex h-3.5 w-3.5 shrink-0 items-center justify-center rounded-full hover:bg-white/20">
                     <svg className="h-2.5 w-2.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -1065,7 +1071,7 @@ export function AppsCostCenter({ data: initialData, isLoading: initialLoading, h
                         href={liveEndpoint(selectedApp)!}
                         target="_blank"
                         rel="noopener noreferrer"
-                        className="text-xs text-[#FF3621] hover:underline"
+                        className="text-xs text-lava hover:underline"
                       >
                         Live App Endpoint →
                       </a>
@@ -1131,7 +1137,7 @@ export function AppsCostCenter({ data: initialData, isLoading: initialLoading, h
                         <div className="h-1.5 flex-1 rounded-full bg-gray-100">
                           <div
                             className="h-1.5 rounded-full"
-                            style={{ width: `${Math.min(sku.percentage, 100)}%`, backgroundColor: '#FF3621' }}
+                            style={{ width: `${Math.min(sku.percentage, 100)}%`, backgroundColor: C.lava }}
                           />
                         </div>
                         <span className="text-[10px] text-gray-500">{sku.percentage.toFixed(1)}%</span>
@@ -1196,7 +1202,7 @@ export function AppsCostCenter({ data: initialData, isLoading: initialLoading, h
                   onClick={() => setSelectedApp(isSelected ? null : app)}
                   className={`group relative flex flex-col items-center justify-center rounded-lg border-2 p-3 transition-all hover:shadow-md ${
                     isSelected
-                      ? "border-[#FF3621] shadow-md scale-105"
+                      ? "border-lava shadow-md scale-105"
                       : "border-gray-200 hover:border-gray-300"
                   }`}
                   title={`${app.app_name}${isResolved ? ` (${app.app_id})` : ""}\n${formatCurrency(app.total_spend)} · ${app.days_active}d active`}
@@ -1232,7 +1238,7 @@ export function AppsCostCenter({ data: initialData, isLoading: initialLoading, h
           // definitive "No apps found" so the UI doesn't imply confirmed
           // empty when we haven't finished loading.
           <div className="flex h-32 flex-col items-center justify-center gap-3">
-            <div className="h-10 w-10 animate-spin rounded-full border-4 border-gray-200" style={{ borderTopColor: '#FF3621' }} />
+            <div className="h-10 w-10 animate-spin rounded-full border-4 border-gray-200" style={{ borderTopColor: C.lava }} />
             <p className="text-sm text-gray-500">Loading apps…</p>
           </div>
         )}
@@ -1292,7 +1298,7 @@ export function AppsCostCenter({ data: initialData, isLoading: initialLoading, h
         const paginatedArtifacts = filteredArtifacts.slice((safePage - 1) * artifactsPerPage, safePage * artifactsPerPage);
 
         return (
-          <div className="rounded-lg bg-white p-6 border " style={{ borderColor: '#E5E5E5' }}>
+          <div className="rounded-lg bg-white p-6 border " style={{ borderColor: C.hairline }}>
             {/* Single toolbar row: title · filters · search */}
             <div className="mb-4 flex flex-wrap items-center gap-2">
               <h3 className="mr-2 text-lg font-semibold text-gray-900 shrink-0">Connected Resources</h3>
@@ -1303,21 +1309,21 @@ export function AppsCostCenter({ data: initialData, isLoading: initialLoading, h
               <div className="relative" data-artifact-app-dropdown>
                 <button
                   onClick={() => { setArtifactAppFilterOpen(v => !v); setArtifactAppFilterSearch(""); }}
-                  className={`flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-medium transition-colors ${artifactAppFilter.length > 0 && artifactAppFilter.length < allAppNames.length ? "border-[#FF3621] text-[#FF3621]" : "border-gray-300 text-gray-700 hover:bg-gray-50"}`}
+                  className={`flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-medium transition-colors ${artifactAppFilter.length > 0 && artifactAppFilter.length < allAppNames.length ? "border-lava text-lava" : "border-gray-300 bg-white text-gray-700 hover:border-gray-400"}`}
                 >
                   {artifactAppFilter.length === 0
-                    ? 'App'
+                    ? 'Filter by app'
                     : artifactAppFilter.length === 1
                     ? artifactAppFilter[0]
                     : artifactAppFilter.length === allAppNames.length
-                    ? 'App'
+                    ? 'Filter by app'
                     : `${artifactAppFilter.length} apps`}
-                  <svg className={`h-3 w-3 transition-transform ${artifactAppFilterOpen ? "rotate-180" : ""}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
+                  <svg className={`h-3 w-3 transition-transform ${artifactAppFilterOpen ? 'rotate-180' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
                   </svg>
                 </button>
                 {artifactAppFilterOpen && (
-                  <div className="absolute right-0 top-full z-[9999] mt-1 min-w-[220px] max-h-72 rounded-lg border border-gray-200 bg-white shadow-lg">
+                  <div className="absolute right-0 top-full z-[9999] mt-1 w-64 max-h-72 overflow-y-auto rounded-lg border border-gray-200 bg-white shadow-lg">
                     <div className="sticky top-0 flex items-center justify-between border-b border-gray-100 bg-white px-3 py-2">
                       <span className="text-[10px] font-semibold uppercase tracking-wider text-gray-500">App</span>
                       <div className="flex items-center gap-2 text-xs">
@@ -1333,20 +1339,23 @@ export function AppsCostCenter({ data: initialData, isLoading: initialLoading, h
                         value={artifactAppFilterSearch}
                         onChange={e => setArtifactAppFilterSearch(e.target.value)}
                         placeholder="Search apps..."
-                        className="w-full rounded border border-gray-200 px-2 py-1.5 text-xs focus:border-[#FF3621] focus:outline-none focus:ring-1 focus:ring-[#FF3621]"
+                        className="w-full rounded border border-gray-200 px-2 py-1.5 text-xs focus:border-lava focus:outline-none focus:ring-1 focus:ring-lava"
                       />
                     </div>
                     {filteredAppNames.length === 0 ? (
-                      <p className="px-4 py-2 text-xs text-gray-500">No apps found</p>
+                      <p className="px-3 py-2 text-xs text-gray-500">No apps found</p>
                     ) : (
                       <VirtualizedList
                         items={filteredAppNames}
-                        itemHeight={40}
-                        maxHeight={192}
+                        itemHeight={36}
+                        maxHeight={240}
                         getKey={(n) => n}
                         renderItem={(name) => (
                           <button
-                            onClick={() => { setArtifactAppFilter(prev => prev.includes(name) ? prev.filter(x => x !== name) : [...prev, name]); setArtifactPage(1); }}
+                            onClick={() => {
+                              setArtifactAppFilter(prev => prev.includes(name) ? prev.filter(x => x !== name) : [...prev, name]);
+                              setArtifactPage(1);
+                            }}
                             className="flex w-full items-center gap-2 px-3 py-2.5 text-left text-xs hover:bg-gray-50"
                           >
                             <div className={`flex h-4 w-4 shrink-0 items-center justify-center rounded border ${artifactAppFilter.includes(name) ? "border-orange-500 bg-orange-500" : "border-gray-300"}`}>
@@ -1365,25 +1374,25 @@ export function AppsCostCenter({ data: initialData, isLoading: initialLoading, h
               <div className="relative" data-artifact-type-dropdown>
                 <button
                   onClick={() => setArtifactTypeDropdownOpen(v => !v)}
-                  className={`flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-medium transition-colors ${artifactTypeFilters.length > 0 && artifactTypeFilters.length < artifactTypes.length ? "border-[#FF3621] text-[#FF3621]" : "border-gray-300 text-gray-700 hover:bg-gray-50"}`}
+                  className={`flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-medium transition-colors ${artifactTypeFilters.length > 0 && artifactTypeFilters.length < artifactTypes.length ? "border-lava text-lava" : "border-gray-300 bg-white text-gray-700 hover:border-gray-400"}`}
                 >
                   {artifactTypeFilters.length === 0
-                    ? 'Resource Type'
+                    ? 'Resource type'
                     : artifactTypeFilters.length === 1
                     ? artifactTypeFilters[0].replace(/_/g, ' ')
                     : artifactTypeFilters.length === artifactTypes.length
-                    ? 'Resource Type'
-                    : `${artifactTypeFilters.length} Types`}
-                  <svg className={`h-3 w-3 transition-transform ${artifactTypeDropdownOpen ? "rotate-180" : ""}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
+                    ? 'Resource type'
+                    : `${artifactTypeFilters.length} types`}
+                  <svg className={`h-3 w-3 transition-transform ${artifactTypeDropdownOpen ? 'rotate-180' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
                   </svg>
                 </button>
                 {artifactTypeDropdownOpen && (
-                  <div className="absolute right-0 top-full z-[9999] mt-1 min-w-[200px] max-h-64 overflow-y-auto rounded-lg border border-gray-200 bg-white shadow-lg">
+                  <div className="absolute right-0 top-full z-[9999] mt-1 w-56 max-h-72 overflow-y-auto rounded-lg border border-gray-200 bg-white shadow-lg">
                     <div className="sticky top-0 flex items-center justify-between border-b border-gray-100 bg-white px-3 py-2">
-                      <span className="text-[10px] font-semibold uppercase tracking-wider text-gray-500">Resource Type</span>
+                      <span className="text-[10px] font-semibold uppercase tracking-wider text-gray-500">Types</span>
                       <div className="flex items-center gap-2 text-xs">
-                        <button onClick={(e) => { e.stopPropagation(); setArtifactTypeFilters([...artifactTypes]); setArtifactPage(1); }} className="text-gray-500 hover:text-gray-800">All</button>
+                        <button onClick={(e) => { e.stopPropagation(); setArtifactTypeFilters([...(artifactTypes as string[])]); setArtifactPage(1); }} className="text-gray-500 hover:text-gray-800">All</button>
                         <span className="text-gray-300">·</span>
                         <button onClick={(e) => { e.stopPropagation(); setArtifactTypeFilters([]); setArtifactPage(1); }} className="text-gray-500 hover:text-gray-800">Clear</button>
                       </div>
@@ -1394,14 +1403,17 @@ export function AppsCostCenter({ data: initialData, isLoading: initialLoading, h
                       return (
                         <button
                           key={type}
-                          onClick={() => { setArtifactTypeFilters(prev => prev.includes(type) ? prev.filter(t => t !== type) : [...prev, type]); setArtifactPage(1); }}
+                          onClick={() => {
+                            setArtifactTypeFilters(prev => prev.includes(type) ? prev.filter(t => t !== type) : [...prev, type]);
+                            setArtifactPage(1);
+                          }}
                           className="flex w-full items-center gap-2 px-3 py-2.5 text-left text-xs hover:bg-gray-50"
                         >
                           <div className={`flex h-4 w-4 shrink-0 items-center justify-center rounded border ${checked ? "border-orange-500 bg-orange-500" : "border-gray-300"}`}>
                             {checked && <svg className="h-3 w-3 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" /></svg>}
                           </div>
                           <span className="flex-1 truncate text-gray-700">{type.replace(/_/g, ' ')}</span>
-                          <span className="text-xs text-gray-500">({count})</span>
+                          <span className="text-gray-500">({count})</span>
                         </button>
                       );
                     })}
@@ -1419,7 +1431,7 @@ export function AppsCostCenter({ data: initialData, isLoading: initialLoading, h
                   value={artifactSearch}
                   onChange={(e) => { setArtifactSearch(e.target.value); setArtifactPage(1); }}
                   placeholder="Search resources..."
-                  className="w-44 rounded-full border border-gray-200 bg-white py-1.5 pl-9 pr-4 text-xs placeholder:text-gray-400 focus:border-[#FF3621] focus:outline-none focus:ring-1 focus:ring-[#FF3621]"
+                  className="w-44 rounded-full border border-gray-200 bg-white py-1.5 pl-9 pr-4 text-xs placeholder:text-gray-400 focus:border-lava focus:outline-none focus:ring-1 focus:ring-lava"
                 />
               </div>
 
@@ -1457,7 +1469,7 @@ export function AppsCostCenter({ data: initialData, isLoading: initialLoading, h
                       <tr key={`${artifact.app_id}-${artifact.artifact_name}-${idx}`} className="hover:bg-gray-50">
                         <td className="whitespace-nowrap px-3 py-3 text-sm font-medium">
                           {appBackendUrl ? (
-                            <a href={appBackendUrl} target="_blank" rel="noopener noreferrer" className="group flex items-center gap-1 text-[#FF3621] hover:text-[#E02F1C]">
+                            <a href={appBackendUrl} target="_blank" rel="noopener noreferrer" className="group flex items-center gap-1 text-lava hover:text-lava-hover">
                               <span>{na(artifact.app_name)}</span>
                               <svg className="h-3 w-3 shrink-0 opacity-0 transition-opacity group-hover:opacity-100" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
@@ -1470,7 +1482,7 @@ export function AppsCostCenter({ data: initialData, isLoading: initialLoading, h
                         <td className="px-3 py-3 text-sm">
                           <div className="flex flex-col gap-0.5">
                             {artifactUrl ? (
-                              <a href={artifactUrl} target="_blank" rel="noopener noreferrer" className="group flex items-center gap-1 font-medium text-[#FF3621] hover:text-[#E02F1C]">
+                              <a href={artifactUrl} target="_blank" rel="noopener noreferrer" className="group flex items-center gap-1 font-medium text-lava hover:text-lava-hover">
                                 <span title={artifact.artifact_name}>{displayName}</span>
                                 <svg className="h-3 w-3 shrink-0 opacity-0 transition-opacity group-hover:opacity-100" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
@@ -1529,7 +1541,7 @@ export function AppsCostCenter({ data: initialData, isLoading: initialLoading, h
                             className={`rounded px-3 py-1 text-sm font-medium ${
                               safePage === p ? 'text-white' : 'border border-gray-300 text-gray-700 hover:bg-gray-50'
                             }`}
-                            style={safePage === p ? { backgroundColor: '#FF3621' } : undefined}
+                            style={safePage === p ? { backgroundColor: C.lava } : undefined}
                           >
                             {p}
                           </button>

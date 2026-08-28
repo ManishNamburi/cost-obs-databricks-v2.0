@@ -11,6 +11,7 @@ import {
   GeneralSection, DashboardTabsSection, AlertsSection, DataTablesSection,
   AccessSection, ResourcesSection, ExperimentalSection,
 } from "./settings/sections";
+import { APP_VERSION } from "@/theme";
 
 export interface TabVisibility {
   dbu: boolean;
@@ -407,7 +408,7 @@ function SettingsShell({ onClose, onTabVisibilityChange, onSettingsChange, tabVi
               {localSettings.enableAccuracyChecks && (
                 <button onClick={() => setOverlay("accuracy")} style={footerLink(overlay === "accuracy")}>Accuracy checks</button>
               )}
-              <div style={{ fontSize: 11, color: T.textFaint, padding: "4px 10px", fontFamily: undefined }}>cost-obs-v2{version ? ` · ${version.slice(0, 7)}` : ""}</div>
+              <div style={{ fontSize: 11, color: T.textFaint, padding: "4px 10px", fontFamily: "DM Mono, ui-monospace, monospace" }}>cost-obs {APP_VERSION}{version ? ` · ${version.slice(0, 7)}` : ""}</div>
             </div>
           </div>
 

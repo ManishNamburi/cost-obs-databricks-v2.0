@@ -17,6 +17,9 @@ import { SettingsDialog, loadTabVisibility, loadAppSettings, type TabVisibility,
 import { PricingProvider, usePricing } from "@/context/PricingContext";
 import { SpNameMapContext } from "@/utils/identity";
 import { Footer } from "@/components/Footer";
+import { C } from "@/theme";
+import { CostObsLockup, VersionPill, PageHero, Chip } from "@/components/brand";
+import { Spinner } from "@/components/Spinner";
 import awsLogo from "@/assets/aws.png";
 import azureLogo from "@/assets/azure.png";
 import gcpLogo from "@/assets/gcp.svg";
@@ -788,7 +791,7 @@ function Dashboard() {
 
   return (
     <SpNameMapContext.Provider value={spNameMap}>
-    <div className="min-h-screen" style={{ backgroundColor: (appSettings.theme === "dark" || (appSettings.theme === "system" && typeof window !== "undefined" && window.matchMedia("(prefers-color-scheme: dark)").matches)) ? '#1B1F23' : '#F9F7F4' }}>
+    <div className="min-h-screen" style={{ backgroundColor: (appSettings.theme === "dark" || (appSettings.theme === "system" && typeof window !== "undefined" && window.matchMedia("(prefers-color-scheme: dark)").matches)) ? '#1B1F23' : C.oatPage }}>
       <TopProgressBar />
       {/* Setup incomplete banner — non-dismissable, shown when wizard was closed without finishing */}
       {setupIncomplete && (
@@ -830,7 +833,7 @@ function Dashboard() {
       {/* Sticky top chrome: navy account bar + white title/tabs */}
       <div className="sticky top-0 z-30 shadow">
       {/* Account Info Banner */}
-      <div className="text-white" style={{ backgroundColor: '#1B3139' }}>
+      <div className="text-white" style={{ backgroundColor: C.navy, height: 46 }}>
         <div className="mx-auto max-w-7xl px-4 py-3 sm:px-6 lg:px-8">
           <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
             <div className="flex items-center gap-4">
@@ -1023,22 +1026,11 @@ function Dashboard() {
         <div className="mx-auto max-w-7xl px-4 pt-8 pb-4 sm:px-6 lg:px-8">
           <div className="grid grid-cols-3 items-center gap-4">
             <div>
-              <div className="flex items-baseline gap-2">
-                <h1
-                  className="text-3xl font-black tracking-wide text-gray-900 cursor-pointer hover:opacity-75 transition-opacity"
-                  style={{ fontFamily: "'Orbitron', sans-serif" }}
-                  onClick={() => setActiveTab("dbu")}
-                  title="Back to $DBU Spend"
-                >
-                  COST-OBS
-                </h1>
-                <span
-                  className="text-sm font-semibold tracking-wide"
-                  style={{ color: "#FF3621", fontFamily: "'Orbitron', sans-serif" }}
-                  title="cost-obs release tag on the deployed repo"
-                >
-                  v2.1
-                </span>
+              <div className="flex items-center gap-2">
+                <button type="button" onClick={() => setActiveTab("dbu")} title="Back to $DBU Spend" className="cursor-pointer hover:opacity-80 transition-opacity">
+                  <CostObsLockup />
+                </button>
+                <VersionPill />
               </div>
             </div>
             <div className="flex justify-center items-center gap-3">
@@ -1054,15 +1046,15 @@ function Dashboard() {
             <div />
           </div>
           {/* Tab Navigation */}
-          <div className="mt-4 border-b border-gray-200 overflow-x-auto overflow-y-hidden">
+          <div className="mt-4 overflow-x-auto overflow-y-hidden" style={{ borderBottom: "1px solid var(--hairline)" }}>
             <nav className="-mb-px flex justify-center space-x-4 min-w-max">
               {tabVisibility.dbu && (
               <button
                 onClick={() => setActiveTab("dbu")}
                 className={`whitespace-nowrap border-b-2 px-1 py-3 text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-gray-400 ${
                   activeTab === "dbu"
-                    ? "border-[#FF3621] text-[#FF3621]"
-                    : "border-transparent text-gray-500 hover:border-gray-300 hover:text-gray-700"
+                    ? "border-lava text-lava"
+                    : "border-transparent text-slate hover:bg-oat-page hover:text-ink"
                 }`}
               >
                 <svg className="mr-2 -mt-0.5 inline h-4 w-4" viewBox="0 0 24 24" fill="currentColor">
@@ -1078,8 +1070,8 @@ function Dashboard() {
                 onClick={() => setActiveTab("sql")}
                 className={`whitespace-nowrap border-b-2 px-1 py-3 text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-gray-400 ${
                   activeTab === "sql"
-                    ? "border-[#FF3621] text-[#FF3621]"
-                    : "border-transparent text-gray-500 hover:border-gray-300 hover:text-gray-700"
+                    ? "border-lava text-lava"
+                    : "border-transparent text-slate hover:bg-oat-page hover:text-ink"
                 }`}
               >
                 <svg className="mr-2 -mt-0.5 inline h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -1094,8 +1086,8 @@ function Dashboard() {
                 onClick={() => setActiveTab("ai-gateway")}
                 className={`whitespace-nowrap border-b-2 px-1 py-3 text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-gray-400 ${
                   activeTab === "ai-gateway"
-                    ? "border-[#FF3621] text-[#FF3621]"
-                    : "border-transparent text-gray-500 hover:border-gray-300 hover:text-gray-700"
+                    ? "border-lava text-lava"
+                    : "border-transparent text-slate hover:bg-oat-page hover:text-ink"
                 }`}
               >
                 <svg className="mr-2 -mt-0.5 inline h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -1109,8 +1101,8 @@ function Dashboard() {
                 onClick={() => setActiveTab("genie")}
                 className={`whitespace-nowrap border-b-2 px-1 py-3 text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-gray-400 ${
                   activeTab === "genie"
-                    ? "border-[#FF3621] text-[#FF3621]"
-                    : "border-transparent text-gray-500 hover:border-gray-300 hover:text-gray-700"
+                    ? "border-lava text-lava"
+                    : "border-transparent text-slate hover:bg-oat-page hover:text-ink"
                 }`}
               >
                 <svg className="mr-2 -mt-0.5 inline h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -1124,8 +1116,8 @@ function Dashboard() {
                 onClick={() => setActiveTab("apps")}
                 className={`whitespace-nowrap border-b-2 px-1 py-3 text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-gray-400 ${
                   activeTab === "apps"
-                    ? "border-[#FF3621] text-[#FF3621]"
-                    : "border-transparent text-gray-500 hover:border-gray-300 hover:text-gray-700"
+                    ? "border-lava text-lava"
+                    : "border-transparent text-slate hover:bg-oat-page hover:text-ink"
                 }`}
               >
                 <svg className="mr-2 -mt-0.5 inline h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -1139,8 +1131,8 @@ function Dashboard() {
                 onClick={() => setActiveTab("tagging")}
                 className={`whitespace-nowrap border-b-2 px-1 py-3 text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-gray-400 ${
                   activeTab === "tagging"
-                    ? "border-[#FF3621] text-[#FF3621]"
-                    : "border-transparent text-gray-500 hover:border-gray-300 hover:text-gray-700"
+                    ? "border-lava text-lava"
+                    : "border-transparent text-slate hover:bg-oat-page hover:text-ink"
                 }`}
               >
                 <svg className="mr-2 -mt-0.5 inline h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -1154,8 +1146,8 @@ function Dashboard() {
                 onClick={() => setActiveTab("users-groups")}
                 className={`whitespace-nowrap border-b-2 px-1 py-3 text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-gray-400 ${
                   activeTab === "users-groups"
-                    ? "border-[#FF3621] text-[#FF3621]"
-                    : "border-transparent text-gray-500 hover:border-gray-300 hover:text-gray-700"
+                    ? "border-lava text-lava"
+                    : "border-transparent text-slate hover:bg-oat-page hover:text-ink"
                 }`}
               >
                 <svg className="mr-2 -mt-0.5 inline h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -1169,8 +1161,8 @@ function Dashboard() {
                 onClick={() => setActiveTab("kpis")}
                 className={`whitespace-nowrap border-b-2 px-1 py-3 text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-gray-400 ${
                   activeTab === "kpis"
-                    ? "border-[#FF3621] text-[#FF3621]"
-                    : "border-transparent text-gray-500 hover:border-gray-300 hover:text-gray-700"
+                    ? "border-lava text-lava"
+                    : "border-transparent text-slate hover:bg-oat-page hover:text-ink"
                 }`}
               >
                 <svg className="mr-2 -mt-0.5 inline h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -1184,8 +1176,8 @@ function Dashboard() {
                 onClick={() => setActiveTab("infra")}
                 className={`whitespace-nowrap border-b-2 px-1 py-3 text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-gray-400 ${
                   activeTab === "infra"
-                    ? "border-[#FF3621] text-[#FF3621]"
-                    : "border-transparent text-gray-500 hover:border-gray-300 hover:text-gray-700"
+                    ? "border-lava text-lava"
+                    : "border-transparent text-slate hover:bg-oat-page hover:text-ink"
                 }`}
               >
                 <svg className="mr-2 -mt-0.5 inline h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -1199,8 +1191,8 @@ function Dashboard() {
                 onClick={() => setActiveTab("optimizer")}
                 className={`whitespace-nowrap border-b-2 px-1 py-3 text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-gray-400 ${
                   activeTab === "optimizer"
-                    ? "border-[#FF3621] text-[#FF3621]"
-                    : "border-transparent text-gray-500 hover:border-gray-300 hover:text-gray-700"
+                    ? "border-lava text-lava"
+                    : "border-transparent text-slate hover:bg-oat-page hover:text-ink"
                 }`}
               >
                 <svg className="mr-2 -mt-0.5 inline h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -1226,40 +1218,40 @@ function Dashboard() {
           )}
         <Suspense fallback={
           <div className="flex h-64 flex-col items-center justify-center gap-3">
-            <div className="h-10 w-10 animate-spin rounded-full border-4 border-gray-200" style={{ borderTopColor: '#FF3621' }} />
+            <Spinner size="md" />
             <p className="text-sm text-gray-500">Loading...</p>
           </div>
         }>
         {activeTab === "dbu" ? (
           (!warehouseStatus || bundleLoading) ? (
             <div className="flex h-64 flex-col items-center justify-center gap-3">
-              <div className="h-12 w-12 animate-spin rounded-full border-4 border-gray-200" style={{ borderTopColor: '#FF3621' }} />
+              <Spinner size="lg" />
               <p className="text-sm text-gray-500">Loading DBU spend data...</p>
             </div>
           ) : (
           <TabErrorBoundary tabName="$DBU Spend">
           <div className="space-y-6">
             {/* Header */}
-            <div className="flex items-center gap-3">
-              <div className="rounded-lg p-2" style={{ backgroundColor: '#FF3621' }}>
-                <svg className="h-6 w-6 text-white" viewBox="0 0 24 24" fill="currentColor">
+            <PageHero
+              icon={
+                <svg viewBox="0 0 24 24" fill="currentColor">
                   <path d="M20 4H4L7 8L4 12H20L17 8L20 4Z" opacity="0.9"/>
                   <path d="M20 8H4L7 12L4 16H20L17 12L20 8Z" opacity="0.7"/>
                   <path d="M20 12H4L7 16L4 20H20L17 16L20 12Z" opacity="0.5"/>
                 </svg>
-              </div>
-              <div>
-                <h1 className="text-2xl font-bold text-gray-900">$DBU Spend</h1>
-                <div className="flex items-center gap-2 flex-wrap">
-                  <p className="text-sm text-gray-500">Databricks Unit consumption and cost breakdown</p>
+              }
+              title="$DBU Spend"
+              subtitle={
+                <>
+                  Databricks Unit consumption and cost breakdown
                   {_wsIds && _wsIds.length > 0 && (
-                    <span className="rounded bg-[#1B3139]/10 px-2 py-0.5 text-[10px] font-medium text-[#1B3139]">
+                    <Chip kind="workspace">
                       {_wsIds.length === 1 ? (workspaceNameMap[_wsIds[0]] || _wsIds[0]) : `${_wsIds.length} workspaces`}
-                    </span>
+                    </Chip>
                   )}
-                </div>
-              </div>
-            </div>
+                </>
+              }
+            />
 
 
             <SummaryCards
@@ -1313,17 +1305,15 @@ function Dashboard() {
         ) : activeTab === "optimizer" ? (
           <TabErrorBoundary tabName="Optimize">
           <div className="space-y-6">
-            <div className="flex items-center gap-3">
-              <div className="rounded-lg p-2" style={{ backgroundColor: '#FF3621' }}>
-                <svg className="h-6 w-6 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <PageHero
+              icon={
+                <svg fill="none" viewBox="0 0 24 24" stroke="currentColor">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6V4m0 2a2 2 0 100 4m0-4a2 2 0 110 4m-6 8a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4m6 6v10m6-2a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4" />
                 </svg>
-              </div>
-              <div>
-                <h1 className="text-2xl font-bold text-gray-900">Optimize</h1>
-                <p className="text-sm text-gray-500">Rightsizing recommendations and cost optimization insights</p>
-              </div>
-            </div>
+              }
+              title="Optimize"
+              subtitle="Rightsizing recommendations and cost optimization insights"
+            />
             <OptimizeMethodologyPanel />
             <WarehouseIdleTimeView host={accountInfo?.host} startDate={dateRange.startDate} endDate={dateRange.endDate} workspaceIds={_wsIds} />
             <WarehouseRightsizingView host={accountInfo?.host} />

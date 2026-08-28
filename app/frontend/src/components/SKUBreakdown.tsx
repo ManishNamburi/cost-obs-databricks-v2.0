@@ -12,6 +12,7 @@ import {
 import type { SKUBreakdownResponse, WorkspaceBreakdown } from "@/types/billing";
 import { formatCurrency } from "@/utils/formatters";
 import { VirtualizedList } from "./VirtualizedList";
+import { C } from "@/theme";
 
 interface SKUBreakdownProps {
   data: SKUBreakdownResponse | undefined;
@@ -21,19 +22,12 @@ interface SKUBreakdownProps {
   workspaceNameMap?: Record<string, string>;
 }
 
-const SKU_COLORS = [
-  "#1B5162", "#FF3621", "#06B6D4", "#10B981", "#F59E0B",
-  "#3B82F6", "#EC4899", "#EF4444", "#14B8A6", "#6B7280",
-];
-
-// Hoisted formatters — inline lambdas create a new ref every render and churn
-// Recharts' internal prop diffing, which contributes to LabelList flicker.
 const fmtCurrency = (v: unknown) => formatCurrency(v as number);
 const fmtTooltip = (value: number | undefined) => formatCurrency(value ?? 0);
 const fmtTooltipLabel = (label: unknown) => `SKU: ${label}`;
 const fmtYTick = (v: string) => (v.length > 22 ? v.substring(0, 20) + "…" : v);
-const TOOLTIP_STYLE = { backgroundColor: "white", border: "1px solid #e5e7eb", borderRadius: "8px" } as const;
-const LABEL_STYLE = { fontSize: 11, fill: "#6b7280" } as const;
+const TOOLTIP_STYLE = { backgroundColor: C.white, border: `1px solid ${C.hairline}`, borderRadius: "8px" } as const;
+const LABEL_STYLE = { fontSize: 11, fill: C.slate } as const;
 
 interface WsRowProps {
   wsId: string;
@@ -169,7 +163,7 @@ export function SKUBreakdown({ data, isLoading, workspaces, dateRange, workspace
     <div className="relative" ref={dropdownRef}>
       <button
         onClick={() => setDropdownOpen(!dropdownOpen)}
-        className={`flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-medium transition-colors ${isWorkspaceFilterActive ? "border-[#FF3621] text-[#FF3621]" : "border-gray-300 text-gray-700 hover:bg-gray-50"}`}
+        className={`flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-medium transition-colors ${isWorkspaceFilterActive ? "border-lava text-lava" : "border-gray-300 text-gray-700 hover:bg-gray-50"}`}
       >
         {workspaceFilters.length === 1
           ? (selectedWorkspaceName || workspaceFilters[0])
@@ -196,7 +190,7 @@ export function SKUBreakdown({ data, isLoading, workspaces, dateRange, workspace
               value={wsSearch}
               onChange={(e) => setWsSearch(e.target.value)}
               placeholder="Search workspaces..."
-              className="w-full rounded border border-gray-200 px-2 py-1 text-xs focus:border-[#FF3621] focus:outline-none focus:ring-1 focus:ring-[#FF3621]"
+              className="w-full rounded border border-gray-200 px-2 py-1 text-xs focus:border-lava focus:outline-none focus:ring-1 focus:ring-lava"
               autoFocus
             />
           </div>
@@ -233,13 +227,13 @@ export function SKUBreakdown({ data, isLoading, workspaces, dateRange, workspace
 
   if (showLoading) {
     return (
-      <div className="rounded-lg bg-white p-6 border " style={{ borderColor: '#E5E5E5' }}>
+      <div className="rounded-lg bg-white p-6 border " style={{ borderColor: C.hairline }}>
         <div className="mb-4 flex items-center justify-between">
           <h3 className="text-lg font-semibold text-gray-900">Spend by SKU</h3>
           {workspaceSelector}
         </div>
         <div className="flex h-48 flex-col items-center justify-center gap-3">
-          <div className="h-12 w-12 animate-spin rounded-full border-4 border-gray-200" style={{ borderTopColor: '#FF3621' }} />
+          <div className="h-12 w-12 animate-spin rounded-full border-4 border-gray-200" style={{ borderTopColor: C.lava }} />
           <p className="text-sm text-gray-500">Loading SKU breakdown...</p>
         </div>
       </div>
@@ -248,7 +242,7 @@ export function SKUBreakdown({ data, isLoading, workspaces, dateRange, workspace
 
   if (!displayData || !displayData.skus?.length) {
     return (
-      <div className="rounded-lg bg-white p-6 border " style={{ borderColor: '#E5E5E5' }}>
+      <div className="rounded-lg bg-white p-6 border " style={{ borderColor: C.hairline }}>
         <div className="mb-4 flex items-center justify-between">
           <h3 className="text-lg font-semibold text-gray-900">Spend by SKU</h3>
           {workspaceSelector}
@@ -262,7 +256,7 @@ export function SKUBreakdown({ data, isLoading, workspaces, dateRange, workspace
   }
 
   return (
-    <div className="animate-fade-in rounded-lg bg-white p-6 border " style={{ borderColor: '#E5E5E5' }}>
+    <div className="animate-fade-in rounded-lg bg-white p-6 border " style={{ borderColor: C.hairline }}>
       <div className="mb-4 flex items-center justify-between">
         <div>
           <h3 className="text-lg font-semibold text-gray-900">Spend by SKU</h3>
@@ -279,12 +273,12 @@ export function SKUBreakdown({ data, isLoading, workspaces, dateRange, workspace
       </div>
       <ResponsiveContainer width="100%" height={320}>
         <BarChart data={barData} layout="vertical" margin={{ left: -25, right: 70 }}>
-          <XAxis type="number" tickFormatter={fmtCurrency} stroke="#9ca3af" fontSize={12} tickMargin={8} />
+          <XAxis type="number" tickFormatter={fmtCurrency} stroke={C.muted} fontSize={12} tickMargin={8} />
           <YAxis
             type="category"
             dataKey="name"
             width={175}
-            stroke="#9ca3af"
+            stroke={C.muted}
             fontSize={11}
             tickMargin={2}
             tickFormatter={fmtYTick}
@@ -296,7 +290,7 @@ export function SKUBreakdown({ data, isLoading, workspaces, dateRange, workspace
           />
           <Bar dataKey="total_spend" name="Spend" radius={[0, 4, 4, 0]} isAnimationActive={false}>
             {barData.map((_entry, idx) => (
-              <Cell key={idx} fill={SKU_COLORS[idx % SKU_COLORS.length]} />
+              <Cell key={idx} fill={idx === 0 ? C.s1 : C.s2} />
             ))}
             <LabelList dataKey="total_spend" position="right" formatter={fmtCurrency} style={LABEL_STYLE} />
           </Bar>

@@ -54,10 +54,10 @@ export function DateRangePicker({ value, onChange }: DateRangePickerProps) {
     <div className="relative">
       <button
         onClick={() => setIsOpen(!isOpen)}
-        className="flex w-80 items-center gap-2 rounded-full border border-gray-200 bg-white px-4 py-1.5 text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors"
+        className="co-filter flex w-80 items-center gap-2 px-4"
       >
         {updating ? (
-          <svg className="h-4 w-4 shrink-0 animate-spin text-[#FF3621]" viewBox="0 0 24 24" fill="none">
+          <svg className="h-4 w-4 shrink-0 animate-spin text-lava" viewBox="0 0 24 24" fill="none">
             <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
             <path className="opacity-75" fill="currentColor" d={UPDATING_SPINNER_PATH} />
           </svg>
@@ -80,7 +80,7 @@ export function DateRangePicker({ value, onChange }: DateRangePickerProps) {
             className="fixed inset-0 z-10"
             onClick={() => setIsOpen(false)}
           />
-          <div className="absolute right-0 z-20 mt-2 w-80 rounded-lg border border-gray-200 bg-white p-4 shadow-lg">
+          <div className="co-filter-menu absolute right-0 z-20 mt-2 w-80 p-4">
             <div className="mb-4">
               <h4 className="mb-2 text-sm font-medium text-gray-700">Quick Select</h4>
               <div className="flex flex-wrap gap-2">

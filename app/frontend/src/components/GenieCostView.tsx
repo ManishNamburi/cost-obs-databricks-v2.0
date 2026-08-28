@@ -11,6 +11,8 @@ import type {
   GenieCostWorkspaceRow,
 } from "@/types/billing";
 import { formatCurrency } from "@/utils/formatters";
+import { PageHero } from "@/components/brand";
+import { C } from "@/theme";
 import { useGenieCostDiagnostics } from "@/hooks/useBillingData";
 
 // ── Number formatting helpers ─────────────────────────────────────────────────
@@ -324,12 +326,15 @@ export function GenieCostView({ data, isLoading }: GenieCostViewProps) {
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between pr-12">
-        <h1 className="text-2xl font-bold text-gray-900">Genie</h1>
-        {summary && (
-          <p className="text-xs text-gray-500">
-            {summary.start_date} → {summary.end_date} · {summary.workspace_count} workspace{summary.workspace_count === 1 ? "" : "s"} with Genie spend
-          </p>
-        )}
+        <PageHero
+          icon={
+            <svg fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 5v-5z" />
+            </svg>
+          }
+          title="Genie"
+          subtitle={summary ? `${summary.start_date} → ${summary.end_date} · ${summary.workspace_count} workspace${summary.workspace_count === 1 ? "" : "s"} with Genie spend` : undefined}
+        />
       </div>
 
       {/* Sub-tab strip */}
@@ -343,7 +348,7 @@ export function GenieCostView({ data, isLoading }: GenieCostViewProps) {
                 ? "border-b-2 text-gray-900"
                 : "text-gray-500 hover:text-gray-700"
             }`}
-            style={subTab === t.id ? { borderColor: "#FF3621" } : undefined}
+            style={subTab === t.id ? { borderColor: C.lava } : undefined}
           >
             {t.label}
           </button>

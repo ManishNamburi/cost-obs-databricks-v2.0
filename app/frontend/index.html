@@ -2,14 +2,10 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <link rel="icon" type="image/png" href="/dbfavicon.png" />
+    <link rel="icon" type="image/svg+xml" href="/brand/costobs-icon-tile.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <link rel="preconnect" href="https://fonts.googleapis.com" />
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@700;900&display=swap" rel="stylesheet" />
-    <title>COST-OBS</title>
+    <title>cost-obs — Cost observability for Databricks</title>
     <style>
-      /* Unique keyframe names to avoid collision with Tailwind v4's layered @keyframes */
       @keyframes co-spin { to { transform: rotate(360deg); } }
       @keyframes co-pulse { 50% { opacity: .5; } }
       @keyframes co-bounce {
@@ -23,18 +19,14 @@
   </head>
   <body>
     <div id="root">
-      <!-- Inline loading shell — React replaces this on mount.
-           Shown immediately while the JS bundle downloads/executes. -->
-      <div style="display:flex;flex-direction:column;min-height:100vh;background:#f8f9fa;font-family:system-ui,-apple-system,sans-serif;">
-        <!-- Nav bar -->
-        <div style="background:#1B3139;padding:0 24px;height:56px;display:flex;align-items:center;gap:24px;flex-shrink:0;">
-          <div style="color:#fff;font-size:18px;font-weight:700;letter-spacing:.05em;">COST-OBS</div>
+      <div style="display:flex;flex-direction:column;min-height:100vh;background:#F9F7F4;font-family:'DM Sans',-apple-system,sans-serif;">
+        <div style="background:#1B3139;padding:0 24px;height:46px;display:flex;align-items:center;gap:24px;flex-shrink:0;">
+          <div style="color:#fff;font-size:16px;font-weight:700;">cost-obs</div>
         </div>
-        <!-- Content area -->
         <div style="flex:1;display:flex;align-items:center;justify-content:center;">
           <div style="text-align:center;">
-            <div style="width:40px;height:40px;border:3px solid #e5e7eb;border-top-color:#FF3621;border-radius:50%;animation:co-spin 1s linear infinite;margin:0 auto 16px;"></div>
-            <p style="color:#6b7280;font-size:14px;margin:0;">Loading Cost Observatory…</p>
+            <div style="width:40px;height:40px;border:3px solid #E4E2DD;border-top-color:#FF3621;border-radius:50%;animation:co-spin 900ms linear infinite;margin:0 auto 16px;"></div>
+            <p style="color:#618794;font-size:14px;margin:0;">Loading cost-obs…</p>
           </div>
         </div>
       </div>

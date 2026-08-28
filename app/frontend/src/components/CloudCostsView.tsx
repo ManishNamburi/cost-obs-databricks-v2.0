@@ -35,6 +35,8 @@ import { VirtualizedList } from "./VirtualizedList";
 import { AWSActualView } from "./AWSActualView";
 import { CloudIntegrationWizard } from "./CloudIntegrationWizard";
 import type { CloudIntegration } from "./CloudIntegrationWizard";
+import { C } from "@/theme";
+import { PageHero, Chip } from "@/components/brand";
 
 type CostMode = "estimated" | "actual";
 
@@ -72,26 +74,26 @@ type SortField = "cluster_name" | "estimated_aws_cost" | "total_dbu_hours" | "da
 type SortDirection = "asc" | "desc";
 
 const FAMILY_PALETTE = [
-  "#1B5162", "#06B6D4", "#10B981", "#14B8A6", "#F59E0B",
-  "#3B82F6", "#EC4899", "#EF4444", "#6B7280",
+  C.s2, C.s5, C.s3, C.s3, C.s4,
+  C.s5, C.s1, C.lava, C.slate,
 ];
 
 const INSTANCE_COLORS: Record<string, string> = {
-  i3: "#1B5162", i3en: "#2D7A96", i4i: "#4A99B8",
-  m4: "#10B981", m5: "#10B981", m5d: "#34D399", m5n: "#6EE7B7",
-  m6i: "#6EE7B7", m6id: "#A7F3D0", m7g: "#059669", m7gd: "#047857", m7i: "#34D399",
-  r5: "#F59E0B", r5d: "#FBBF24", r6id: "#FDE68A", r6gd: "#FCD34D", r8gd: "#D97706",
-  c5: "#3B82F6", c5d: "#60A5FA", c6gd: "#1D4ED8",
-  g4dn: "#EC4899", g5: "#F472B6",
-  p3: "#EF4444",
-  "rd-fleet": "#06B6D4", "rgd-fleet": "#0891B2",
-  Standard_D: "#1B5162", Standard_DS: "#2D7A96",
-  Standard_E: "#10B981", Standard_ES: "#34D399",
-  Standard_F: "#3B82F6", Standard_FS: "#60A5FA",
-  Standard_L: "#F59E0B", Standard_LS: "#FBBF24",
-  Standard_M: "#EF4444",
-  Standard_NC: "#EC4899", Standard_ND: "#F472B6", Standard_NV: "#14B8A6",
-  unknown: "#6B7280",
+  i3: C.s2, i3en: C.s2, i4i: C.s5,
+  m4: C.s3, m5: C.s3, m5d: C.s3, m5n: C.s3,
+  m6i: C.s3, m6id: C.s3, m7g: C.s3, m7gd: C.s3, m7i: C.s3,
+  r5: C.s4, r5d: C.s4, r6id: C.s4, r6gd: C.s4, r8gd: C.s4,
+  c5: C.s5, c5d: C.s5, c6gd: C.s5,
+  g4dn: C.s1, g5: C.s1,
+  p3: C.lava,
+  "rd-fleet": C.s5, "rgd-fleet": C.s5,
+  Standard_D: C.s2, Standard_DS: C.s2,
+  Standard_E: C.s3, Standard_ES: C.s3,
+  Standard_F: C.s5, Standard_FS: C.s5,
+  Standard_L: C.s4, Standard_LS: C.s4,
+  Standard_M: C.lava,
+  Standard_NC: C.s1, Standard_ND: C.s1, Standard_NV: C.s3,
+  unknown: C.slate,
 };
 
 function getInstanceColor(name: string, index: number): string {
@@ -369,7 +371,7 @@ export function CloudCostsView({
   if (showLoading) {
     return (
       <div className="flex h-64 flex-col items-center justify-center gap-3">
-        <div className="h-12 w-12 animate-spin rounded-full border-4 border-gray-200" style={{ borderTopColor: '#FF3621' }} />
+        <div className="h-12 w-12 animate-spin rounded-full border-4 border-gray-200" style={{ borderTopColor: C.lava }} />
         <p className="text-sm text-gray-500">Loading cloud costs...</p>
       </div>
     );
@@ -602,7 +604,7 @@ export function CloudCostsView({
       <div className="space-y-6">
         {ModeToggle}
         {CurSetupBanner}
-        <div className="rounded-lg bg-white p-6 border" style={{ borderColor: '#E5E5E5' }}>
+        <div className="rounded-lg bg-white p-6 border" style={{ borderColor: C.hairline }}>
           <h3 className="mb-4 text-lg font-semibold text-gray-900">{cloudDisplayName} Infrastructure Costs</h3>
           <p className="text-sm text-amber-600">{data.error}</p>
         </div>
@@ -618,24 +620,24 @@ export function CloudCostsView({
         {CurSetupBanner}
         {hasBillingSummary && (
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
-            <div className="rounded-lg bg-white p-6 border" style={{ borderColor: '#E5E5E5' }}>
+            <div className="rounded-lg bg-white p-6 border" style={{ borderColor: C.hairline }}>
               <p className="text-sm font-medium text-gray-500">Compute Spend</p>
               <p className="text-2xl font-semibold text-gray-900">{formatCurrency(billingSummary!.total_cost ?? 0)}</p>
               <p className="mt-1 text-xs text-gray-500">{billingSummary!.days_in_range ?? 0} days (all-purpose + jobs + DLT)</p>
             </div>
-            <div className="rounded-lg bg-white p-6 border" style={{ borderColor: '#E5E5E5' }}>
+            <div className="rounded-lg bg-white p-6 border" style={{ borderColor: C.hairline }}>
               <p className="text-sm font-medium text-gray-500">Avg Active Clusters / Day</p>
               <p className="text-2xl font-semibold text-gray-900">{formatNumber(billingSummary!.avg_clusters_per_day ?? 0)}</p>
               <p className="mt-1 text-xs text-gray-500">daily average</p>
             </div>
-            <div className="rounded-lg bg-white p-6 border" style={{ borderColor: '#E5E5E5' }}>
+            <div className="rounded-lg bg-white p-6 border" style={{ borderColor: C.hairline }}>
               <p className="text-sm font-medium text-gray-500">Avg Cost / Cluster</p>
               <p className="text-2xl font-semibold text-gray-900">{formatCurrency(billingSummary!.avg_cost_per_cluster ?? 0)}</p>
               <p className="mt-1 text-xs text-gray-500">per cluster per day</p>
             </div>
           </div>
         )}
-        <div className="rounded-lg bg-white p-6 border" style={{ borderColor: '#E5E5E5' }}>
+        <div className="rounded-lg bg-white p-6 border" style={{ borderColor: C.hairline }}>
           <h3 className="mb-4 text-lg font-semibold text-gray-900">{cloudDisplayName} Infrastructure Costs</h3>
           <div className="flex h-32 flex-col items-center justify-center gap-2 text-gray-500">
             <p className="text-base font-medium">No cluster instance data available</p>
@@ -806,26 +808,26 @@ export function CloudCostsView({
 
   return (
     <div className="animate-fade-in space-y-6">
-      <div className="flex items-center gap-3">
-        <div className="rounded-lg p-2" style={{ backgroundColor: '#FF3621' }}>
-          <svg className="h-6 w-6 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+      <PageHero
+        icon={
+          <svg fill="none" viewBox="0 0 24 24" stroke="currentColor">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 15a4 4 0 004 4h9a5 5 0 10-.1-9.999 5.002 5.002 0 10-9.78 2.096A4.001 4.001 0 003 15z" />
           </svg>
-        </div>
-        <div>
-          <h1 className="text-2xl font-bold text-gray-900">Cloud Costs</h1>
-          <div className="flex items-center gap-2 flex-wrap">
-            <p className="text-sm text-gray-500">Estimated cloud infrastructure costs and cluster analytics</p>
+        }
+        title="Cloud Costs"
+        subtitle={
+          <>
+            Estimated cloud infrastructure costs and cluster analytics
             {workspaceIds && workspaceIds.length > 0 ? (
-              <span className="rounded bg-[#1B3139]/10 px-2 py-0.5 text-[10px] font-medium text-[#1B3139]">
+              <Chip kind="workspace">
                 {workspaceIds.length === 1 ? (workspaceNameMap?.[workspaceIds[0]] || workspaceIds[0]) : `${workspaceIds.length} workspaces`}
-              </span>
+              </Chip>
             ) : (
-              <span className="rounded-full bg-gray-100 px-2 py-0.5 text-xs text-gray-500">Account-wide</span>
+              <Chip>Account-wide</Chip>
             )}
-          </div>
-        </div>
-      </div>
+          </>
+        }
+      />
 
       {EstimationInfoBox}
       {ModeToggle}
@@ -834,13 +836,13 @@ export function CloudCostsView({
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <div
           className="relative rounded-lg bg-white p-6 border shadow-sm cursor-pointer hover:shadow-md hover:scale-[1.01] transition-all"
-          style={{ borderColor: '#E5E5E5' }}
+          style={{ borderColor: C.hairline }}
           onClick={() => startDate && endDate && setSelectedKPI({ kpi: "infra_cost", label: `Daily ${cloudDisplayName} Cluster Spend` })}
         >
-          <span className="absolute top-2 left-2 inline-flex items-center rounded px-1.5 py-0.5 text-[10px] font-semibold tracking-wide" style={{ backgroundColor: '#FF9900', color: '#fff' }}>est.</span>
+          <span className="absolute top-2 left-2 inline-flex items-center rounded px-1.5 py-0.5 text-[10px] font-semibold tracking-wide" style={{ backgroundColor: C.amber, color: C.white }}>est.</span>
           <div className="flex items-center">
             <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-lg bg-orange-100">
-              <svg className="h-6 w-6 text-[#FF3621]" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <svg className="h-6 w-6 text-lava" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
               </svg>
             </div>
@@ -852,18 +854,18 @@ export function CloudCostsView({
                 const dailyAvg = cloudSummary.totalCost > 0 ? cloudSummary.totalCost / days : 0;
                 return <p className="mt-1 text-xs text-gray-500">{formatCurrency(dailyAvg)}/day avg · {days} days</p>;
               })()}
-              {startDate && endDate && <p className="mt-0.5 text-xs font-medium" style={{ color: '#FF3621' }}>Click to see trend →</p>}
+              {startDate && endDate && <p className="mt-0.5 text-xs font-medium" style={{ color: C.lava }}>See trend →</p>}
             </div>
           </div>
         </div>
         <div
           className="rounded-lg bg-white p-6 border shadow-sm cursor-pointer hover:shadow-md hover:scale-[1.01] transition-all"
-          style={{ borderColor: '#E5E5E5' }}
+          style={{ borderColor: C.hairline }}
           onClick={() => startDate && endDate && setSelectedKPI({ kpi: "infra_dbu_hours", label: "Daily Cluster DBUs" })}
         >
           <div className="flex items-center">
             <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-lg bg-orange-100">
-              <svg className="h-6 w-6 text-[#FF3621]" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <svg className="h-6 w-6 text-lava" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
               </svg>
             </div>
@@ -871,18 +873,18 @@ export function CloudCostsView({
               <p className="text-sm font-medium text-gray-500">Total Cluster DBUs</p>
               <p className="text-2xl font-semibold text-gray-900">{formatNumber(cloudSummary.totalDBUHours)}</p>
               <p className="mt-1 text-xs text-gray-500">across {data.clusters.length} clusters</p>
-              {startDate && endDate && <p className="mt-0.5 text-xs font-medium" style={{ color: '#FF3621' }}>Click to see trend →</p>}
+              {startDate && endDate && <p className="mt-0.5 text-xs font-medium" style={{ color: C.lava }}>See trend →</p>}
             </div>
           </div>
         </div>
         <div
           className="rounded-lg bg-white p-6 border shadow-sm cursor-pointer hover:shadow-md hover:scale-[1.01] transition-all"
-          style={{ borderColor: '#E5E5E5' }}
+          style={{ borderColor: C.hairline }}
           onClick={() => startDate && endDate && setSelectedKPI({ kpi: "infra_clusters", label: `Daily Active ${cloudDisplayName} Clusters` })}
         >
           <div className="flex items-center">
             <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-lg bg-orange-100">
-              <svg className="h-6 w-6 text-[#FF3621]" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <svg className="h-6 w-6 text-lava" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 12h14M5 12a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v4a2 2 0 01-2 2M5 12a2 2 0 00-2 2v4a2 2 0 00-2-2m-2-4h.01M17 16h.01" />
               </svg>
             </div>
@@ -890,19 +892,19 @@ export function CloudCostsView({
               <p className="text-sm font-medium text-gray-500">Active Clusters<InfoTooltip text="Average number of distinct clusters with billing activity per day in the selected period. Includes all cluster types (job clusters, interactive clusters)." /></p>
               <p className="text-2xl font-semibold text-gray-900">{formatNumber(cloudSummary.avgActiveClustersPerDay)}</p>
               <p className="mt-1 text-xs text-gray-500">daily average</p>
-              {startDate && endDate && <p className="mt-0.5 text-xs font-medium" style={{ color: '#FF3621' }}>Click to see trend →</p>}
+              {startDate && endDate && <p className="mt-0.5 text-xs font-medium" style={{ color: C.lava }}>See trend →</p>}
             </div>
           </div>
         </div>
         <div
           className={`relative rounded-lg bg-white p-6 border shadow-sm transition-all ${startDate && endDate ? "cursor-pointer hover:shadow-md hover:scale-[1.01]" : ""}`}
-          style={{ borderColor: '#E5E5E5' }}
+          style={{ borderColor: C.hairline }}
           onClick={() => startDate && endDate && setSelectedKPI({ kpi: "avg_cost_per_cluster", label: `Daily ${cloudDisplayName} Cost Per-Cluster` })}
         >
-          <span className="absolute top-2 left-2 inline-flex items-center rounded px-1.5 py-0.5 text-[10px] font-semibold tracking-wide" style={{ backgroundColor: '#FF9900', color: '#fff' }}>est.</span>
+          <span className="absolute top-2 left-2 inline-flex items-center rounded px-1.5 py-0.5 text-[10px] font-semibold tracking-wide" style={{ backgroundColor: C.amber, color: C.white }}>est.</span>
           <div className="flex items-center">
             <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-lg bg-orange-100">
-              <svg className="h-6 w-6 text-[#FF3621]" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <svg className="h-6 w-6 text-lava" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
               </svg>
             </div>
@@ -911,7 +913,7 @@ export function CloudCostsView({
               <p className="text-2xl font-semibold text-gray-900">{formatCurrency(cloudSummary.avgCostPerCluster)}</p>
               {startDate && endDate && <p className="mt-1 text-xs text-gray-500">average over {Math.round((new Date(endDate).getTime() - new Date(startDate).getTime()) / 86400000) + 1} days</p>}
               {startDate && endDate && (
-                <p className="mt-0.5 text-xs font-medium" style={{ color: '#FF3621' }}>Click to see trend →</p>
+                <p className="mt-0.5 text-xs font-medium" style={{ color: C.lava }}>See trend →</p>
               )}
             </div>
           </div>
@@ -932,36 +934,36 @@ export function CloudCostsView({
 
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
         {(infraTimeseriesLoading || timeseriesLoading) ? (
-          <div className="rounded-lg bg-white p-6 border" style={{ borderColor: '#E5E5E5' }}>
-            <h3 className="mb-4 text-lg font-semibold text-gray-900">{cloudDisplayName} Cluster Costs{daysCount ? ` over ${daysCount} Days` : ""} <span className="inline-flex items-center rounded px-1.5 py-0.5 text-[10px] font-semibold tracking-wide align-middle ml-1" style={{ backgroundColor: '#FF9900', color: '#fff' }}>est.</span></h3>
+          <div className="rounded-lg bg-white p-6 border" style={{ borderColor: C.hairline }}>
+            <h3 className="mb-4 text-lg font-semibold text-gray-900">{cloudDisplayName} Cluster Costs{daysCount ? ` over ${daysCount} Days` : ""} <span className="inline-flex items-center rounded px-1.5 py-0.5 text-[10px] font-semibold tracking-wide align-middle ml-1" style={{ backgroundColor: C.amber, color: C.white }}>est.</span></h3>
             <div className="h-80 animate-pulse rounded bg-gray-200" />
           </div>
         ) : (infraTimeseriesData?.timeseries && infraTimeseriesData.timeseries.length > 0) ? (
-          <div className="rounded-lg bg-white p-6 border" style={{ borderColor: '#E5E5E5' }}>
-            <h3 className="mb-4 text-lg font-semibold text-gray-900">{cloudDisplayName} Cluster Costs{daysCount ? ` over ${daysCount} Days` : ""} <span className="inline-flex items-center rounded px-1.5 py-0.5 text-[10px] font-semibold tracking-wide align-middle ml-1" style={{ backgroundColor: '#FF9900', color: '#fff' }}>est.</span></h3>
+          <div className="rounded-lg bg-white p-6 border" style={{ borderColor: C.hairline }}>
+            <h3 className="mb-4 text-lg font-semibold text-gray-900">{cloudDisplayName} Cluster Costs{daysCount ? ` over ${daysCount} Days` : ""} <span className="inline-flex items-center rounded px-1.5 py-0.5 text-[10px] font-semibold tracking-wide align-middle ml-1" style={{ backgroundColor: C.amber, color: C.white }}>est.</span></h3>
             <ResponsiveContainer width="100%" height={320}>
               <AreaChart data={infraTimeseriesData.timeseries} margin={{ top: 10, right: 30, left: 0, bottom: 0 }}>
                 <defs>
                   <linearGradient id="infraCostGradient" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%" stopColor="#f97316" stopOpacity={0.3} />
-                    <stop offset="95%" stopColor="#f97316" stopOpacity={0.05} />
+                    <stop offset="5%" stopColor={C.s1} stopOpacity={0.3} />
+                    <stop offset="95%" stopColor={C.s1} stopOpacity={0.05} />
                   </linearGradient>
                 </defs>
-                <XAxis dataKey="date" tickFormatter={formatDate} stroke="#9ca3af" fontSize={12} tickMargin={8} />
-                <YAxis tickFormatter={(v) => formatCurrency(v)} stroke="#9ca3af" fontSize={12} width={80} />
+                <XAxis dataKey="date" tickFormatter={formatDate} stroke={C.muted} fontSize={12} tickMargin={8} />
+                <YAxis tickFormatter={(v) => formatCurrency(v)} stroke={C.muted} fontSize={12} width={80} />
                 <Tooltip
                   formatter={(value: number | undefined) => formatCurrency(value ?? 0)}
                   labelFormatter={(label) => format(parseISO(label as string), "MMM d, yyyy")}
-                  contentStyle={{ backgroundColor: "white", border: "1px solid #e5e7eb", borderRadius: "8px" }}
+                  contentStyle={{ backgroundColor: C.white, border: `1px solid ${C.hairline}`, borderRadius: "8px" }}
                 />
-                <Area isAnimationActive={false} type="monotone" dataKey="Infrastructure Cost" stroke="#f97316" strokeWidth={2} fill="url(#infraCostGradient)" />
+                <Area isAnimationActive={false} type="monotone" dataKey="Infrastructure Cost" stroke={C.s1} strokeWidth={2} fill="url(#infraCostGradient)" />
               </AreaChart>
             </ResponsiveContainer>
           </div>
         ) : (filteredTimeseriesData && filteredTimeseriesData.length > 0) ? (
-          <div className="rounded-lg bg-white p-6 border" style={{ borderColor: '#E5E5E5' }}>
+          <div className="rounded-lg bg-white p-6 border" style={{ borderColor: C.hairline }}>
             <div className="mb-4 flex items-center justify-between">
-              <h3 className="text-lg font-semibold text-gray-900">{cloudDisplayName} Cluster Costs{daysCount ? ` over ${daysCount} Days` : ""} <span className="inline-flex items-center rounded px-1.5 py-0.5 text-[10px] font-semibold tracking-wide align-middle ml-1" style={{ backgroundColor: '#FF9900', color: '#fff' }}>est.</span></h3>
+              <h3 className="text-lg font-semibold text-gray-900">{cloudDisplayName} Cluster Costs{daysCount ? ` over ${daysCount} Days` : ""} <span className="inline-flex items-center rounded px-1.5 py-0.5 text-[10px] font-semibold tracking-wide align-middle ml-1" style={{ backgroundColor: C.amber, color: C.white }}>est.</span></h3>
               {timeseriesFamilies.length > 0 && (
                 <div className="flex flex-wrap items-center gap-2">
                   <button
@@ -969,7 +971,7 @@ export function CloudCostsView({
                     className={`rounded-full px-3 py-1 text-xs font-medium ${
                       selectedFamilies.size === 0 ? "text-white" : "bg-blue-50 text-blue-700 hover:bg-blue-100"
                     }`}
-                    style={selectedFamilies.size === 0 ? { backgroundColor: '#1B5162' } : undefined}
+                    style={selectedFamilies.size === 0 ? { backgroundColor: C.s2 } : undefined}
                   >
                     All
                   </button>
@@ -998,32 +1000,32 @@ export function CloudCostsView({
               <AreaChart data={filteredTimeseriesData} margin={{ top: 10, right: 30, left: 0, bottom: 0 }}>
                 <defs>
                   <linearGradient id="awsCostGradient" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%" stopColor="#f97316" stopOpacity={0.3} />
-                    <stop offset="95%" stopColor="#f97316" stopOpacity={0.05} />
+                    <stop offset="5%" stopColor={C.s1} stopOpacity={0.3} />
+                    <stop offset="95%" stopColor={C.s1} stopOpacity={0.05} />
                   </linearGradient>
                 </defs>
-                <XAxis dataKey="date" tickFormatter={formatDate} stroke="#9ca3af" fontSize={12} tickMargin={8} />
-                <YAxis tickFormatter={(v) => formatCurrency(v)} stroke="#9ca3af" fontSize={12} width={80} />
+                <XAxis dataKey="date" tickFormatter={formatDate} stroke={C.muted} fontSize={12} tickMargin={8} />
+                <YAxis tickFormatter={(v) => formatCurrency(v)} stroke={C.muted} fontSize={12} width={80} />
                 <Tooltip
                   formatter={(value: number | undefined) => formatCurrency(value ?? 0)}
                   labelFormatter={(label) => format(parseISO(label as string), "MMM d, yyyy")}
-                  contentStyle={{ backgroundColor: "white", border: "1px solid #e5e7eb", borderRadius: "8px" }}
+                  contentStyle={{ backgroundColor: C.white, border: `1px solid ${C.hairline}`, borderRadius: "8px" }}
                 />
-                <Area isAnimationActive={false} type="monotone" dataKey="AWS Cost" stroke="#f97316" strokeWidth={2} fill="url(#awsCostGradient)" />
+                <Area isAnimationActive={false} type="monotone" dataKey="AWS Cost" stroke={C.s1} strokeWidth={2} fill="url(#awsCostGradient)" />
               </AreaChart>
             </ResponsiveContainer>
           </div>
         ) : null}
 
-        <div className="rounded-lg bg-white p-6 border" style={{ borderColor: '#E5E5E5' }}>
+        <div className="rounded-lg bg-white p-6 border" style={{ borderColor: C.hairline }}>
           <h3 className="mb-4 text-lg font-semibold text-gray-900">Usage by Instance Family</h3>
           <ResponsiveContainer width="100%" height={320}>
             <BarChart data={familyChartData} layout="vertical" margin={{ left: 10, right: 20 }}>
-              <XAxis type="number" tickFormatter={(v) => `${(v / 1000).toFixed(0)}K`} stroke="#9ca3af" fontSize={12} tickMargin={8} />
-              <YAxis type="category" dataKey="name" width={100} fontSize={12} stroke="#9ca3af" interval={0} />
+              <XAxis type="number" tickFormatter={(v) => `${(v / 1000).toFixed(0)}K`} stroke={C.muted} fontSize={12} tickMargin={8} />
+              <YAxis type="category" dataKey="name" width={100} fontSize={12} stroke={C.muted} interval={0} />
               <Tooltip
                 formatter={(value: number | undefined) => [formatNumber(value ?? 0) + " DBU hours", "Usage"]}
-                contentStyle={{ backgroundColor: "white", border: "1px solid #e5e7eb", borderRadius: "8px" }}
+                contentStyle={{ backgroundColor: C.white, border: `1px solid ${C.hairline}`, borderRadius: "8px" }}
               />
               <Bar isAnimationActive={false} dataKey="value" radius={[0, 4, 4, 0]}>
                 {familyChartData.map((entry, index) => (
@@ -1035,12 +1037,12 @@ export function CloudCostsView({
         </div>
       </div>
 
-      <div className="rounded-lg bg-white p-6 border" style={{ borderColor: '#E5E5E5' }}>
+      <div className="rounded-lg bg-white p-6 border" style={{ borderColor: C.hairline }}>
         <div className="mb-4 flex items-center justify-between">
           <div>
             <h3 className="flex items-center gap-2 text-lg font-semibold text-gray-900">
               {cloudDisplayName} Cluster Leaderboard
-              <span className="inline-flex items-center rounded px-1.5 py-0.5 text-[10px] font-semibold tracking-wide" style={{ backgroundColor: '#FF9900', color: '#fff' }}>est.</span>
+              <span className="inline-flex items-center rounded px-1.5 py-0.5 text-[10px] font-semibold tracking-wide" style={{ backgroundColor: C.amber, color: C.white }}>est.</span>
               <span className="inline-flex items-center group relative">
                 <svg className="h-3.5 w-3.5 text-gray-500 cursor-help" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
@@ -1051,7 +1053,7 @@ export function CloudCostsView({
               </span>
             </h3>
             <p className="text-sm text-gray-500">
-              {sortedClusters.length} cluster{sortedClusters.length !== 1 ? "s" : ""}{selectedFamilies.size > 0 ? ` · ${[...selectedFamilies].join(", ")} only` : ""}
+              {sortedClusters.length} cluster{sortedClusters.length !== 1 ? "s" : ""}{selectedFamilies.size > 0 ? ` · ${[...selectedFamilies].join(", ")} only` : ""}{isTableFamilyFilterActive ? ` · filtered to ${tableFamily.length} families` : ""}{isTableWorkspaceFilterActive ? ` · filtered to ${tableWorkspace.length} workspaces` : ""}
             </p>
           </div>
           <div className="flex items-center gap-2">
@@ -1077,7 +1079,7 @@ export function CloudCostsView({
               <div className="relative" ref={workspaceFilterRef}>
                 <button
                   onClick={() => { setWorkspaceFilterOpen(o => !o); setFamilyFilterOpen(false); setTableWorkspaceSearch(""); }}
-                  className={`flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-sm font-medium transition-colors ${isTableWorkspaceFilterActive ? "border-[#FF3621] text-[#FF3621]" : "border-gray-200 bg-white text-gray-700 hover:bg-gray-50"}`}
+                  className={`flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-medium transition-colors ${isTableWorkspaceFilterActive ? "border-lava text-lava" : "border-gray-300 bg-white text-gray-700 hover:bg-gray-50"}`}
                 >
                   {!isTableWorkspaceFilterActive ? "Workspaces" : tableWorkspace.length === 1 ? resolveWsName(tableWorkspace[0]) : `${tableWorkspace.length} Workspaces`}
                   {isTableWorkspaceFilterActive && (
@@ -1085,8 +1087,8 @@ export function CloudCostsView({
                       <svg className="h-2 w-2" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M6 18L18 6M6 6l12 12" /></svg>
                     </button>
                   )}
-                  <svg className={`h-4 w-4 transition-transform ${workspaceFilterOpen ? "rotate-180" : ""}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
+                  <svg className={`h-3 w-3 transition-transform ${workspaceFilterOpen ? "rotate-180" : ""}`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
                   </svg>
                 </button>
                 {workspaceFilterOpen && (
@@ -1097,7 +1099,7 @@ export function CloudCostsView({
                         value={tableWorkspaceSearch}
                         onChange={(e) => setTableWorkspaceSearch(e.target.value)}
                         placeholder="Search workspaces..."
-                        className="w-full rounded-md border border-gray-300 px-3 py-1.5 text-sm focus:border-[#FF3621] focus:outline-none focus:ring-1 focus:ring-[#FF3621]"
+                        className="w-full rounded-md border border-gray-300 px-3 py-1.5 text-sm focus:border-lava focus:outline-none focus:ring-1 focus:ring-lava"
                         autoFocus
                       />
                     </div>
@@ -1128,8 +1130,10 @@ export function CloudCostsView({
                             renderItem={(w) => {
                               const label = resolveWsName(w);
                               return (
-                                <button onClick={() => { setTableWorkspace((prev) => prev.includes(w) ? prev.filter((x) => x !== w) : [...prev, w]); setCurrentPage(1); }}
-                                  className="flex w-full items-center gap-2 px-3 py-2.5 text-left text-xs hover:bg-gray-50">
+                                <button
+                                  onClick={() => { setTableWorkspace((prev) => prev.includes(w) ? prev.filter(x => x !== w) : [...prev, w]); setCurrentPage(1); }}
+                                  className="flex w-full items-center gap-2 px-3 py-2.5 text-xs hover:bg-gray-50"
+                                >
                                   <div className={`flex h-4 w-4 shrink-0 items-center justify-center rounded border ${tableWorkspace.includes(w) ? "border-orange-500 bg-orange-500" : "border-gray-300"}`}>
                                     {tableWorkspace.includes(w) && <svg className="h-3 w-3 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" /></svg>}
                                   </div>
@@ -1149,7 +1153,7 @@ export function CloudCostsView({
               <div className="relative" ref={familyFilterRef}>
                 <button
                   onClick={() => { setFamilyFilterOpen(o => !o); setWorkspaceFilterOpen(false); }}
-                  className={`flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-sm font-medium transition-colors ${isTableFamilyFilterActive ? "border-[#FF3621] text-[#FF3621]" : "border-gray-200 bg-white text-gray-700 hover:bg-gray-50"}`}
+                  className={`flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-medium transition-colors ${isTableFamilyFilterActive ? "border-lava text-lava" : "border-gray-300 bg-white text-gray-700 hover:bg-gray-50"}`}
                 >
                   {!isTableFamilyFilterActive ? "Families" : tableFamily.length === 1 ? tableFamily[0] : `${tableFamily.length} Families`}
                   {isTableFamilyFilterActive && (
@@ -1157,8 +1161,8 @@ export function CloudCostsView({
                       <svg className="h-2 w-2" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M6 18L18 6M6 6l12 12" /></svg>
                     </button>
                   )}
-                  <svg className={`h-4 w-4 transition-transform ${familyFilterOpen ? "rotate-180" : ""}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
+                  <svg className={`h-3 w-3 transition-transform ${familyFilterOpen ? "rotate-180" : ""}`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
                   </svg>
                 </button>
                 {familyFilterOpen && (
@@ -1172,8 +1176,11 @@ export function CloudCostsView({
                       </div>
                     </div>
                     {availableTableFamilies.map(f => (
-                      <button key={f} onClick={() => { setTableFamily((prev) => prev.includes(f) ? prev.filter((x) => x !== f) : [...prev, f]); setCurrentPage(1); }}
-                        className="flex w-full items-center gap-2 px-3 py-2.5 text-left text-xs hover:bg-gray-50">
+                      <button
+                        key={f}
+                        onClick={() => { setTableFamily((prev) => prev.includes(f) ? prev.filter(x => x !== f) : [...prev, f]); setCurrentPage(1); }}
+                        className="flex w-full items-center gap-2 px-3 py-2.5 text-xs hover:bg-gray-50"
+                      >
                         <div className={`flex h-4 w-4 shrink-0 items-center justify-center rounded border ${tableFamily.includes(f) ? "border-orange-500 bg-orange-500" : "border-gray-300"}`}>
                           {tableFamily.includes(f) && <svg className="h-3 w-3 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" /></svg>}
                         </div>
@@ -1193,7 +1200,7 @@ export function CloudCostsView({
                 placeholder="Search clusters..."
                 value={clusterSearch}
                 onChange={(e) => { setClusterSearch(e.target.value); setCurrentPage(1); }}
-                className="w-44 rounded-full border border-gray-200 bg-white py-1.5 pl-9 pr-4 text-xs placeholder:text-gray-400 focus:border-[#FF3621] focus:outline-none focus:ring-1 focus:ring-[#FF3621]"
+                className="w-44 rounded-full border border-gray-200 bg-white py-1.5 pl-9 pr-4 text-xs placeholder:text-gray-400 focus:border-lava focus:outline-none focus:ring-1 focus:ring-lava"
               />
             </div>
           </div>

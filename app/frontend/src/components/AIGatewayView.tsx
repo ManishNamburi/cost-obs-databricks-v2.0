@@ -13,6 +13,8 @@ import type {
 } from "@/types/billing";
 import { formatCurrency } from "@/utils/formatters";
 import { AIMLCostCenter } from "@/components/AIMLCostCenter";
+import { PageHero } from "@/components/brand";
+import { C } from "@/theme";
 
 // ── Number formatting helpers ─────────────────────────────────────────────────
 
@@ -345,10 +347,15 @@ export function AIGatewayView({
       <div className="animate-fade-in space-y-5">
         <div className="flex items-center justify-between gap-3 pr-12">
           <div>
-            <h2 className="text-xl font-bold text-gray-900">AI Gateway</h2>
-            <p className="text-sm text-gray-500">
-              AI/ML product cost + governed model traffic
-            </p>
+            <PageHero
+              icon={
+                <svg fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
+                </svg>
+              }
+              title="AI Gateway"
+              subtitle="AI/ML product cost + governed model traffic"
+            />
           </div>
           <div className="flex rounded-lg border border-gray-200 overflow-hidden text-xs font-medium">
             {SUB_TABS.map(tab => (
@@ -356,7 +363,7 @@ export function AIGatewayView({
                 key={tab.id}
                 onClick={() => setSubTab(tab.id)}
                 className={`px-3 py-1.5 transition-colors ${subTab === tab.id ? "text-white" : "text-gray-600 hover:bg-gray-50"}`}
-                style={subTab === tab.id ? { backgroundColor: "#1B3139" } : {}}
+                style={subTab === tab.id ? { backgroundColor: C.navy } : {}}
               >
                 {tab.label}
               </button>
@@ -392,7 +399,7 @@ export function AIGatewayView({
             {SUB_TABS.map(tab => (
               <button key={tab.id} onClick={() => setSubTab(tab.id)}
                 className={`px-3 py-1.5 transition-colors ${subTab === tab.id ? "text-white" : "text-gray-600 hover:bg-gray-50"}`}
-                style={subTab === tab.id ? { backgroundColor: "#1B3139" } : {}}
+                style={subTab === tab.id ? { backgroundColor: C.navy } : {}}
               >{tab.label}</button>
             ))}
           </div>
@@ -417,7 +424,7 @@ export function AIGatewayView({
             {SUB_TABS.map(tab => (
               <button key={tab.id} onClick={() => setSubTab(tab.id)}
                 className={`px-3 py-1.5 transition-colors ${subTab === tab.id ? "text-white" : "text-gray-600 hover:bg-gray-50"}`}
-                style={subTab === tab.id ? { backgroundColor: "#1B3139" } : {}}
+                style={subTab === tab.id ? { backgroundColor: C.navy } : {}}
               >{tab.label}</button>
             ))}
           </div>

@@ -1,5 +1,300 @@
 @import "tailwindcss";
 
+@font-face {
+  font-family: "DM Sans";
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url("/fonts/dm-sans-latin-400-normal.woff2") format("woff2");
+}
+@font-face {
+  font-family: "DM Sans";
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url("/fonts/dm-sans-latin-500-normal.woff2") format("woff2");
+}
+@font-face {
+  font-family: "DM Sans";
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+  src: url("/fonts/dm-sans-latin-700-normal.woff2") format("woff2");
+}
+@font-face {
+  font-family: "DM Mono";
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url("/fonts/dm-mono-latin-400-normal.woff2") format("woff2");
+}
+@font-face {
+  font-family: "DM Mono";
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url("/fonts/dm-mono-latin-500-normal.woff2") format("woff2");
+}
+
+:root {
+  --oat-page: #F9F7F4;
+  --card-surface: #FFFFFF;
+  --paper-white: #FFFFFF;
+  --oat-med: #EEEDE9;
+  --hairline: #E4E2DD;
+  --row-hover: #FBF9F6;
+  --grid-line: #ECE8E1;
+  --navy: #1B3139;
+  --ink-deep: #0B2026;
+  --ink: #1B3139;
+  --body: #3A3838;
+  --slate: #618794;
+  --muted: #93A6AE;
+  --lava: #FF3621;
+  --lava-hover: #D82A18;
+  --coral: #FF5F46;
+  --coral-tint: #FFEDE8;
+  --coral-brd: #FFD9CE;
+  --green: #00A972;
+  --green-ink: #00754F;
+  --green-tint: #DDF3E8;
+  --amber: #FFAB00;
+  --amber-ink: #7A5200;
+  --amber-tint: #FFF3D6;
+  --maroon: #98102A;
+  --maroon-tint: #FBE7EB;
+  --s1: #FF5F46;
+  --s2: #1B5162;
+  --s3: #00A972;
+  --s4: #FFAB00;
+  --s5: #618794;
+  --status-dot: #3CD68F;
+  --baseline: #D9D4CB;
+  --busy: #FFB3A6;
+  --cal-mid: #D2F0E1;
+  --cal-oor: #C9C4BB;
+  --r-chip: 4px;
+  --r-ctl: 8px;
+  --r-card: 12px;
+  --sh-card: 0 1px 2px rgba(11, 32, 38, 0.06);
+  --sh-hover: 0 4px 14px rgba(11, 32, 38, 0.10);
+  --sh-menu: 0 8px 28px rgba(11, 32, 38, 0.16);
+  --sh-modal: 0 24px 64px rgba(11, 32, 38, 0.30);
+  --focus: 0 0 0 2px rgba(255, 54, 33, 0.35);
+  --sans: "DM Sans", -apple-system, sans-serif;
+  --mono: "DM Mono", ui-monospace, monospace;
+
+  --background: 0 0% 100%;
+  --foreground: 222.2 84% 4.9%;
+  --card: 0 0% 100%;
+  --card-foreground: 222.2 84% 4.9%;
+  --popover: 0 0% 100%;
+  --popover-foreground: 222.2 84% 4.9%;
+  --primary: 222.2 47.4% 11.2%;
+  --primary-foreground: 210 40% 98%;
+  --secondary: 210 40% 96.1%;
+  --secondary-foreground: 222.2 47.4% 11.2%;
+  --muted-foreground: 215.4 16.3% 46.9%;
+  --accent: 210 40% 96.1%;
+  --accent-foreground: 222.2 47.4% 11.2%;
+  --destructive: 0 84.2% 60.2%;
+  --destructive-foreground: 210 40% 98%;
+  --border: 214.3 31.8% 91.4%;
+  --input: 214.3 31.8% 91.4%;
+  --ring: 222.2 84% 4.9%;
+  --radius: 0.5rem;
+}
+
+@theme {
+  --color-oat-page: var(--oat-page);
+  --color-card-surface: var(--card-surface);
+  --color-oat-med: var(--oat-med);
+  --color-hairline: var(--hairline);
+  --color-row-hover: var(--row-hover);
+  --color-navy: var(--navy);
+  --color-ink: var(--ink);
+  --color-body: var(--body);
+  --color-slate: var(--slate);
+  --color-muted-fg: var(--muted);
+  --color-lava: var(--lava);
+  --color-lava-hover: var(--lava-hover);
+  --color-coral: var(--coral);
+  --color-coral-tint: var(--coral-tint);
+  --color-coral-brd: var(--coral-brd);
+  --color-green-ink: var(--green-ink);
+  --color-green-tint: var(--green-tint);
+  --color-amber-ink: var(--amber-ink);
+  --color-amber-tint: var(--amber-tint);
+  --color-maroon: var(--maroon);
+  --color-maroon-tint: var(--maroon-tint);
+  --color-s1: var(--s1);
+  --color-s2: var(--s2);
+  --color-s3: var(--s3);
+  --color-s4: var(--s4);
+  --color-s5: var(--s5);
+  --color-status-dot: var(--status-dot);
+  --color-baseline: var(--baseline);
+  --color-busy: var(--busy);
+  --font-sans: var(--sans);
+  --font-mono: var(--mono);
+}
+
+.dark {
+  --background: 222.2 84% 4.9%;
+  --foreground: 210 40% 98%;
+  --card: 222.2 84% 4.9%;
+  --card-foreground: 210 40% 98%;
+  --popover: 222.2 84% 4.9%;
+  --popover-foreground: 210 40% 98%;
+  --primary: 210 40% 98%;
+  --primary-foreground: 222.2 47.4% 11.2%;
+  --secondary: 217.2 32.6% 17.5%;
+  --secondary-foreground: 210 40% 98%;
+  --muted-foreground: 215 20.2% 65.1%;
+  --accent: 217.2 32.6% 17.5%;
+  --accent-foreground: 210 40% 98%;
+  --destructive: 0 62.8% 30.6%;
+  --destructive-foreground: 210 40% 98%;
+  --border: 217.2 32.6% 17.5%;
+  --input: 217.2 32.6% 17.5%;
+  --ring: 212.7 26.8% 83.9%;
+}
+
+* {
+  border-color: hsl(var(--border));
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  margin: 0;
+  background-color: var(--oat-page);
+  color: var(--body);
+  font-family: var(--sans);
+  font-size: 14px;
+  line-height: 1.55;
+}
+
+/* ── Animations ────────────────────────────────────────── */
+
+/* NOTE: animate-spin, animate-pulse, animate-bounce overrides are in
+   public/animations.css (loaded via index.html <link>) so they stay
+   outside Tailwind v4's @layer system. Putting them here doesn't work
+   because @import "tailwindcss" absorbs everything into @layer utilities. */
+
+/* Fade-in for tab content, loaded data, etc. */
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(4px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.animate-fade-in {
+  animation: fadeIn 0.2s ease-out both;
+}
+
+/* Modal backdrop fade */
+@keyframes backdropIn {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+.animate-backdrop {
+  animation: backdropIn 0.15s ease-out both;
+}
+
+/* Modal dialog scale + fade */
+@keyframes dialogIn {
+  from { opacity: 0; transform: scale(0.97) translateY(8px); }
+  to   { opacity: 1; transform: scale(1) translateY(0); }
+}
+.animate-dialog {
+  animation: dialogIn 0.2s ease-out both;
+}
+
+/* Slide-down for expandable panels */
+@keyframes slideDown {
+  from { opacity: 0; max-height: 0; }
+  to   { opacity: 1; max-height: 2000px; }
+}
+.animate-slide-down {
+  animation: slideDown 0.25s ease-out both;
+  overflow: hidden;
+}
+
+/* Brand-colored button with hover */
+.btn-brand {
+  background-color: var(--lava);
+  color: white;
+  font-weight: 600;
+  border-radius: var(--r-ctl);
+  transition: background-color 0.15s ease-out;
+}
+.btn-brand:hover {
+  background-color: var(--lava-hover);
+}
+.btn-brand:focus-visible {
+  outline: none;
+  box-shadow: var(--focus);
+}
+.btn-brand:disabled {
+  background-color: var(--busy);
+  cursor: not-allowed;
+}
+
+.co-card {
+  background-color: var(--card-surface);
+  border: 1px solid var(--hairline);
+  border-radius: var(--r-card);
+  box-shadow: var(--sh-card);
+}
+.co-card:hover {
+  box-shadow: var(--sh-hover);
+}
+
+.co-version-pill {
+  display: inline-flex;
+  align-items: center;
+  background: var(--coral-tint);
+  color: var(--lava-hover);
+  font-family: var(--mono);
+  font-size: 12.5px;
+  font-weight: 500;
+  border-radius: 999px;
+  padding: 2px 8px;
+}
+
+.co-filter {
+  height: 40px;
+  border-radius: var(--r-ctl);
+  border: 1px solid var(--hairline);
+  background: var(--card-surface);
+  color: var(--ink);
+  font-size: 14px;
+  font-weight: 500;
+  transition: box-shadow 150ms ease-out, background-color 150ms ease-out;
+}
+.co-filter:hover {
+  background: var(--row-hover);
+}
+.co-filter:focus-visible {
+  outline: none;
+  box-shadow: var(--focus);
+}
+.co-filter-menu {
+  border-radius: var(--r-card);
+  border: 1px solid var(--hairline);
+  background: var(--card-surface);
+  box-shadow: var(--sh-menu);
+}
+
+@keyframes co-arc {
+  to { transform: rotate(360deg); }
+}
+.co-arc-spin {
+  animation: co-arc 900ms linear infinite;
+}
+
+
 :root {
   --background: 0 0% 100%;
   --foreground: 222.2 84% 4.9%;

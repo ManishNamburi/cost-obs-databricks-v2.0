@@ -1,5 +1,6 @@
 import { useState, useRef, useEffect } from "react";
 import { useUpdatingIndicator, UPDATING_SPINNER_PATH } from "@/hooks/useUpdatingIndicator";
+import { C } from "@/theme";
 
 interface Workspace {
   workspace_id: string | null;
@@ -47,7 +48,7 @@ export function WorkspaceFilter({ workspaces, selectedIds, onChange, isLoading }
 
   if (isLoading) {
     return (
-      <div className="inline-flex items-center gap-2 whitespace-nowrap rounded-full border border-gray-200 bg-white px-3 py-1.5 text-sm text-gray-500">
+      <div className="flex items-center gap-2 whitespace-nowrap rounded-full border border-gray-200 bg-white px-3 py-1.5 text-sm text-gray-500">
         <svg className="h-4 w-4 shrink-0 animate-pulse text-gray-300" fill="none" viewBox="0 0 24 24" stroke="currentColor">
           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4" />
         </svg>
@@ -109,10 +110,10 @@ export function WorkspaceFilter({ workspaces, selectedIds, onChange, isLoading }
 
       <button
         onClick={() => setIsOpen((o) => !o)}
-        className="inline-flex items-center gap-2 rounded-full border border-gray-200 bg-white px-3 py-1.5 text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors"
+        className="co-filter flex items-center gap-2 whitespace-nowrap px-3"
       >
         {updating ? (
-          <svg className="h-4 w-4 shrink-0 animate-spin text-[#FF3621]" viewBox="0 0 24 24" fill="none">
+          <svg className="h-4 w-4 shrink-0 animate-spin text-lava" viewBox="0 0 24 24" fill="none">
             <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
             <path className="opacity-75" fill="currentColor" d={UPDATING_SPINNER_PATH} />
           </svg>
@@ -142,7 +143,7 @@ export function WorkspaceFilter({ workspaces, selectedIds, onChange, isLoading }
       </button>
 
       {isOpen && (
-        <div className="absolute left-0 z-20 mt-2 min-w-[220px] rounded-lg border border-gray-200 bg-white p-3 shadow-lg">
+        <div className="co-filter-menu absolute left-0 z-20 mt-2 min-w-[220px] p-3">
           <div className="mb-2 flex items-center justify-between">
             <span className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Workspaces</span>
             <div className="flex gap-2">
@@ -199,13 +200,13 @@ export function WorkspaceFilter({ workspaces, selectedIds, onChange, isLoading }
                 return (
                   <label
                     key={id}
-                    className={`flex cursor-pointer items-center gap-2 rounded-md px-2 py-2.5 ${checked && !draftAll ? "bg-red-50 hover:bg-red-100" : "hover:bg-gray-50"}`}
+                    className={`flex cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 ${checked && !draftAll ? "bg-red-50 hover:bg-red-100" : "hover:bg-gray-50"}`}
                   >
                     <input
                       type="checkbox"
                       checked={checked}
                       onChange={() => draftToggle(id)}
-                      className="h-4 w-4 rounded border-gray-300 text-[#FF3621] focus:ring-1 focus:ring-[#FF3621]"
+                      className="h-3.5 w-3.5 rounded border-gray-300 accent-lava"
                     />
                     <span className="flex-1 truncate text-sm text-gray-700">
                       {ws.workspace_name || `Workspace ${id}`}
@@ -259,7 +260,7 @@ export function WorkspaceFilter({ workspaces, selectedIds, onChange, isLoading }
               onClick={handleApply}
               disabled={!applyEnabled}
               className="rounded-md px-3 py-1.5 text-xs font-medium text-white transition-colors disabled:cursor-not-allowed disabled:opacity-40"
-              style={{ backgroundColor: applyEnabled ? '#FF3621' : '#FFA390' }}
+              style={{ backgroundColor: applyEnabled ? C.lava : C.busy }}
             >
               Apply
             </button>

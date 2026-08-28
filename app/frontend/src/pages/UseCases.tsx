@@ -4,6 +4,8 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Plus, Package, TrendingUp, Users, X, Tag, Trash2, Calendar, PlayCircle, Server, Database, Workflow, Bot, BarChart3 } from "lucide-react";
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip, BarChart, Bar, XAxis, YAxis, ReferenceLine, Legend } from "recharts";
 import { formatCurrency, formatNumber } from "@/utils/formatters";
+import { C } from "@/theme";
+import { PageHero } from "@/components/brand";
 
 type UseCaseStage = 'Live' | 'Development' | 'Planned' | 'Inactive';
 
@@ -107,7 +109,7 @@ function StageBadge({ stage }: { stage: UseCaseStage }) {
   );
 }
 
-const COLORS = ["#FF3621", "#E02F1C", "#FFA390", "#FF7F6F", "#FF9E8C", "#FFB5A7"];
+const COLORS = [C.lava, C.lavaHover, C.busy, C.coral, C.s1, C.coralBrd];
 
 interface UserInfo {
   email: string;
@@ -1472,7 +1474,7 @@ export default function UseCases() {
   if (isLoading || summaryLoading) {
     return (
       <div className="flex h-64 flex-col items-center justify-center gap-3">
-        <div className="h-12 w-12 animate-spin rounded-full border-4 border-gray-200" style={{ borderTopColor: '#FF3621' }} />
+        <div className="h-12 w-12 animate-spin rounded-full border-4 border-gray-200" style={{ borderTopColor: C.lava }} />
         <p className="text-sm text-gray-500">Loading use cases...</p>
       </div>
     );
@@ -1481,29 +1483,25 @@ export default function UseCases() {
   return (
     <div className="space-y-6">
       {/* Header */}
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-3">
-          <div className="rounded-lg p-2" style={{ backgroundColor: '#FF3621' }}>
-            <Package className="h-6 w-6 text-white" />
-          </div>
-          <div>
-            <h1 className="text-2xl font-bold text-gray-900">Use Cases</h1>
-            <p className="text-sm text-gray-500">Track spend by project and use case</p>
-          </div>
-        </div>
-        <button
-          onClick={() => setShowCreateModal(true)}
-          className="btn-brand inline-flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-medium text-white transition-colors"
-        >
-          <Plus className="h-4 w-4" />
-          New Use Case
-        </button>
-      </div>
+        <PageHero
+          icon={<Package />}
+          title="Use Cases"
+          subtitle="Track spend by project and use case"
+          action={
+            <button
+              onClick={() => setShowCreateModal(true)}
+              className="btn-brand inline-flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-medium text-white transition-colors"
+            >
+              <Plus className="h-4 w-4" />
+              New Use Case
+            </button>
+          }
+        />
 
       {/* Summary Cards */}
       {summary && (
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
-          <div className="rounded-lg bg-white p-6 border " style={{ borderColor: '#E5E5E5' }}>
+          <div className="rounded-lg bg-white p-6 border " style={{ borderColor: C.hairline }}>
             <div className="flex items-center">
               <div className="flex h-12 w-12 items-center justify-center rounded-lg bg-orange-100">
                 <Package className="h-6 w-6 text-orange-600" />
@@ -1515,7 +1513,7 @@ export default function UseCases() {
             </div>
           </div>
 
-          <div className="rounded-lg bg-white p-6 border " style={{ borderColor: '#E5E5E5' }}>
+          <div className="rounded-lg bg-white p-6 border " style={{ borderColor: C.hairline }}>
             <div className="flex items-center">
               <div className="flex h-12 w-12 items-center justify-center rounded-lg bg-orange-100">
                 <TrendingUp className="h-6 w-6 text-orange-600" />
@@ -1527,7 +1525,7 @@ export default function UseCases() {
             </div>
           </div>
 
-          <div className="rounded-lg bg-white p-6 border " style={{ borderColor: '#E5E5E5' }}>
+          <div className="rounded-lg bg-white p-6 border " style={{ borderColor: C.hairline }}>
             <div className="flex items-center">
               <div className="flex h-12 w-12 items-center justify-center rounded-lg bg-orange-100">
                 <Users className="h-6 w-6 text-orange-600" />
@@ -1544,14 +1542,14 @@ export default function UseCases() {
       )}
 
       {/* Use Cases List */}
-      <div className="rounded-lg bg-white border " style={{ borderColor: '#E5E5E5' }}>
-        <div className="border-b px-6 py-4" style={{ borderColor: '#E5E5E5' }}>
+      <div className="rounded-lg bg-white border " style={{ borderColor: C.hairline }}>
+        <div className="border-b px-6 py-4" style={{ borderColor: C.hairline }}>
           <h2 className="text-lg font-semibold text-gray-900">All Use Cases</h2>
         </div>
 
         {isLoading || summaryLoading ? (
           <div className="flex h-64 items-center justify-center">
-            <div className="h-12 w-12 animate-spin rounded-full border-4 border-gray-200" style={{ borderTopColor: '#FF3621' }} />
+            <div className="h-12 w-12 animate-spin rounded-full border-4 border-gray-200" style={{ borderTopColor: C.lava }} />
           </div>
         ) : summary && summary.use_cases.length > 0 ? (
           <div className="overflow-x-auto">
@@ -1673,7 +1671,7 @@ export default function UseCases() {
 
       {/* Spend Distribution Chart - moved below table */}
       {summary && summary.use_cases.length > 0 && (
-        <div className="rounded-lg bg-white p-6 border " style={{ borderColor: '#E5E5E5' }}>
+        <div className="rounded-lg bg-white p-6 border " style={{ borderColor: C.hairline }}>
           <h2 className="mb-4 text-lg font-semibold text-gray-900">Spend Distribution by Use Case</h2>
           <ResponsiveContainer width="100%" height={300}>
             <PieChart>
@@ -1699,7 +1697,7 @@ export default function UseCases() {
 
       {/* Monthly Consumption Chart */}
       {monthlyChartData.length > 0 && (
-        <div className="rounded-lg bg-white p-6 border " style={{ borderColor: '#E5E5E5' }}>
+        <div className="rounded-lg bg-white p-6 border " style={{ borderColor: C.hairline }}>
           <div className="mb-4">
             <h2 className="text-lg font-semibold text-gray-900">Monthly Consumption by Use Case</h2>
             <p className="text-sm text-gray-500">Monthly spend with use case go-live markers</p>
@@ -1709,12 +1707,12 @@ export default function UseCases() {
               <XAxis
                 dataKey="monthLabel"
                 tick={{ fontSize: 12 }}
-                tickLine={{ stroke: '#E5E5E5' }}
+                tickLine={{ stroke: C.hairline }}
               />
               <YAxis
                 tickFormatter={(value) => `$${(value / 1000).toFixed(0)}k`}
                 tick={{ fontSize: 12 }}
-                tickLine={{ stroke: '#E5E5E5' }}
+                tickLine={{ stroke: C.hairline }}
               />
               <Tooltip
                 formatter={(value) => [formatCurrency(value as number), 'Total Spend']}
@@ -1724,7 +1722,7 @@ export default function UseCases() {
               <Bar
                 dataKey="total_spend"
                 name="Total Spend"
-                fill="#FF3621"
+                fill={C.lava}
                 radius={[4, 4, 0, 0]}
               />
               {/* Reference lines for use case go-live dates */}
@@ -1734,13 +1732,13 @@ export default function UseCases() {
                   <ReferenceLine
                     key={`live-${event.use_case_id}-${idx}`}
                     x={monthLabel}
-                    stroke="#10B981"
+                    stroke={C.s3}
                     strokeWidth={2}
                     strokeDasharray="4 4"
                     label={{
                       value: `${event.use_case_name} Live`,
                       position: 'top',
-                      fill: '#10B981',
+                      fill: C.s3,
                       fontSize: 10,
                       fontWeight: 500,
                     }}

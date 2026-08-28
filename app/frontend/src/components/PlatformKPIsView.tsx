@@ -6,6 +6,8 @@ import { SpendAnomalies } from "@/components/SpendAnomalies";
 import { KPITrendModal } from "@/components/KPITrendModal";
 import { formatNumber, formatBytesNoDecimal, formatRowCount, formatDurationSeconds } from "@/utils/formatters";
 import { useFeatureAvailability } from "@/hooks/useFeatureAvailability";
+import { C } from "@/theme";
+import { PageHero, Chip } from "@/components/brand";
 
 interface PlatformKPIsViewProps {
   data: PlatformKPIsResponse | undefined;
@@ -31,8 +33,8 @@ function InfoTooltip({ text }: { text: string }) {
       <span className="flex h-4 w-4 items-center justify-center rounded-full bg-gray-200 text-[10px] font-semibold text-gray-500">i</span>
       {pos && createPortal(
         <div
-          className="pointer-events-none fixed z-[9999] w-72 rounded-lg bg-gray-900 px-3 py-2 text-xs font-normal leading-relaxed text-white shadow-lg"
-          style={{ top: pos.y - 12, transform: "translateY(-100%)", left: Math.min(pos.x + 14, window.innerWidth - 304) }}
+          className="pointer-events-none fixed z-[9999] w-64 rounded-lg bg-gray-900 px-3 py-2 text-xs font-normal leading-relaxed text-white shadow-lg"
+          style={{ top: pos.y - 12, transform: "translateY(-100%)", left: Math.min(pos.x + 14, window.innerWidth - 272) }}
         >
           {text}
         </div>,
@@ -61,7 +63,7 @@ const KPICard = memo(function KPICard({ title, value, subtitle, infoTooltip, ico
     return (
       <div
         className="rounded-lg bg-white p-6 border"
-        style={{ borderColor: '#E5E5E5' }}
+        style={{ borderColor: C.hairline }}
         title={unavailableReason}
       >
         <div className="flex items-center">
@@ -83,7 +85,7 @@ const KPICard = memo(function KPICard({ title, value, subtitle, infoTooltip, ico
       className={`rounded-lg bg-white p-6 border transition-all ${
         onClick ? "shadow-sm cursor-pointer hover:shadow-md hover:scale-[1.01]" : ""
       }`}
-      style={{ borderColor: '#E5E5E5' }}
+      style={{ borderColor: C.hairline }}
       onClick={onClick}
     >
       <div className="flex items-center">
@@ -91,10 +93,13 @@ const KPICard = memo(function KPICard({ title, value, subtitle, infoTooltip, ico
           {icon}
         </div>
         <div className="ml-4 flex-1 min-w-0">
-          <p className="text-sm font-medium text-gray-500 flex items-center">{title}{infoTooltip && <InfoTooltip text={infoTooltip} />}</p>
+          <p className="text-sm font-medium text-gray-500 flex items-center">
+            {title}
+            {infoTooltip && <InfoTooltip text={infoTooltip} />}
+          </p>
           {isLoading ? (
             <div className="mt-2 h-6 w-6">
-              <div className="h-6 w-6 animate-spin rounded-full border-2 border-gray-200" style={{ borderTopColor: '#FF3621' }} />
+              <div className="h-6 w-6 animate-spin rounded-full border-2 border-gray-200" style={{ borderTopColor: C.lava }} />
             </div>
           ) : (
             <p className="mt-1 text-2xl font-semibold text-gray-900">{value}</p>
@@ -103,7 +108,7 @@ const KPICard = memo(function KPICard({ title, value, subtitle, infoTooltip, ico
             <p className="mt-0.5 text-sm text-gray-500">{subtitle}</p>
           )}
           {onClick && (
-            <p className="mt-1 text-xs font-medium" style={{ color: '#FF3621' }}>Click to see trend →</p>
+            <p className="mt-1 text-xs font-medium" style={{ color: C.lava }}>See trend →</p>
           )}
         </div>
       </div>
@@ -180,7 +185,7 @@ export function PlatformKPIsView({ data, isLoading, isFetching, spendAnomalies, 
   if (isLoading) {
     return (
       <div className="flex h-64 flex-col items-center justify-center gap-3">
-        <div className="h-12 w-12 animate-spin rounded-full border-4 border-gray-200" style={{ borderTopColor: '#FF3621' }} />
+        <div className="h-12 w-12 animate-spin rounded-full border-4 border-gray-200" style={{ borderTopColor: C.lava }} />
         <p className="text-sm text-gray-500">Loading platform KPIs...</p>
       </div>
     );
@@ -188,7 +193,7 @@ export function PlatformKPIsView({ data, isLoading, isFetching, spendAnomalies, 
 
   if (!data) {
     return (
-      <div className="rounded-lg bg-white p-6 border " style={{ borderColor: '#E5E5E5' }}>
+      <div className="rounded-lg bg-white p-6 border " style={{ borderColor: C.hairline }}>
         <div className="flex h-32 flex-col items-center justify-center gap-2 text-gray-500">
           <p className="text-base font-medium">No platform KPI data available</p>
           <p className="text-sm">Try adjusting the date range or verify system tables are accessible</p>
@@ -226,24 +231,24 @@ export function PlatformKPIsView({ data, isLoading, isFetching, spendAnomalies, 
   return (
     <div className="animate-fade-in space-y-6">
       {/* Header */}
-      <div className="flex items-center gap-3">
-        <div className="rounded-lg p-2" style={{ backgroundColor: '#FF3621' }}>
-          <svg className="h-6 w-6 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+      <PageHero
+        icon={
+          <svg fill="none" viewBox="0 0 24 24" stroke="currentColor">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
           </svg>
-        </div>
-        <div>
-          <h1 className="text-2xl font-bold text-gray-900">Platform KPIs & Trends</h1>
-          <div className="flex items-center gap-2 flex-wrap">
-            <p className="text-sm text-gray-500">Platform health, usage metrics, and adoption tracking</p>
+        }
+        title="Platform KPIs & Trends"
+        subtitle={
+          <>
+            Platform health, usage metrics, and adoption tracking
             {workspaceIds && workspaceIds.length > 0 && (
-              <span className="rounded bg-[#1B3139]/10 px-2 py-0.5 text-[10px] font-medium text-[#1B3139]">
+              <Chip kind="workspace">
                 {workspaceIds.length === 1 ? (workspaceNameMap?.[workspaceIds[0]] || workspaceIds[0]) : `${workspaceIds.length} workspaces`}
-              </span>
+              </Chip>
             )}
-          </div>
-        </div>
-      </div>
+          </>
+        }
+      />
 
       {data.data_stale && (
         <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-2.5 text-xs text-amber-700">
@@ -309,7 +314,7 @@ export function PlatformKPIsView({ data, isLoading, isFetching, spendAnomalies, 
             unavailableReason={queryHistUnavailable}
             onClick={!queryHistUnavailable && startDate && endDate ? () => handleKPIClick("total_queries", "Daily Queries Executed") : undefined}
             icon={
-              <svg className="h-6 w-6 text-[#FF3621]" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <svg className="h-6 w-6 text-lava" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01" />
               </svg>
             }
@@ -324,7 +329,7 @@ export function PlatformKPIsView({ data, isLoading, isFetching, spendAnomalies, 
             unavailableReason={queryHistUnavailable}
             onClick={!queryHistUnavailable && startDate && endDate ? () => handleKPIClick("total_rows_read", "Rows Processed") : undefined}
             icon={
-              <svg className="h-6 w-6 text-[#FF3621]" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <svg className="h-6 w-6 text-lava" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 7v10c0 2.21 3.582 4 8 4s8-1.79 8-4V7M4 7c0 2.21 3.582 4 8 4s8-1.79 8-4M4 7c0-2.21 3.582-4 8-4s8 1.79 8 4m0 5c0 2.21-3.582 4-8 4s-8-1.79-8-4" />
               </svg>
             }
@@ -339,7 +344,7 @@ export function PlatformKPIsView({ data, isLoading, isFetching, spendAnomalies, 
             unavailableReason={queryHistUnavailable}
             onClick={!queryHistUnavailable && startDate && endDate ? () => handleKPIClick("total_bytes_read", "Data Processed") : undefined}
             icon={
-              <svg className="h-6 w-6 text-[#FF3621]" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <svg className="h-6 w-6 text-lava" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
               </svg>
             }
@@ -354,7 +359,7 @@ export function PlatformKPIsView({ data, isLoading, isFetching, spendAnomalies, 
             unavailableReason={queryHistUnavailable}
             onClick={!queryHistUnavailable && startDate && endDate ? () => handleKPIClick("total_compute_seconds", "Daily Active Processing Time") : undefined}
             icon={
-              <svg className="h-6 w-6 text-[#FF3621]" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <svg className="h-6 w-6 text-lava" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
               </svg>
             }
@@ -376,7 +381,7 @@ export function PlatformKPIsView({ data, isLoading, isFetching, spendAnomalies, 
             unavailableReason={jobsUnavailable}
             onClick={!jobsUnavailable && startDate && endDate ? () => handleKPIClick("total_jobs", "Daily Active Jobs") : undefined}
             icon={
-              <svg className="h-6 w-6 text-[#FF3621]" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <svg className="h-6 w-6 text-lava" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 13.255A23.931 23.931 0 0112 15c-3.183 0-6.22-.62-9-1.745M16 6V4a2 2 0 00-2-2h-4a2 2 0 00-2 2v2m4 6h.01M5 20h14a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
               </svg>
             }
@@ -391,7 +396,7 @@ export function PlatformKPIsView({ data, isLoading, isFetching, spendAnomalies, 
             unavailableReason={jobsUnavailable}
             onClick={!jobsUnavailable && startDate && endDate ? () => handleKPIClick("total_job_runs", "Daily Job Runs") : undefined}
             icon={
-              <svg className="h-6 w-6 text-[#FF3621]" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <svg className="h-6 w-6 text-lava" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
               </svg>
             }
@@ -405,7 +410,7 @@ export function PlatformKPIsView({ data, isLoading, isFetching, spendAnomalies, 
             isLoading={isLoading || isFetching}
             onClick={startDate && endDate && hasSuccessRateData ? () => handleKPIClick("successful_runs", "Successful Runs") : undefined}
             icon={
-              <svg className={`h-6 w-6 ${hasSuccessRateData ? "text-[#FF3621]" : "text-gray-500"}`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <svg className={`h-6 w-6 ${hasSuccessRateData ? "text-lava" : "text-gray-500"}`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
               </svg>
             }
@@ -421,7 +426,7 @@ export function PlatformKPIsView({ data, isLoading, isFetching, spendAnomalies, 
             unavailableReason={clustersUnavailable}
             onClick={!clustersUnavailable && startDate && endDate ? () => handleKPIClick("active_notebooks", "Daily Active Clusters") : undefined}
             icon={
-              <svg className="h-6 w-6 text-[#FF3621]" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <svg className="h-6 w-6 text-lava" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 12h14M5 12a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v4a2 2 0 01-2 2M5 12a2 2 0 00-2 2v4a2 2 0 002 2h14a2 2 0 002-2v-4a2 2 0 00-2-2m-2-4h.01M17 16h.01" />
               </svg>
             }
@@ -442,7 +447,7 @@ export function PlatformKPIsView({ data, isLoading, isFetching, spendAnomalies, 
             isLoading={isLoading || isFetching}
             onClick={startDate && endDate ? () => handleKPIClick("active_workspaces", "Daily Active Workspaces") : undefined}
             icon={
-              <svg className="h-6 w-6 text-[#FF3621]" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <svg className="h-6 w-6 text-lava" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" />
               </svg>
             }
@@ -459,7 +464,7 @@ export function PlatformKPIsView({ data, isLoading, isFetching, spendAnomalies, 
               unavailableReason={servingUnavailable}
               onClick={!servingUnavailable && startDate && endDate ? () => handleKPIClick("models_served", "Daily Models Served") : undefined}
               icon={
-                <svg className="h-6 w-6 text-[#FF3621]" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <svg className="h-6 w-6 text-lava" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
                 </svg>
               }
@@ -475,7 +480,7 @@ export function PlatformKPIsView({ data, isLoading, isFetching, spendAnomalies, 
             color="bg-orange-100"
             onClick={startDate && endDate ? () => handleKPIClick("total_users", "Daily Active Users") : undefined}
             icon={
-              <svg className="h-6 w-6 text-[#FF3621]" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <svg className="h-6 w-6 text-lava" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z" />
               </svg>
             }
@@ -490,7 +495,7 @@ export function PlatformKPIsView({ data, isLoading, isFetching, spendAnomalies, 
             isLoading={isLoading || isFetching}
             onClick={stickinessPct !== null && startDate && endDate ? () => handleKPIClick("stickiness", "Daily Usage Stickiness") : undefined}
             icon={
-              <svg className={`h-6 w-6 ${stickinessPct !== null ? "text-[#FF3621]" : "text-gray-500"}`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <svg className={`h-6 w-6 ${stickinessPct !== null ? "text-lava" : "text-gray-500"}`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
               </svg>
             }

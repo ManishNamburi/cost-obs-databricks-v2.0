@@ -40,6 +40,8 @@ import {
 import type { AIMLDashboardBundle } from "@/types/billing";
 import { KPITrendModal } from "./KPITrendModal";
 import { formatIdentity, useSpNameMap } from "@/utils/identity";
+import { C } from "@/theme";
+import { PageHero, Chip } from "@/components/brand";
 
 interface AIMLCostCenterProps {
   data: AIMLDashboardBundle | undefined;
@@ -56,19 +58,19 @@ interface AIMLCostCenterProps {
 
 // Stable category-to-color mapping for consistent colors across pie + timeseries
 const CATEGORY_COLORS: Record<string, string> = {
-  "Serverless Inference": "#06B6D4",
-  "Model Training": "#1B5162",
-  "Feature Engineering": "#14B8A6",
-  "GPU Clusters": "#EF4444",
-  "Model Serving": "#EC4899",
-  "MLflow": "#06B6D4",
-  "OpenAI": "#10B981",
-  "Anthropic": "#F59E0B",
-  "Gemini": "#6B7280",
-  "AI Search": "#3B82F6",
-  "Fine Tuning": "#F97316",
+  "Serverless Inference": C.s5,
+  "Model Training": C.s2,
+  "Feature Engineering": C.s3,
+  "GPU Clusters": C.lava,
+  "Model Serving": C.s1,
+  "MLflow": C.s5,
+  "OpenAI": C.s3,
+  "Anthropic": C.s4,
+  "Gemini": C.slate,
+  "AI Search": C.s5,
+  "Fine Tuning": C.s1,
 };
-const FALLBACK_COLORS = ["#1B5162", "#06B6D4", "#10B981", "#14B8A6", "#F59E0B", "#3B82F6", "#EC4899", "#EF4444", "#6B7280"];
+const FALLBACK_COLORS = [C.s2, C.s5, C.s3, C.s3, C.s4, C.s5, C.s1, C.lava, C.slate];
 const formatCurrency = (value: number) =>
   new Intl.NumberFormat("en-US", {
     style: "currency",
@@ -412,24 +414,24 @@ export function AIMLCostCenter({ data, isLoading, startDate, endDate, host, work
     <div className="animate-fade-in space-y-6">
       {/* Header — hidden when embedded (the AI Gateway view already shows the title) */}
       {!embedded && (
-      <div className="flex items-center gap-3">
-        <div className="rounded-lg p-2" style={{ backgroundColor: '#FF3621' }}>
-          <svg className="h-6 w-6 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+      <PageHero
+        icon={
+          <svg fill="none" viewBox="0 0 24 24" stroke="currentColor">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
           </svg>
-        </div>
-        <div>
-          <h1 className="text-2xl font-bold text-gray-900">AI/ML</h1>
-          <div className="flex items-center gap-2 flex-wrap">
-            <p className="text-sm text-gray-500">AI and machine learning cost attribution and trends</p>
+        }
+        title="AI/ML"
+        subtitle={
+          <>
+            AI and machine learning cost attribution and trends
             {workspaceIds && workspaceIds.length > 0 && (
-              <span className="rounded bg-[#1B3139]/10 px-2 py-0.5 text-[10px] font-medium text-[#1B3139]">
+              <Chip kind="workspace">
                 {workspaceIds.length === 1 ? (workspaceNameMap?.[workspaceIds[0]] || workspaceIds[0]) : `${workspaceIds.length} workspaces`}
-              </span>
+              </Chip>
             )}
-          </div>
-        </div>
-      </div>
+          </>
+        }
+      />
       )}
 
       {/* Info Banner */}

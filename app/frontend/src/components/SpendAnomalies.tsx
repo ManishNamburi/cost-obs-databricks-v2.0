@@ -8,6 +8,7 @@ import {
 } from "date-fns";
 import type { SpendAnomaliesResponse, SpendAnomaly } from "@/types/billing";
 import { formatCurrency } from "@/utils/formatters";
+import { C } from "@/theme";
 
 type ViewMode = "calendar" | "table";
 
@@ -18,18 +19,13 @@ interface SpendAnomaliesProps {
 
 // Returns background color + text color for a heatmap cell based on change_percent
 function cellStyle(changePercent: number): { background: string; color: string } {
-  const abs = Math.abs(changePercent);
+  if (Math.abs(changePercent) < 0.5) return { background: C.rowHover, color: C.slate };
   if (changePercent > 0) {
-    if (abs >= 30) return { background: "rgba(220, 38, 38, 0.82)", color: "#fff" };
-    if (abs >= 15) return { background: "rgba(239, 68, 68, 0.65)", color: "#fff" };
-    if (abs >= 5)  return { background: "rgba(252, 165, 165, 0.52)", color: "#991b1b" };
-    return           { background: "rgba(254, 226, 226, 0.42)", color: "#dc2626" };
-  } else {
-    if (abs >= 30) return { background: "rgba(22, 163, 74, 0.82)", color: "#fff" };
-    if (abs >= 15) return { background: "rgba(34, 197, 94, 0.65)", color: "#fff" };
-    if (abs >= 5)  return { background: "rgba(134, 239, 172, 0.52)", color: "#14532d" };
-    return           { background: "rgba(220, 252, 231, 0.42)", color: "#15803d" };
+    if (Math.abs(changePercent) >= 15) return { background: C.lava, color: C.white };
+    return { background: C.coralBrd, color: C.lavaHover };
   }
+  if (Math.abs(changePercent) >= 15) return { background: C.green, color: C.white };
+  return { background: C.calMid, color: C.greenInk };
 }
 
 function CalendarView({
@@ -165,9 +161,9 @@ export function SpendAnomalies({ data, isLoading }: SpendAnomaliesProps) {
 
   if (isLoading) {
     return (
-      <div className="rounded-lg bg-white p-6 border" style={{ borderColor: "#E5E5E5" }}>
+      <div className="rounded-lg bg-white p-6 border" style={{ borderColor: C.hairline }}>
         <div className="flex h-48 flex-col items-center justify-center gap-3">
-          <div className="h-12 w-12 animate-spin rounded-full border-4 border-gray-200" style={{ borderTopColor: "#FF3621" }} />
+          <div className="h-12 w-12 animate-spin rounded-full border-4 border-gray-200" style={{ borderTopColor: C.lava }} />
           <p className="text-sm text-gray-500">Loading spend anomalies...</p>
         </div>
       </div>
@@ -176,7 +172,7 @@ export function SpendAnomalies({ data, isLoading }: SpendAnomaliesProps) {
 
   if (!data || data.anomalies.length === 0) {
     return (
-      <div className="rounded-lg bg-white p-6 border" style={{ borderColor: "#E5E5E5" }}>
+      <div className="rounded-lg bg-white p-6 border" style={{ borderColor: C.hairline }}>
         <h3 className="mb-4 text-lg font-semibold text-gray-900">Largest Spend Changes</h3>
         <div className="flex h-40 flex-col items-center justify-center gap-2 text-gray-500">
           <p className="text-base font-medium">No significant spend changes detected</p>
@@ -198,7 +194,7 @@ export function SpendAnomalies({ data, isLoading }: SpendAnomaliesProps) {
   });
 
   return (
-    <div className="animate-fade-in rounded-lg bg-white p-6 border" style={{ borderColor: "#E5E5E5" }}>
+    <div className="animate-fade-in rounded-lg bg-white p-6 border" style={{ borderColor: C.hairline }}>
       {/* Header */}
       <div className="mb-4 flex items-center justify-between gap-3 flex-wrap">
         <div>
@@ -219,7 +215,7 @@ export function SpendAnomalies({ data, isLoading }: SpendAnomaliesProps) {
                 placeholder="Search date..."
                 value={dateSearch}
                 onChange={(e) => setDateSearch(e.target.value)}
-                className="w-44 rounded-full border border-gray-200 bg-white py-1.5 pl-9 pr-4 text-xs placeholder:text-gray-400 focus:border-[#FF3621] focus:outline-none focus:ring-1 focus:ring-[#FF3621]"
+                className="w-44 rounded-full border border-gray-200 bg-white py-1.5 pl-9 pr-4 text-xs placeholder:text-gray-400 focus:border-lava focus:outline-none focus:ring-1 focus:ring-lava"
               />
             </div>
           )}
@@ -237,7 +233,7 @@ export function SpendAnomalies({ data, isLoading }: SpendAnomaliesProps) {
               className={`px-3 py-1.5 transition-colors ${
                 viewMode === "calendar" ? "text-white" : "text-gray-600 hover:bg-gray-50"
               }`}
-              style={viewMode === "calendar" ? { backgroundColor: "#1B3139" } : {}}
+              style={viewMode === "calendar" ? { backgroundColor: C.navy } : {}}
             >
               <span className="flex items-center gap-1">
                 <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -251,7 +247,7 @@ export function SpendAnomalies({ data, isLoading }: SpendAnomaliesProps) {
               className={`px-3 py-1.5 transition-colors ${
                 viewMode === "table" ? "text-white" : "text-gray-600 hover:bg-gray-50"
               }`}
-              style={viewMode === "table" ? { backgroundColor: "#1B3139" } : {}}
+              style={viewMode === "table" ? { backgroundColor: C.navy } : {}}
             >
               <span className="flex items-center gap-1">
                 <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
