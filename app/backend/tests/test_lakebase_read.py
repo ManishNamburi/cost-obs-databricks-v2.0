@@ -313,6 +313,38 @@ def test_viewer_gold_pg_templates_are_postgres():
     assert "system." not in PLATFORM_KPI_TREND_PG["total_queries"].format(ws_filter="")
 
 
+def test_kpi_trend_pg_covers_sparkline_kpis():
+    from backend.lakebase_read import KPI_TREND_PG, PG_APPS_WORKSPACES, PG_AVAILABLE_TAGS
+    for key in (
+        "total_spend", "tagged_spend", "infra_cost", "aiml_spend",
+        "apps_spend", "apps_avg_cost_per_app",
+    ):
+        sql = KPI_TREND_PG[key].format(ws_filter="")
+        assert "`" not in sql
+        assert "system." not in sql
+        assert "%(start_date)s" in sql
+    tags = PG_AVAILABLE_TAGS
+    assert "daily_tag_summary" in tags
+    assert "system." not in tags
+    ws = PG_APPS_WORKSPACES.format(ws_filter="")
+    assert "daily_apps_summary" in ws
+    assert "system." not in ws
+
+
+def test_kpi_trend_response_empty_and_daily():
+    from backend.routers.billing import _kpi_trend_response
+    identity = lambda d: d
+    empty = _kpi_trend_response("total_spend", "daily", [], identity)
+    assert empty["data_points"] == []
+    out = _kpi_trend_response(
+        "total_spend", "daily",
+        [{"date": "2026-01-01", "value": 10}, {"date": "2026-01-02", "value": 20}],
+        identity,
+    )
+    assert out["summary"]["trend"] == "increasing"
+    assert out["data_points"][1]["value"] == 20.0
+
+
 def test_families_from_cluster_rows_rolls_driver_and_worker():
     from backend.routers.billing import _families_from_cluster_rows
 

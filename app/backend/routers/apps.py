@@ -319,7 +319,13 @@ FROM apps_usage
 
 
 def _query_app_workspaces(params: dict[str, Any], ws_clause: str = "") -> list[dict[str, Any]]:
-    """Query workspace info per app, falling back to IDs if name table is inaccessible."""
+    """Query workspace info per app from Lakebase gold; live system tables only as fallback."""
+    from backend.lakebase_read import PG_APPS_WORKSPACES, gold_read, warehouse_view_fallback
+    rows = gold_read("apps_workspaces", PG_APPS_WORKSPACES, params, ws_clause)
+    if rows:
+        return rows
+    if not warehouse_view_fallback():
+        return []
     sql = wf.inject_ws_filter(APPS_WORKSPACES, ws_clause)
     fallback = wf.inject_ws_filter(APPS_WORKSPACES_FALLBACK, ws_clause)
     try:
@@ -1044,6 +1050,63 @@ async def get_apps_kpi_trend(
     registry = _app_name_cache  # use stale cache — background refresh handled by dashboard-bundle
     app_filter = _build_app_id_filter(registry)
 
+    from backend.lakebase_read import KPI_TREND_PG, gold_read, warehouse_view_fallback
+    pg = KPI_TREND_PG.get(kpi)
+    if pg:
+        gold_rows = await asyncio.to_thread(gold_read, f"apps_kpi_trend_{kpi}", pg, params)
+        if gold_rows or not warehouse_view_fallback():
+            results = gold_rows or []
+            daily_points = [{"date": str(r["date"])[:10], "value": float(r.get("value") or 0)} for r in results]
+            if granularity == "weekly" and daily_points:
+                buckets: dict[str, list[float]] = {}
+                for dp in daily_points:
+                    d = datetime.strptime(dp["date"], "%Y-%m-%d")
+                    week_start = d - timedelta(days=d.weekday())
+                    key = week_start.strftime("%Y-%m-%d")
+                    buckets.setdefault(key, []).append(dp["value"])
+                data_points = [{"date": k, "value": sum(v)} for k, v in sorted(buckets.items())]
+            elif granularity == "monthly" and daily_points:
+                buckets_m: dict[str, list[float]] = {}
+                for dp in daily_points:
+                    key = dp["date"][:7] + "-01"
+                    buckets_m.setdefault(key, []).append(dp["value"])
+                data_points = [{"date": k, "value": sum(v)} for k, v in sorted(buckets_m.items())]
+            else:
+                data_points = daily_points
+            if not data_points:
+                empty = {
+                    "kpi": kpi, "granularity": granularity, "data_points": [],
+                    "summary": {"period_start_value": 0, "period_end_value": 0,
+                                 "change_amount": 0, "change_percent": 0,
+                                 "min_value": 0, "max_value": 0, "avg_value": 0,
+                                 "trend": "flat"},
+                }
+                delta_cache_put(_dkey, "apps:kpi-trend", empty, ttl_seconds=cache_ttls.TREND)
+                return empty
+            all_values = [dp["value"] for dp in data_points]
+            start_val = all_values[0]
+            end_val = all_values[-1]
+            change = end_val - start_val
+            change_pct = (change / start_val * 100) if start_val > 0 else 0
+            trend = "flat" if abs(change_pct) < 5 else ("increasing" if change_pct > 0 else "decreasing")
+            payload = {
+                "kpi": kpi,
+                "granularity": granularity,
+                "data_points": data_points,
+                "summary": {
+                    "period_start_value": round(start_val, 2),
+                    "period_end_value": round(end_val, 2),
+                    "change_amount": round(change, 2),
+                    "change_percent": round(change_pct, 2),
+                    "min_value": round(min(all_values), 2),
+                    "max_value": round(max(all_values), 2),
+                    "avg_value": round(sum(all_values) / len(all_values), 2),
+                    "trend": trend,
+                },
+            }
+            delta_cache_put(_dkey, "apps:kpi-trend", payload, ttl_seconds=cache_ttls.TREND)
+            return payload
+
     if kpi == "apps_spend":
         query = """
         WITH usage_with_price AS (
@@ -1105,6 +1168,15 @@ async def get_apps_kpi_trend(
         """
     else:
         return {"error": f"Unknown KPI: {kpi}"}
+
+    if not warehouse_view_fallback():
+        return {
+            "kpi": kpi, "granularity": granularity, "data_points": [],
+            "summary": {"period_start_value": 0, "period_end_value": 0,
+                         "change_amount": 0, "change_percent": 0,
+                         "min_value": 0, "max_value": 0, "avg_value": 0,
+                         "trend": "flat"},
+        }
 
     try:
         results = await asyncio.to_thread(execute_query, query, params)

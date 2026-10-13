@@ -342,12 +342,15 @@ async def get_billing_by_product(
         "end_date": end_date or get_default_end_date(),
     }
 
+    from backend import workspace_filter as wf
+    id_list = [workspace_id] if workspace_id else None
     if workspace_id:
-        # Add workspace filter to the query
         params["workspace_id"] = workspace_id
-        results = await asyncio.to_thread(execute_query, BILLING_BY_PRODUCT_WORKSPACE, params)
-    else:
-        results = await asyncio.to_thread(execute_query, BILLING_BY_PRODUCT, params)
+    ws_clause = wf.build_ws_filter_clause(col="workspace_id", id_list=id_list)
+    results = await asyncio.to_thread(_exec_mv, MV_BILLING_BY_PRODUCT, params, ws_clause)
+    if not results:
+        live = BILLING_BY_PRODUCT_WORKSPACE if workspace_id else BILLING_BY_PRODUCT
+        results = await asyncio.to_thread(_live_if_allowed, live, params)
 
     products = []
     total_spend = 0
@@ -1182,8 +1185,11 @@ def _get_pipeline_names() -> dict[str, str]:
     if _pipeline_names_cache is not None and (now - _pipeline_names_cache_ts) < _PIPELINE_CACHE_TTL:
         return _pipeline_names_cache
 
-    # Try system.lakeflow.pipelines (cross-workspace)
+    from backend.lakebase_read import warehouse_view_fallback
+    # Try system.lakeflow.pipelines (cross-workspace) only when viewers may hit the warehouse.
     try:
+        if not warehouse_view_fallback():
+            raise RuntimeError("skip warehouse pipeline-name lookup")
         results = execute_query("""
             SELECT pipeline_id, MAX(name) as pipeline_name
             FROM system.lakeflow.pipelines
@@ -2577,6 +2583,94 @@ async def get_kpis_bundle(
     return _kpis_resp
 
 
+def _kpi_trend_response(
+    kpi: str,
+    granularity: str,
+    results: list[dict[str, Any]] | None,
+    _resp,
+) -> dict[str, Any]:
+    """Turn daily {date, value} rows into the sparkline payload."""
+    daily_points = []
+    for row in results or []:
+        daily_points.append({
+            "date": str(row["date"])[:10],
+            "value": float(row.get("value") or 0),
+        })
+
+    AVG_KPIS = {"avg_cost_per_cluster", "avg_daily_spend", "avg_spend_per_user"}
+
+    if granularity == "weekly" and daily_points:
+        from datetime import datetime, timedelta
+        buckets: dict[str, list[float]] = {}
+        for dp in daily_points:
+            d = datetime.strptime(dp["date"], "%Y-%m-%d")
+            week_start = d - timedelta(days=d.weekday())
+            key = week_start.strftime("%Y-%m-%d")
+            buckets.setdefault(key, []).append(dp["value"])
+        data_points = []
+        for key in sorted(buckets.keys()):
+            vals = buckets[key]
+            agg = sum(vals) / len(vals) if kpi in AVG_KPIS else sum(vals)
+            data_points.append({"date": key, "value": agg})
+    elif granularity == "monthly" and daily_points:
+        buckets_m: dict[str, list[float]] = {}
+        for dp in daily_points:
+            key = dp["date"][:7] + "-01"
+            buckets_m.setdefault(key, []).append(dp["value"])
+        data_points = []
+        for key in sorted(buckets_m.keys()):
+            vals = buckets_m[key]
+            agg = sum(vals) / len(vals) if kpi in AVG_KPIS else sum(vals)
+            data_points.append({"date": key, "value": agg})
+    else:
+        data_points = daily_points
+
+    all_values = [dp["value"] for dp in data_points]
+    if not data_points:
+        return _resp({
+            "kpi": kpi,
+            "granularity": granularity,
+            "data_points": [],
+            "summary": {
+                "period_start_value": 0,
+                "period_end_value": 0,
+                "change_amount": 0,
+                "change_percent": 0,
+                "min_value": 0,
+                "max_value": 0,
+                "avg_value": 0,
+                "trend": "flat",
+            },
+        })
+
+    period_start_value = all_values[0]
+    period_end_value = all_values[-1]
+    change_amount = period_end_value - period_start_value
+    change_percent = (change_amount / period_start_value * 100) if period_start_value > 0 else 0
+    if abs(change_percent) < 5:
+        trend = "flat"
+    elif change_percent > 0:
+        trend = "increasing"
+    else:
+        trend = "decreasing"
+
+    return _resp({
+        "kpi": kpi,
+        "granularity": granularity,
+        "data_points": data_points,
+        "summary": {
+            "period_start_value": round(period_start_value, 2),
+            "period_end_value": round(period_end_value, 2),
+            "change_amount": round(change_amount, 2),
+            "change_percent": round(change_percent, 2),
+            "min_value": round(min(all_values), 2),
+            "max_value": round(max(all_values), 2),
+            "avg_value": round(sum(all_values) / len(all_values), 2),
+            "trend": trend,
+        },
+    })
+
+
 @router.get("/kpi-trend")
 async def get_kpi_trend(
     kpi: str = Query(..., description="KPI to fetch trend for: total_spend, total_dbus, avg_daily_spend, workspace_count, aiml_spend, aiml_dbus, aiml_endpoints, tagged_spend, untagged_spend, infra_cost, infra_clusters, infra_dbu_hours"),
@@ -2601,6 +2695,13 @@ async def get_kpi_trend(
         return data
 
     ws_clause = wf.build_ws_filter_clause(col="workspace_id", id_list=id_list)
+
+    from backend.lakebase_read import KPI_TREND_PG, gold_read, warehouse_view_fallback
+    pg = KPI_TREND_PG.get(kpi)
+    if pg:
+        gold_rows = await asyncio.to_thread(gold_read, f"kpi_trend_{kpi}", pg, params, ws_clause)
+        if gold_rows or not warehouse_view_fallback():
+            return _kpi_trend_response(kpi, granularity, gold_rows, _resp)
 
     use_mv = await asyncio.to_thread(_check_mv_available)
     # MV tables are pre-aggregated and cannot be filtered by individual workspace
@@ -3151,13 +3252,16 @@ async def get_kpi_trend(
     else:
         return {"error": f"Unknown KPI: {kpi}"}
 
+    if not warehouse_view_fallback():
+        return _kpi_trend_response(kpi, granularity, [], _resp)
+
     try:
         results = await asyncio.to_thread(execute_query, apply_mv_overrides(_inject_ws_filter(query, ws_clause), *get_catalog_schema()), params)
         if use_mv:
-            from backend.lakebase_read import KPI_TREND_PG, dual_read
-            pg = KPI_TREND_PG.get(kpi)
-            if pg:
-                results = dual_read(f"kpi_trend_{kpi}", pg, params, ws_clause, results or [], ["date"])
+            from backend.lakebase_read import dual_read
+            pg_live = KPI_TREND_PG.get(kpi)
+            if pg_live:
+                results = dual_read(f"kpi_trend_{kpi}", pg_live, params, ws_clause, results or [], ["date"])
         if not results and mv_fallback_query:
             from backend.lakebase_read import warehouse_view_fallback
             if warehouse_view_fallback():

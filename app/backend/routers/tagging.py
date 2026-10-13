@@ -13,7 +13,7 @@ from backend import workspace_filter as wf
 from backend import cache_ttls
 from backend.materialized_views import MV_TAG_STATS, MV_TAGGING_SUMMARY
 from backend.materialized_views_extra import MV_TAGGING_COVERAGE
-from backend.routers.billing import _check_mv_available, _exec_mv
+from backend.routers.billing import _check_mv_available, _exec_mv, get_default_end_date, get_default_start_date
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -765,6 +765,9 @@ def _get_tagging_pipeline_names() -> dict[str, str]:
         return _tagging_pipeline_names_cache
 
     try:
+        from backend.lakebase_read import warehouse_view_fallback
+        if not warehouse_view_fallback():
+            raise RuntimeError("skip warehouse pipeline-name lookup")
         results = execute_query("""
             SELECT pipeline_id, MAX(name) as pipeline_name
             FROM system.lakeflow.pipelines
@@ -1077,7 +1080,14 @@ async def get_available_tags() -> dict[str, Any]:
     Returns tag keys with their associated values for use in tagging resources.
     """
     try:
-        results = await asyncio.to_thread(execute_query, AVAILABLE_TAGS, {})
+        from backend.lakebase_read import PG_AVAILABLE_TAGS, gold_read
+        params = {
+            "start_date": get_default_start_date(),
+            "end_date": get_default_end_date(),
+        }
+        results = await asyncio.to_thread(
+            gold_read, "available_tags", PG_AVAILABLE_TAGS, params, "", AVAILABLE_TAGS
+        )
 
         tags = {}
         for row in results:

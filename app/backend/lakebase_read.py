@@ -1443,12 +1443,205 @@ GROUP BY usage_date ORDER BY usage_date
 """,
 }
 
+_AIML_KPI_WHERE = """
+  AND (
+    billing_origin_product IN ('MODEL_SERVING', 'VECTOR_SEARCH', 'FINE_TUNING')
+    OR sku_name ILIKE '%ANTHROPIC%' OR sku_name ILIKE '%OPENAI%' OR sku_name ILIKE '%GEMINI%'
+    OR sku_name ILIKE '%INFERENCE%' OR sku_name ILIKE '%FINE_TUNING%' OR sku_name ILIKE '%VECTOR_SEARCH%'
+    OR aiml_category IN (
+      'FMAPI - Anthropic', 'FMAPI - OpenAI', 'FMAPI - Gemini',
+      'Serverless Inference', 'Batch Inference', 'AI Search',
+      'Fine Tuning', 'Model Serving'
+    )
+  )
+"""
+
+PG_KPI_TREND_TAGGED = """
+SELECT usage_date AS date, SUM(tagged_spend) AS value
+FROM daily_tag_coverage
+WHERE usage_date BETWEEN %(start_date)s AND %(end_date)s
+  {ws_filter}
+GROUP BY usage_date
+ORDER BY usage_date
+"""
+
+PG_KPI_TREND_UNTAGGED = """
+SELECT usage_date AS date, SUM(total_spend) - SUM(tagged_spend) AS value
+FROM daily_tag_coverage
+WHERE usage_date BETWEEN %(start_date)s AND %(end_date)s
+  {ws_filter}
+GROUP BY usage_date
+ORDER BY usage_date
+"""
+
+PG_KPI_TREND_INFRA_COST = """
+SELECT usage_date AS date, SUM(total_spend) AS value
+FROM daily_product_breakdown
+WHERE usage_date BETWEEN %(start_date)s AND %(end_date)s
+  {ws_filter}
+  AND product_category IN (
+    'Interactive', 'ETL - Batch', 'ETL - Streaming', 'SQL - DBSQL', 'SQL - Genie'
+  )
+GROUP BY usage_date
+ORDER BY usage_date
+"""
+
+PG_KPI_TREND_INFRA_CLUSTERS = """
+SELECT usage_date AS date, COUNT(DISTINCT NULLIF(cluster_id, '__na__')) AS value
+FROM daily_infra_cluster_spend
+WHERE usage_date BETWEEN %(start_date)s AND %(end_date)s
+  {ws_filter}
+GROUP BY usage_date
+ORDER BY usage_date
+"""
+
+PG_KPI_TREND_INFRA_DBUS = """
+SELECT usage_date AS date, SUM(total_dbu_hours) AS value
+FROM daily_infra_cluster_spend
+WHERE usage_date BETWEEN %(start_date)s AND %(end_date)s
+  {ws_filter}
+GROUP BY usage_date
+ORDER BY usage_date
+"""
+
+PG_KPI_TREND_AVG_CLUSTER = """
+SELECT usage_date AS date,
+  SUM(total_dbu_hours) * 0.50 / NULLIF(COUNT(DISTINCT NULLIF(cluster_id, '__na__')), 0) AS value
+FROM daily_infra_cluster_spend
+WHERE usage_date BETWEEN %(start_date)s AND %(end_date)s
+  {ws_filter}
+GROUP BY usage_date
+ORDER BY usage_date
+"""
+
+PG_KPI_TREND_AIML_SPEND = """
+SELECT usage_date AS date, SUM(total_spend) AS value
+FROM daily_sku_breakdown
+WHERE usage_date BETWEEN %(start_date)s AND %(end_date)s
+  {ws_filter}
+""" + _AIML_KPI_WHERE + """
+GROUP BY usage_date
+ORDER BY usage_date
+"""
+
+PG_KPI_TREND_AIML_DBUS = """
+SELECT usage_date AS date, SUM(total_dbus) AS value
+FROM daily_sku_breakdown
+WHERE usage_date BETWEEN %(start_date)s AND %(end_date)s
+  {ws_filter}
+""" + _AIML_KPI_WHERE + """
+GROUP BY usage_date
+ORDER BY usage_date
+"""
+
+PG_KPI_TREND_AIML_ENDPOINTS = """
+SELECT usage_date AS date, COUNT(DISTINCT NULLIF(endpoint_name, '__na__')) AS value
+FROM daily_aiml_endpoints
+WHERE usage_date BETWEEN %(start_date)s AND %(end_date)s
+  {ws_filter}
+GROUP BY usage_date
+ORDER BY usage_date
+"""
+
+PG_KPI_TREND_AIML_AVG_EP = """
+SELECT usage_date AS date,
+  SUM(total_spend) / NULLIF(COUNT(DISTINCT NULLIF(endpoint_name, '__na__')), 0) AS value
+FROM daily_aiml_endpoints
+WHERE usage_date BETWEEN %(start_date)s AND %(end_date)s
+  {ws_filter}
+GROUP BY usage_date
+ORDER BY usage_date
+"""
+
+PG_KPI_TREND_APPS_SPEND = """
+SELECT usage_date AS date, SUM(total_spend) AS value
+FROM daily_apps_summary
+WHERE usage_date BETWEEN %(start_date)s AND %(end_date)s
+  {ws_filter}
+GROUP BY usage_date
+ORDER BY usage_date
+"""
+
+PG_KPI_TREND_APPS_DBUS = """
+SELECT usage_date AS date, SUM(total_dbus) AS value
+FROM daily_apps_summary
+WHERE usage_date BETWEEN %(start_date)s AND %(end_date)s
+  {ws_filter}
+GROUP BY usage_date
+ORDER BY usage_date
+"""
+
+PG_KPI_TREND_APPS_COUNT = """
+SELECT usage_date AS date, COUNT(DISTINCT NULLIF(app_id, 'Unknown')) AS value
+FROM daily_apps_summary
+WHERE usage_date BETWEEN %(start_date)s AND %(end_date)s
+  {ws_filter}
+GROUP BY usage_date
+ORDER BY usage_date
+"""
+
+PG_KPI_TREND_APPS_AVG = """
+SELECT usage_date AS date,
+  SUM(total_spend) / NULLIF(COUNT(DISTINCT NULLIF(app_id, 'Unknown')), 0) AS value
+FROM daily_apps_summary
+WHERE usage_date BETWEEN %(start_date)s AND %(end_date)s
+  {ws_filter}
+GROUP BY usage_date
+ORDER BY usage_date
+"""
+
+PG_KPI_TREND_TOTAL_TAGS = """
+SELECT usage_date AS date, COUNT(DISTINCT tag_key || ':' || tag_value) AS value
+FROM daily_tag_summary
+WHERE usage_date BETWEEN %(start_date)s AND %(end_date)s
+  {ws_filter}
+GROUP BY usage_date
+ORDER BY usage_date
+"""
+
+PG_AVAILABLE_TAGS = """
+SELECT tag_key, ARRAY_AGG(DISTINCT tag_value) AS tag_values
+FROM daily_tag_summary
+WHERE tag_key IS NOT NULL
+GROUP BY tag_key
+"""
+
+PG_APPS_WORKSPACES = """
+SELECT NULLIF(a.app_id, 'Unknown') AS app_id,
+  NULLIF(a.workspace_id, '__account__') AS workspace_id,
+  MAX(NULLIF(w.workspace_name, '__na__')) AS workspace_name
+FROM daily_apps_summary a
+LEFT JOIN (
+  SELECT workspace_id, MAX(NULLIF(workspace_name, '__na__')) AS workspace_name
+  FROM daily_workspace_breakdown
+  GROUP BY workspace_id
+) w ON w.workspace_id = a.workspace_id
+WHERE a.usage_date BETWEEN %(start_date)s AND %(end_date)s
+  {ws_filter}
+GROUP BY NULLIF(a.app_id, 'Unknown'), NULLIF(a.workspace_id, '__account__')
+"""
+
 KPI_TREND_PG = {
     "total_spend": PG_KPI_TREND_SPEND,
     "avg_daily_spend": PG_KPI_TREND_SPEND,
     "total_dbus": PG_KPI_TREND_DBUS,
     "workspace_count": PG_KPI_TREND_WORKSPACES,
     "user_spend": PG_KPI_TREND_USER_SPEND,
+    "tagged_spend": PG_KPI_TREND_TAGGED,
+    "untagged_spend": PG_KPI_TREND_UNTAGGED,
+    "infra_cost": PG_KPI_TREND_INFRA_COST,
+    "infra_clusters": PG_KPI_TREND_INFRA_CLUSTERS,
+    "infra_dbu_hours": PG_KPI_TREND_INFRA_DBUS,
+    "avg_cost_per_cluster": PG_KPI_TREND_AVG_CLUSTER,
+    "aiml_spend": PG_KPI_TREND_AIML_SPEND,
+    "aiml_dbus": PG_KPI_TREND_AIML_DBUS,
+    "aiml_endpoints": PG_KPI_TREND_AIML_ENDPOINTS,
+    "aiml_avg_endpoint_cost": PG_KPI_TREND_AIML_AVG_EP,
+    "apps_spend": PG_KPI_TREND_APPS_SPEND,
+    "apps_dbus": PG_KPI_TREND_APPS_DBUS,
+    "apps_count": PG_KPI_TREND_APPS_COUNT,
+    "apps_avg_cost_per_app": PG_KPI_TREND_APPS_AVG,
+    "total_tags": PG_KPI_TREND_TOTAL_TAGS,
 }
 
 # Registry: maps a Databricks MV template (by identity) → (parity name, PG template, key cols).
