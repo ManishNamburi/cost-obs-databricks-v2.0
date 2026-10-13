@@ -21,7 +21,7 @@ import type { GranularBreakdownResponse, DBSQLDashboardBundle, QueryCostByWareho
 import { KPITrendModal } from "./KPITrendModal";
 import { VirtualizedList } from "./VirtualizedList";
 import { C } from "@/theme";
-import { PageHero, TabInfoBanner } from "@/components/brand";
+import { PageHero, TabInfoBanner, SourceCapabilityNotice } from "@/components/brand";
 
 interface SQLWarehousing360Props {
   sqlBreakdownData: GranularBreakdownResponse | undefined;
@@ -463,20 +463,11 @@ export function SQLWarehousing360({ sqlBreakdownData: _sqlBreakdownData, queryDa
 
       {/* Query-level Cost Attribution */}
       {hasQueryData === false ? (
-        <div className="rounded-lg border border-gray-200 bg-gray-50 p-6">
-          <div className="flex items-start gap-3">
-            <svg className="mt-0.5 h-5 w-5 shrink-0 text-gray-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-            </svg>
-            <div>
-              <p className="text-sm font-medium text-gray-700">Query-level cost attribution is not available</p>
-              <p className="mt-1 text-sm text-gray-500">
-                This tab requires <code className="rounded bg-gray-200 px-1 text-xs">system.query.history</code> access for the app's service principal.
-                Copy the GRANT SQL from <strong>Settings → Permissions</strong> and run it as a metastore admin, then rebuild tables from <strong>Settings → Config</strong>.
-              </p>
-            </div>
-          </div>
-        </div>
+        <SourceCapabilityNotice
+          title="Query-level cost attribution is not available"
+          description="This tab requires system.query.history access for the app's service principal. Copy the GRANT SQL from Settings → Permissions and run it as a metastore admin, then rebuild tables from Settings → Config."
+          requiredAggregates={["daily_query_stats", "sql_tool_attribution", "dbsql_cost_per_query"]}
+        />
       ) : (
         <>
           {/* Header */}
@@ -1520,16 +1511,18 @@ export function WarehouseRightsizingView({ host }: { host?: string | null }) {
         <div className="flex h-24 items-center justify-center">
           <div className="h-6 w-6 animate-spin rounded-full border-2 border-gray-200" style={{ borderTopColor: C.lava }} />
         </div>
-      ) : !warehouseHealth?.available || !warehouseHealth.recommendations.length ? (
-        <div className="rounded-lg p-4 text-sm" style={{ background: C.oatPage, color: warehouseHealth?.available === false ? C.slate : C.greenInk }}>
-          {warehouseHealth?.available === false
-            ? "Warehouse health data unavailable. Requires system.compute.warehouse_events access."
-            : (
-              <span className="inline-flex items-center gap-2">
-                <svg className="h-4 w-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" /></svg>
-                No rightsizing recommendations — all warehouses appear appropriately sized.
-              </span>
-            )}
+      ) : warehouseHealth?.available === false ? (
+        <SourceCapabilityNotice
+          title="Rightsizing recommendations are temporarily unavailable"
+          description="Warehouse health data unavailable. Requires system.compute.warehouse_events access."
+          requiredAggregates={["warehouse_health_summary"]}
+        />
+      ) : !warehouseHealth?.recommendations.length ? (
+        <div className="rounded-lg p-4 text-sm" style={{ background: C.oatPage, color: C.greenInk }}>
+          <span className="inline-flex items-center gap-2">
+            <svg className="h-4 w-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" /></svg>
+            No rightsizing recommendations — all warehouses appear appropriately sized.
+          </span>
         </div>
       ) : (() => {
         const badgeColor: Record<string, string> = {
@@ -1846,13 +1839,17 @@ export function WarehouseIdleTimeView({
         <div className="flex h-24 items-center justify-center">
           <div className="h-6 w-6 animate-spin rounded-full border-2 border-gray-200" style={{ borderTopColor: C.lava }} />
         </div>
-      ) : !data?.available || !data.warehouses.length ? (
+      ) : data?.available === false ? (
+        <SourceCapabilityNotice
+          title="Idle time analysis is temporarily unavailable"
+          description={(data as { error?: string }).error
+            ? `Idle time query failed: ${(data as { error?: string }).error}`
+            : "Idle time data unavailable. Requires access to system.compute.warehouse_events and system.query.history."}
+          requiredAggregates={["warehouse_idle_summary"]}
+        />
+      ) : !data?.warehouses.length ? (
         <div className="rounded-lg border border-gray-100 bg-gray-50 p-4 text-sm text-gray-500">
-          {data?.available === false
-            ? (data as any).error
-              ? `Idle time query failed: ${(data as any).error}`
-              : "Idle time data unavailable. Requires access to system.compute.warehouse_events and system.query.history."
-            : data?.serverless_detected
+          {data?.serverless_detected
             ? "Idle time via lifecycle events is not available for Serverless SQL Warehouses. Serverless warehouses scale per-query and do not emit start/stop events."
             : "No warehouse uptime data found for this date range."}
         </div>

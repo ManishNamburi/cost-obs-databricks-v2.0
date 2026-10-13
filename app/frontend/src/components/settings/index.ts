@@ -6,4 +6,5 @@ export { SettingsTabs } from "./SettingsTabs";
 export { SettingsExperimental } from "./SettingsExperimental";
 export { SettingsAccuracyChecks } from "./SettingsAccuracyChecks";
 export { SettingsPermissions } from "./SettingsPermissions";
+export { SettingsResources } from "./SettingsResources";
 export { SettingsDebugger } from "./SettingsDebugger";

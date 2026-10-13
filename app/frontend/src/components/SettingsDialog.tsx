@@ -420,7 +420,7 @@ function SettingsShell({ onClose, onTabVisibilityChange, onSettingsChange, tabVi
 
           {/* Content */}
           <div style={{ flex: 1, minHeight: 0, overflowY: "auto", backgroundColor: T.surface }}>
-            <div style={{ maxWidth: 720, padding: "20px 24px" }}>
+            <div style={{ maxWidth: 880, padding: "20px 24px" }}>
               {overlay === "setup" && isAdmin && (
                 <SetupWizard embedded onComplete={() => {
                   rqClient.invalidateQueries({ queryKey: ["app-config"] });

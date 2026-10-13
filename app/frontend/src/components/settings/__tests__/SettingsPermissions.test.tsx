@@ -9,6 +9,7 @@
  */
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { SettingsPermissions } from "../SettingsPermissions";
 
@@ -45,7 +46,12 @@ const USER_AUTH_STATUS = {
   schema: "coc",
 };
 
-function mockApis(authStatus: object, permissionsPayload?: object) {
+function mockApis(authStatus: object, permissionsPayload?: object, userPermissions?: object) {
+  const defaultUserPermissions = {
+    admins: [],
+    consumers: [],
+    current_user: "alice@databricks.com",
+  };
   const defaultPermissions = {
     permissions: [],
     summary: { total: 0, granted: 0, required_count: 2, required_granted: 2, all_required_granted: true, ready_to_use: true },
@@ -54,11 +60,27 @@ function mockApis(authStatus: object, permissionsPayload?: object) {
     help_url: "https://docs.databricks.com",
   };
 
-  fetchMock.mockImplementation((input: RequestInfo | URL) => {
+  fetchMock.mockImplementation((input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input);
     if (url.includes("/api/settings/auth-status")) {
       return Promise.resolve(
         new Response(JSON.stringify(authStatus), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        })
+      );
+    }
+    if (url.includes("/api/settings/user-permissions")) {
+      if (init?.method === "POST") {
+        return Promise.resolve(
+          new Response(JSON.stringify({ status: "ok" }), {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          })
+        );
+      }
+      return Promise.resolve(
+        new Response(JSON.stringify(userPermissions ?? defaultUserPermissions), {
           status: 200,
           headers: { "Content-Type": "application/json" },
         })
@@ -159,6 +181,121 @@ describe("SettingsPermissions — grant bundle targets actual SP name", () => {
       // Section 1 grants must target the SP; no user-specific grants when SP is active identity
       expect(sqlText).toContain("GRANT USE CATALOG ON CATALOG system TO");
     });
+  });
+});
+
+describe("SettingsPermissions — access grid", () => {
+  it("shows each user's organization from the email domain", async () => {
+    mockApis(SP_AUTH_STATUS, undefined, {
+      admins: ["admin@databricks.com", "leader@take2games.com"],
+      consumers: ["player@2k.com", "builder@zynga.com", "james@demonware.net"],
+    });
+    renderPermissions();
+
+    for (const organization of [
+      "Databricks",
+      "Take-Two Interactive Software",
+      "2K",
+      "Zynga",
+      "Demonware",
+    ]) {
+      expect(await screen.findByText(organization)).toBeVisible();
+    }
+  });
+
+  it("describes the server bootstrap policy when no admin is configured", async () => {
+    mockApis(SP_AUTH_STATUS, undefined, {
+      admins: [],
+      consumers: [],
+      current_user: "alice@databricks.com",
+    });
+    renderPermissions();
+
+    expect(await screen.findByText(/bootstrap mode: every authenticated user is an implicit admin/i)).toBeVisible();
+    expect(screen.getByText(/server currently treats every authenticated user/i)).toBeVisible();
+    expect(screen.queryByText(/everyone is a consumer/i)).not.toBeInTheDocument();
+  });
+
+  it("renders labeled custom role menus with a DuBois focus treatment and chevron", async () => {
+    mockApis(SP_AUTH_STATUS, undefined, {
+      admins: ["admin@databricks.com", "backup@databricks.com"],
+      consumers: ["viewer@databricks.com"],
+    });
+    renderPermissions();
+
+    const role = await screen.findByRole("combobox", { name: "Role for admin@databricks.com" });
+    expect(role.tagName).toBe("BUTTON");
+    expect(role).toHaveAttribute("aria-haspopup", "listbox");
+    expect(role).toHaveAttribute("aria-expanded", "false");
+    expect(role).toHaveClass("settings-role-select-trigger");
+    expect(role.querySelector("svg[aria-hidden='true']")).toBeInTheDocument();
+    expect(screen.getByRole("combobox", { name: "Role for new user" })).toBeInTheDocument();
+    expect(screen.getByRole("textbox", { name: "User email" })).toBeInTheDocument();
+  });
+
+  it("supports keyboard navigation and role selection without a native select", async () => {
+    mockApis(SP_AUTH_STATUS, undefined, {
+      admins: ["admin@databricks.com", "backup@databricks.com"],
+      consumers: ["viewer@databricks.com"],
+    });
+    renderPermissions();
+
+    const role = await screen.findByRole("combobox", { name: "Role for admin@databricks.com" });
+    role.focus();
+    await userEvent.keyboard("{Enter}");
+
+    expect(role).toHaveAttribute("aria-expanded", "true");
+    expect(screen.getByRole("listbox", { name: "Role for admin@databricks.com" })).toBeInTheDocument();
+    expect(screen.getByRole("option", { name: "Admin" })).toHaveAttribute("aria-selected", "true");
+
+    await userEvent.keyboard("{ArrowUp}{Enter}");
+
+    expect(role).toHaveAttribute("aria-expanded", "false");
+    await waitFor(() => {
+      const saveCall = fetchMock.mock.calls.find(([, init]) => init?.method === "POST");
+      expect(saveCall).toBeDefined();
+      expect(JSON.parse(String(saveCall?.[1]?.body))).toEqual({
+        admins: ["backup@databricks.com"],
+        consumers: ["viewer@databricks.com", "admin@databricks.com"],
+      });
+    });
+  });
+
+  it("aligns existing users and the add-user controls to one five-column grid", async () => {
+    mockApis(SP_AUTH_STATUS, undefined, {
+      admins: ["admin@databricks.com"],
+      consumers: ["viewer@databricks.com"],
+    });
+    renderPermissions();
+
+    const rows = await screen.findAllByTestId("access-user-row");
+    const addRow = screen.getByTestId("access-add-user-row");
+
+    expect(addRow).toHaveClass("settings-access-user-grid");
+    expect(addRow.style.getPropertyValue("--settings-access-grid-columns")).toBe(
+      "minmax(210px, 1fr) 190px 90px 112px 112px",
+    );
+    expect(addRow.children).toHaveLength(5);
+    expect(rows).toHaveLength(2);
+    rows.forEach((row) => {
+      expect(row).toHaveClass("settings-access-user-grid");
+      expect(row.children).toHaveLength(5);
+    });
+    expect(screen.getByRole("button", { name: "Add User" }).parentElement).toHaveClass("settings-user-action-cell");
+  });
+
+  it("disables removal and demotion of the last explicit admin", async () => {
+    mockApis(SP_AUTH_STATUS, undefined, {
+      admins: ["admin@databricks.com"],
+      consumers: ["viewer@databricks.com"],
+    });
+    renderPermissions();
+
+    expect(await screen.findByText(/only explicit admin cannot be removed/i)).toBeVisible();
+    expect(screen.getByRole("combobox", { name: "Role for admin@databricks.com" })).toBeDisabled();
+    const adminRow = screen.getByText("admin@databricks.com").closest("[data-testid='access-user-row']");
+    expect(adminRow?.querySelector("button[aria-describedby='last-admin-explanation']")).toBeDisabled();
+    expect(screen.getByRole("combobox", { name: "Role for viewer@databricks.com" })).toBeEnabled();
   });
 });
 

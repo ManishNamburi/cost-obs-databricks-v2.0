@@ -9,7 +9,7 @@ export interface AppConfigInfo {
   warehouse: { id: string; name: string | null; size: string | null; state: string; source?: "app_resource" | "http_path" | "none" } | null;
   identity: { display_name: string | null; user_name: string | null } | null;
   storage_location: { catalog: string; schema: string; catalog_source?: "env_var" | "default"; schema_source?: "env_var" | "default" } | null;
-  version?: { commit_sha: string };
+  version?: { commit_sha: string; branch?: string; repo?: string; commit_date?: string };
 }
 
 // Small red danger indicator with a hover tooltip for per-column errors.

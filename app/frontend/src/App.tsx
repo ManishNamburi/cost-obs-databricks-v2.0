@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo, useRef, lazy, Suspense } from "react";
 import { QueryClient, QueryClientProvider, useQuery, useQueryClient } from "@tanstack/react-query";
-import { TabRefreshButton } from "@/components/TabRefreshButton";
+import { TabRefreshRegion } from "@/components/TabRefreshRegion";
 import { SetupWizard } from "@/components/SetupWizard";
 import { SummaryCards } from "@/components/SummaryCards";
 import { SpendChart } from "@/components/SpendChart";
@@ -22,6 +22,11 @@ import { CostObsLockup, VersionPill, PageHero } from "@/components/brand";
 import { Spinner } from "@/components/Spinner";
 import { UserMenu } from "@/components/UserMenu";
 import { DeploymentBadgeFromApi } from "@/components/DeploymentBadge";
+import {
+  WarehouseGuidanceBanner,
+  WarehouseHealthCheckBanner,
+} from "@/components/WarehouseGuidanceBanner";
+import type { WarehouseHealth } from "@/utils/warehouseGuidance";
 import { Bot, Check, Copy, Settings } from "lucide-react";
 
 // Retry a dynamic import once on failure (handles cold-start chunk load errors)
@@ -111,6 +116,147 @@ function useKeepAlive() {
 // AI/ML content is now under the AI Gateway tab as the default "Cost" sub-tab
 // (V2.1_SPEC §4.3). "aiml" is no longer a top-level tab value.
 type ViewTab = "dbu" | "sql" | "infra" | "optimizer" | "kpis" | "ai-gateway" | "genie" | "apps" | "tagging" | "use-cases" | "users-groups";
+
+const DASHBOARD_TABS: Array<{ id: ViewTab; label: string; icon: React.ReactNode }> = [
+  {
+    id: "dbu",
+    label: "$DBU Spend",
+    icon: <svg className="mr-2 -mt-0.5 inline h-4 w-4" viewBox="0 0 24 24" fill="currentColor"><path d="M20 4H4L7 8L4 12H20L17 8L20 4Z" opacity="0.9"/><path d="M20 8H4L7 12L4 16H20L17 12L20 8Z" opacity="0.7"/><path d="M20 12H4L7 16L4 20H20L17 16L20 12Z" opacity="0.5"/></svg>,
+  },
+  {
+    id: "sql",
+    label: "SQL",
+    icon: <svg className="mr-2 -mt-0.5 inline h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 3v2m6-2v2M9 19v2m6-2v2M5 9H3m2 6H3m18-6h-2m2 6h-2M7 19h10a2 2 0 002-2V7a2 2 0 00-2-2H7a2 2 0 00-2 2v10a2 2 0 002 2zM9 9h6v6H9V9z" /></svg>,
+  },
+  {
+    id: "ai-gateway",
+    label: "AI Gateway",
+    icon: <svg className="mr-2 -mt-0.5 inline h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 9l3 3-3 3m5 0h3M5 20h14a2 2 0 002-2V6a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" /></svg>,
+  },
+  {
+    id: "genie",
+    label: "Genie",
+    icon: <svg className="mr-2 -mt-0.5 inline h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" /></svg>,
+  },
+  {
+    id: "apps",
+    label: "Apps",
+    icon: <svg className="mr-2 -mt-0.5 inline h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2V6zM14 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2V6zM4 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2v-2zM14 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2v-2z" /></svg>,
+  },
+  {
+    id: "tagging",
+    label: "Tagging",
+    icon: <svg className="mr-2 -mt-0.5 inline h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 7h.01M7 3h5c.512 0 1.024.195 1.414.586l7 7a2 2 0 010 2.828l-7 7a2 2 0 01-2.828 0l-7-7A1.994 1.994 0 013 12V7a4 4 0 014-4z" /></svg>,
+  },
+  {
+    id: "users-groups",
+    label: "Users",
+    icon: <svg className="mr-2 -mt-0.5 inline h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z" /></svg>,
+  },
+  {
+    id: "kpis",
+    label: "KPIs & Trends",
+    icon: <svg className="mr-2 -mt-0.5 inline h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" /></svg>,
+  },
+  {
+    id: "infra",
+    label: "Cloud Costs",
+    icon: <svg className="mr-2 -mt-0.5 inline h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 15a4 4 0 004 4h9a5 5 0 10-.1-9.999 5.002 5.002 0 10-9.78 2.096A4.001 4.001 0 003 15z" /></svg>,
+  },
+  {
+    id: "optimizer",
+    label: "Optimize",
+    icon: <svg className="mr-2 -mt-0.5 inline h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6V4m0 2a2 2 0 100 4m0-4a2 2 0 110 4m-6 8a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4m6 6v10m6-2a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4" /></svg>,
+  },
+];
+
+const TAB_LOADING_SECTIONS: Record<ViewTab, string[]> = {
+  dbu: ["Spend Over Time", "Spend by Product", "Spend by SKU", "Workspace Breakdown", "Jobs and Pipelines", "Interactive Compute"],
+  sql: ["Query Spend Summary", "Spend by Source", "Warehouse Spend", "SKU Breakdown", "Top Users by Query Spend", "Top Queries"],
+  infra: ["Infrastructure Costs", "Cluster Costs", "Usage by Instance Family", "Cluster Cost Breakdown"],
+  optimizer: ["Idle Time Analysis", "Rightsizing Recommendations"],
+  kpis: ["Platform KPIs", "Data Activity", "Compute Activity", "Spend Changes and Trends"],
+  "ai-gateway": ["AI Gateway Spend", "Routes", "Models", "Users"],
+  genie: ["Genie Spend", "Spend by Surface", "Workspaces"],
+  apps: ["Apps Spend Over Time", "Apps by Spend", "Connected Resources"],
+  tagging: ["Total Tag Coverage", "Tag Coverage Over Time", "Top Tags", "Spend by Key", "Untagged Resources"],
+  "users-groups": ["Top Users by Spend", "User Spend by Product", "User Activity", "Service Principal Activity"],
+  "use-cases": ["Use Cases"],
+};
+
+export function DashboardTabNavigation({
+  activeTab,
+  visibility,
+  loading,
+  onChange,
+}: {
+  activeTab: ViewTab;
+  visibility: TabVisibility;
+  loading?: Partial<Record<ViewTab, boolean>>;
+  onChange: (tab: ViewTab) => void;
+}) {
+  const tabRefs = useRef<Partial<Record<ViewTab, HTMLButtonElement | null>>>({});
+  const visibleTabs = DASHBOARD_TABS.filter(({ id }) => visibility[id]);
+
+  const moveFocus = (current: ViewTab, key: string) => {
+    const currentIndex = visibleTabs.findIndex(({ id }) => id === current);
+    if (currentIndex < 0) return;
+    let nextIndex: number;
+    if (key === "Home") nextIndex = 0;
+    else if (key === "End") nextIndex = visibleTabs.length - 1;
+    else if (key === "ArrowRight") nextIndex = (currentIndex + 1) % visibleTabs.length;
+    else if (key === "ArrowLeft") nextIndex = (currentIndex - 1 + visibleTabs.length) % visibleTabs.length;
+    else return;
+
+    const nextTab = visibleTabs[nextIndex].id;
+    onChange(nextTab);
+    tabRefs.current[nextTab]?.focus();
+  };
+
+  return (
+    <div className="mt-4 overflow-x-auto overflow-y-hidden" style={{ borderBottom: "1px solid var(--hairline)" }}>
+      <nav
+        role="tablist"
+        aria-label="Dashboard views"
+        className="-mb-px flex min-w-max justify-start space-x-7 px-1 sm:justify-center [&_svg]:h-3.75 [&_svg]:w-3.75"
+      >
+        {visibleTabs.map(({ id, label, icon }) => (
+          <button
+            key={id}
+            ref={(element) => { tabRefs.current[id] = element; }}
+            id={`dashboard-tab-${id}`}
+            type="button"
+            role="tab"
+            aria-label={label}
+            aria-selected={activeTab === id}
+            aria-busy={loading?.[id] || undefined}
+            aria-controls={`dashboard-panel-${id}`}
+            tabIndex={activeTab === id ? 0 : -1}
+            onClick={() => onChange(id)}
+            onKeyDown={(event) => {
+              if (["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) {
+                event.preventDefault();
+                moveFocus(id, event.key);
+              }
+            }}
+            className={`whitespace-nowrap border-b-2 px-1 py-3 text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-gray-400 ${
+              activeTab === id
+                ? "border-lava text-lava"
+                : "border-transparent text-slate hover:bg-oat-page hover:text-ink"
+            }`}
+          >
+            {loading?.[id] ? (
+              <span className="mr-2 -mt-0.5 inline-flex h-4 w-4 items-center justify-center" aria-hidden="true">
+                <Spinner size="xs" />
+              </span>
+            ) : icon}
+            {label}
+          </button>
+        ))}
+      </nav>
+    </div>
+  );
+}
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -375,12 +521,24 @@ function Dashboard() {
   const setupStatusAbortRef = useRef<AbortController | null>(null);
   const rqClient = useQueryClient();
 
+  const [tabRefreshing, setTabRefreshing] = useState(false);
+  const [refreshError, setRefreshError] = useState<string | null>(null);
   const handleTabRefresh = async () => {
-    await rqClient.cancelQueries();
-    // Await cache clear so server-side cache is empty before any query fires
-    await fetch("/api/cache/clear", { method: "POST" }).catch(() => {});
-    // refetchQueries bypasses enabled:false — forces all tab-gated queries to fetch too
-    await rqClient.refetchQueries({ type: "all" });
+    if (tabRefreshing) return;
+    setTabRefreshing(true);
+    setRefreshError(null);
+    try {
+      await rqClient.cancelQueries();
+      // Await cache clear so server-side cache is empty before any query fires
+      await fetch("/api/cache/clear", { method: "POST" }).catch(() => {});
+      // refetchQueries bypasses enabled:false — forces all tab-gated queries to fetch too
+      await rqClient.refetchQueries({ type: "all" });
+    } catch (error) {
+      console.error("Failed to refresh tab", error);
+      setRefreshError("This tab could not be refreshed. Retry shortly.");
+    } finally {
+      setTabRefreshing(false);
+    }
   };
 
   // On every load, verify setup status with the server.
@@ -514,12 +672,12 @@ function Dashboard() {
 
   // Central warehouse warming poller — single source of truth for warehouse state.
   // Polls every 5s while warming_up, 15s once warm (catches post-idle auto-stop within ~15s).
-  const { data: warehouseStatus } = useQuery<{
-    status: "warm" | "warming_up" | "unavailable";
-    state?: string;
-    warehouse_id?: string | null;
-    warehouse_name?: string | null;
-  }>({
+  const {
+    data: warehouseStatus,
+    isError: warehouseHealthCheckFailed,
+    isFetching: warehouseHealthChecking,
+    refetch: retryWarehouseHealthCheck,
+  } = useQuery<WarehouseHealth>({
     queryKey: ["health", "sql-warehouse"],
     queryFn: () => fetch("/api/health/sql-warehouse").then(r => r.ok ? r.json().catch(() => ({ status: "warm" })) : { status: "warm" }).catch(() => ({ status: "warm" })),
     refetchInterval: (query) => (query.state.data?.status === "warming_up") ? 5000 : 15000,
@@ -623,11 +781,11 @@ function Dashboard() {
 
   const { data: dbsqlData, isLoading: dbsqlLoading, isFetching: dbsqlFetching } = useDBSQLQueryCosts(dateRange, _wsIds, true);
   const { data: dbsqlTopQueriesData, isLoading: dbsqlTopQueriesLoading } = useDBSQLTopQueries(dateRange, _wsIds, warehouseReady);
-  const { data: usersGroupsData } = useUsersGroupsBundle(dateRange, _wsIds, true);
+  const { data: usersGroupsData, isLoading: usersGroupsLoading } = useUsersGroupsBundle(dateRange, _wsIds, true);
 
   // Optimizer tab — prefetch rightsizing and idle-time in background so the tab loads instantly,
   // and capture the data so the PDF export can include it under the Optimize section.
-  const { data: optimizeRightsizingData } = useQuery<{
+  const { data: optimizeRightsizingData, isLoading: optimizeRightsizingLoading } = useQuery<{
     available: boolean;
     warehouses_analyzed: number;
     recommendations: Array<{
@@ -647,7 +805,7 @@ function Dashboard() {
     // this prefetched at Dashboard mount and could starve concurrent bundles.
     enabled: activeTab === "optimizer",
   });
-  const { data: optimizeIdleData } = useQuery<{
+  const { data: optimizeIdleData, isLoading: optimizeIdleLoading } = useQuery<{
     available: boolean;
     serverless_detected: boolean;
     warehouses: Array<{
@@ -862,6 +1020,19 @@ function Dashboard() {
     );
   };
 
+  const tabLoadingFlags: Partial<Record<ViewTab, boolean>> = {
+    dbu: bundleLoading,
+    sql: sqlLoading || dbsqlLoading,
+    infra: infraBundleLoading,
+    optimizer: optimizeRightsizingLoading || optimizeIdleLoading,
+    kpis: kpisLoading,
+    "ai-gateway": aiGatewayLoading,
+    genie: genieCostLoading,
+    apps: appsLoading,
+    tagging: taggingLoading,
+    "users-groups": usersGroupsLoading,
+  };
+
   if (setupCheckPending) {
     return (
       <div className="flex min-h-screen flex-col items-center justify-center gap-4" style={{ backgroundColor: '#F9F7F4' }}>
@@ -1058,6 +1229,19 @@ function Dashboard() {
         </div>
       </div>
 
+      {warehouseHealthCheckFailed && (
+        <WarehouseHealthCheckBanner
+          isRetrying={warehouseHealthChecking}
+          onRetry={() => { void retryWarehouseHealthCheck(); }}
+        />
+      )}
+      {warehouseStatus && (
+        <WarehouseGuidanceBanner
+          key={warehouseStatus.warehouse_id ?? "unbound"}
+          warehouse={warehouseStatus}
+          workspaceHost={accountInfo?.host}
+        />
+      )}
       <AccountPricingBanner />
       <SpGrantsBanner onOpenSettings={() => setShowSettings(true)} />
 
@@ -1074,177 +1258,36 @@ function Dashboard() {
               <DateRangePicker value={dateRange} onChange={setDateRange} />
             </div>
           </div>
-          {/* Tab Navigation */}
-          <div className="mt-4 overflow-x-auto overflow-y-hidden" style={{ borderBottom: "1px solid var(--hairline)" }}>
-            <nav className="-mb-px flex justify-center space-x-4 min-w-max">
-              {tabVisibility.dbu && (
-              <button
-                onClick={() => setActiveTab("dbu")}
-                className={`whitespace-nowrap border-b-2 px-1 py-3 text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-gray-400 ${
-                  activeTab === "dbu"
-                    ? "border-lava text-lava"
-                    : "border-transparent text-slate hover:bg-oat-page hover:text-ink"
-                }`}
-              >
-                <svg className="mr-2 -mt-0.5 inline h-4 w-4" viewBox="0 0 24 24" fill="currentColor">
-                  <path d="M20 4H4L7 8L4 12H20L17 8L20 4Z" opacity="0.9"/>
-                  <path d="M20 8H4L7 12L4 16H20L17 12L20 8Z" opacity="0.7"/>
-                  <path d="M20 12H4L7 16L4 20H20L17 16L20 12Z" opacity="0.5"/>
-                </svg>
-                $DBU Spend
-              </button>
-              )}
-              {tabVisibility.sql && (
-              <button
-                onClick={() => setActiveTab("sql")}
-                className={`whitespace-nowrap border-b-2 px-1 py-3 text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-gray-400 ${
-                  activeTab === "sql"
-                    ? "border-lava text-lava"
-                    : "border-transparent text-slate hover:bg-oat-page hover:text-ink"
-                }`}
-              >
-                <svg className="mr-2 -mt-0.5 inline h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 3v2m6-2v2M9 19v2m6-2v2M5 9H3m2 6H3m18-6h-2m2 6h-2M7 19h10a2 2 0 002-2V7a2 2 0 00-2-2H7a2 2 0 00-2 2v10a2 2 0 002 2zM9 9h6v6H9V9z" />
-                </svg>
-                SQL
-              </button>
-              )}
-              {/* AI/ML tab removed — content merged into AI Gateway per V2.1_SPEC §4.3 */}
-              {tabVisibility["ai-gateway"] && (
-              <button
-                onClick={() => setActiveTab("ai-gateway")}
-                className={`whitespace-nowrap border-b-2 px-1 py-3 text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-gray-400 ${
-                  activeTab === "ai-gateway"
-                    ? "border-lava text-lava"
-                    : "border-transparent text-slate hover:bg-oat-page hover:text-ink"
-                }`}
-              >
-                <svg className="mr-2 -mt-0.5 inline h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 9l3 3-3 3m5 0h3M5 20h14a2 2 0 002-2V6a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
-                </svg>
-                AI Gateway
-              </button>
-              )}
-              {tabVisibility.genie && (
-              <button
-                onClick={() => setActiveTab("genie")}
-                className={`whitespace-nowrap border-b-2 px-1 py-3 text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-gray-400 ${
-                  activeTab === "genie"
-                    ? "border-lava text-lava"
-                    : "border-transparent text-slate hover:bg-oat-page hover:text-ink"
-                }`}
-              >
-                <svg className="mr-2 -mt-0.5 inline h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
-                </svg>
-                Genie
-              </button>
-              )}
-              {tabVisibility.apps && (
-              <button
-                onClick={() => setActiveTab("apps")}
-                className={`whitespace-nowrap border-b-2 px-1 py-3 text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-gray-400 ${
-                  activeTab === "apps"
-                    ? "border-lava text-lava"
-                    : "border-transparent text-slate hover:bg-oat-page hover:text-ink"
-                }`}
-              >
-                <svg className="mr-2 -mt-0.5 inline h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2V6zM14 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2V6zM4 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2v-2zM14 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2v-2z" />
-                </svg>
-                Apps
-              </button>
-              )}
-              {tabVisibility.tagging && (
-              <button
-                onClick={() => setActiveTab("tagging")}
-                className={`whitespace-nowrap border-b-2 px-1 py-3 text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-gray-400 ${
-                  activeTab === "tagging"
-                    ? "border-lava text-lava"
-                    : "border-transparent text-slate hover:bg-oat-page hover:text-ink"
-                }`}
-              >
-                <svg className="mr-2 -mt-0.5 inline h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 7h.01M7 3h5c.512 0 1.024.195 1.414.586l7 7a2 2 0 010 2.828l-7 7a2 2 0 01-2.828 0l-7-7A1.994 1.994 0 013 12V7a4 4 0 014-4z" />
-                </svg>
-                Tagging
-              </button>
-              )}
-              {tabVisibility["users-groups"] && (
-              <button
-                onClick={() => setActiveTab("users-groups")}
-                className={`whitespace-nowrap border-b-2 px-1 py-3 text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-gray-400 ${
-                  activeTab === "users-groups"
-                    ? "border-lava text-lava"
-                    : "border-transparent text-slate hover:bg-oat-page hover:text-ink"
-                }`}
-              >
-                <svg className="mr-2 -mt-0.5 inline h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z" />
-                </svg>
-                Users
-              </button>
-              )}
-              {tabVisibility.kpis && (
-              <button
-                onClick={() => setActiveTab("kpis")}
-                className={`whitespace-nowrap border-b-2 px-1 py-3 text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-gray-400 ${
-                  activeTab === "kpis"
-                    ? "border-lava text-lava"
-                    : "border-transparent text-slate hover:bg-oat-page hover:text-ink"
-                }`}
-              >
-                <svg className="mr-2 -mt-0.5 inline h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
-                </svg>
-                KPIs & Trends
-              </button>
-              )}
-              {tabVisibility.infra && (
-              <button
-                onClick={() => setActiveTab("infra")}
-                className={`whitespace-nowrap border-b-2 px-1 py-3 text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-gray-400 ${
-                  activeTab === "infra"
-                    ? "border-lava text-lava"
-                    : "border-transparent text-slate hover:bg-oat-page hover:text-ink"
-                }`}
-              >
-                <svg className="mr-2 -mt-0.5 inline h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 15a4 4 0 004 4h9a5 5 0 10-.1-9.999 5.002 5.002 0 10-9.78 2.096A4.001 4.001 0 003 15z" />
-                </svg>
-                Cloud Costs
-              </button>
-              )}
-              {tabVisibility.optimizer && (
-              <button
-                onClick={() => setActiveTab("optimizer")}
-                className={`whitespace-nowrap border-b-2 px-1 py-3 text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-gray-400 ${
-                  activeTab === "optimizer"
-                    ? "border-lava text-lava"
-                    : "border-transparent text-slate hover:bg-oat-page hover:text-ink"
-                }`}
-              >
-                <svg className="mr-2 -mt-0.5 inline h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6V4m0 2a2 2 0 100 4m0-4a2 2 0 110 4m-6 8a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4m6 6v10m6-2a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4" />
-                </svg>
-                Optimize
-              </button>
-              )}
-            </nav>
-          </div>
+          <DashboardTabNavigation
+            activeTab={activeTab}
+            visibility={tabVisibility}
+            loading={{
+              ...tabLoadingFlags,
+              ...(tabRefreshing ? { [activeTab]: true } : {}),
+            }}
+            onChange={setActiveTab}
+          />
         </div>
       </header>
       </div>{/* end sticky top chrome */}
 
       <main className="mx-auto max-w-7xl px-4 py-6 sm:px-6 lg:px-8">
-        <div key={activeTab} className="animate-fade-in relative">
-          {/* Per-tab refresh button — top-right corner, across from each tab's title.
-              Hidden on infra (cloud costs) tab. */}
-          {activeTab !== "infra" && activeTab !== "optimizer" && (
-            <div className="absolute right-0 top-1 z-20">
-              <TabRefreshButton onRefresh={handleTabRefresh} />
-            </div>
-          )}
+        <div
+          key={activeTab}
+          id={`dashboard-panel-${activeTab}`}
+          role="tabpanel"
+          aria-labelledby={`dashboard-tab-${activeTab}`}
+          tabIndex={0}
+          className="animate-fade-in relative focus-visible:outline-none focus-visible:shadow-(--focus)"
+        >
+        <TabRefreshRegion
+          isLoading={Boolean(tabLoadingFlags[activeTab]) && !tabRefreshing}
+          isRefreshing={tabRefreshing}
+          loadingSections={TAB_LOADING_SECTIONS[activeTab]}
+          onRefresh={handleTabRefresh}
+          onDismissRefreshError={() => setRefreshError(null)}
+          refreshError={refreshError}
+        >
         <Suspense fallback={
           <div className="flex h-64 flex-col items-center justify-center gap-3">
             <Spinner size="md" />
@@ -1436,6 +1479,7 @@ function Dashboard() {
           </TabErrorBoundary>
         ) : null}
         </Suspense>
+        </TabRefreshRegion>
         </div>
       </main>
 

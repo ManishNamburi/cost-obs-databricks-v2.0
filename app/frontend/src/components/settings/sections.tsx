@@ -4,6 +4,7 @@ import type { AppSettings, TabVisibility, SettingsCapabilities } from "../Settin
 import { SettingsConfig } from "./SettingsConfig";
 import type { AppConfigInfo } from "./SettingsConfig";
 import { SettingsPermissions } from "./SettingsPermissions";
+import { SettingsResources } from "./SettingsResources";
 import {
   SectionTitle, Group, Row, Toggle, Select, TextInput, UnitInput, Badge, MonoChip,
   SecondaryButton, LinkButton, Callout, useToast, T, MONO,
@@ -205,27 +206,7 @@ export function AlertsSection({ localSettings, updateSetting, caps }: CommonProp
 
 // ── Resources (read-only) ─────────────────────────────────────────────────────
 export function ResourcesSection() {
-  const { data: appConfig } = useQuery<{
-    warehouse: { id: string; name: string | null; size: string | null; state: string } | null;
-    storage_location: { catalog: string; schema: string } | null;
-  } | null>({ queryKey: ["app-config"], queryFn: () => fetch("/api/settings/config").then(r => r.json()).catch(() => null) });
-  const wh = appConfig?.warehouse;
-  const loc = appConfig?.storage_location;
-  const dot = (color: string) => <span style={{ width: 8, height: 8, borderRadius: 999, backgroundColor: color, display: "inline-block" }} />;
-  return (
-    <div>
-      <SectionTitle title="Resources" subtitle="Bound compute and storage. These are set in app.yaml and change only on redeploy." />
-      <Group>
-        <Row first label={<span className="inline-flex items-center gap-2">{dot(wh?.state === "RUNNING" ? "#277C43" : "#8CA0B0")} SQL warehouse</span>}
-          helper={wh ? `${wh.name || wh.id} · ${wh.size || "—"} · ${wh.state}` : "No warehouse bound."}
-          control={<MonoChip>resource: sql-warehouse</MonoChip>} />
-        <Row label="Permissions table" helper="Roles persist here across redeploys."
-          control={<MonoChip>{loc?.catalog && loc?.schema ? `${loc.catalog}.${loc.schema}.app_user_permissions` : "—"}</MonoChip>} />
-        <Row label="Workspace filter pool" helper="Set via COST_OBS_WORKSPACES at deploy time."
-          control={<span style={{ fontSize: 12, color: T.textSecondary }}>Redeploy to change</span>} />
-      </Group>
-    </div>
-  );
+  return <SettingsResources />;
 }
 
 // ── Experimental (admin-only) ─────────────────────────────────────────────────

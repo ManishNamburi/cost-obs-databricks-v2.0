@@ -231,8 +231,8 @@
 
 .settings-role-select-trigger:focus-visible,
 .settings-role-select-trigger[aria-expanded="true"] {
-  border-color: var(--lava, #FF3621);
-  box-shadow: 0 0 0 2px rgba(255, 54, 33, 0.22);
+  border-color: var(--dob-primary-fill, #2272B4);
+  box-shadow: 0 0 0 2px var(--dob-focus-ring, rgba(34, 114, 180, 0.22));
 }
 
 .settings-role-select-trigger:disabled {
@@ -289,7 +289,7 @@
 .settings-role-select-option svg {
   width: 14px;
   height: 14px;
-  color: var(--lava, #FF3621);
+  color: var(--dob-primary-fill, #2272B4);
 }
 
 .settings-danger-action-slot {
