@@ -249,3 +249,39 @@ def test_sql_tool_and_kpis_templates_are_postgres():
         assert "`" not in sql
         assert "%(start_date)s" in sql and "%(end_date)s" in sql
         assert "system." not in sql
+
+
+def test_remaining_gold_tables_registered():
+    from backend.materialized_views_extra import EXTRA_CREATE, EXTRA_MERGE, EXTRA_TABLE_REFRESH
+
+    for name in (
+        "daily_user_spend",
+        "daily_untagged_objects",
+        "daily_aiml_models",
+        "daily_aiml_ml_clusters",
+        "daily_aiml_agents",
+        "daily_object_spend",
+        "daily_infra_cluster_spend",
+        "daily_dbsql_warehouse_type",
+        "warehouse_optimizer_findings",
+    ):
+        assert name in EXTRA_CREATE
+        assert name in EXTRA_TABLE_REFRESH
+        assert "{catalog}" in EXTRA_CREATE[name]
+    assert "daily_user_spend" in EXTRA_MERGE
+    assert "warehouse_optimizer_findings" not in EXTRA_MERGE  # always full rebuild
+
+
+def test_remaining_pg_templates_are_postgres():
+    from backend.lakebase_read import (
+        PG_USERS_SUMMARY, PG_USERS_TOP, PG_AIML_MODELS, PG_INFRA_CLUSTERS,
+        PG_WH_META, PG_OBJECT_SPEND, PG_AI_GATEWAY_ROWS, PG_UNTAGGED,
+    )
+    for sql in (PG_USERS_SUMMARY, PG_USERS_TOP, PG_AIML_MODELS, PG_INFRA_CLUSTERS, PG_WH_META, PG_OBJECT_SPEND, PG_AI_GATEWAY_ROWS):
+        formatted = sql.format(ws_filter="")
+        assert "`" not in formatted
+        assert "system." not in formatted
+        assert "%(start_date)s" in formatted
+    untagged = PG_UNTAGGED.format(ws_filter="", id_col="cluster_id", name_col="cluster_name")
+    assert "FROM daily_untagged_objects" in untagged
+    assert "`" not in untagged

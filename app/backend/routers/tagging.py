@@ -675,7 +675,11 @@ async def get_untagged_clusters(
         "end_date": end_date or get_default_end_date(),
     }
 
-    results = await asyncio.to_thread(execute_query, UNTAGGED_CLUSTERS, params)
+    from backend.lakebase_read import PG_UNTAGGED, gold_read
+    results = await asyncio.to_thread(
+        gold_read, "untagged_clusters", PG_UNTAGGED, {**params, "object_type": "cluster"}, "",
+        UNTAGGED_CLUSTERS, extra_format={"id_col": "cluster_id", "name_col": "cluster_name"},
+    )
 
     clusters = []
     total_spend = 0
@@ -716,7 +720,11 @@ async def get_untagged_jobs(
         "end_date": end_date or get_default_end_date(),
     }
 
-    results = await asyncio.to_thread(execute_query, UNTAGGED_JOBS, params)
+    from backend.lakebase_read import PG_UNTAGGED, gold_read
+    results = await asyncio.to_thread(
+        gold_read, "untagged_jobs", PG_UNTAGGED, {**params, "object_type": "job"}, "",
+        UNTAGGED_JOBS, extra_format={"id_col": "job_id", "name_col": "job_name"},
+    )
 
     jobs = []
     total_spend = 0
@@ -822,7 +830,11 @@ async def get_untagged_pipelines(
         "end_date": end_date or get_default_end_date(),
     }
 
-    results = await asyncio.to_thread(execute_query, UNTAGGED_PIPELINES, params)
+    from backend.lakebase_read import PG_UNTAGGED, gold_read
+    results = await asyncio.to_thread(
+        gold_read, "untagged_pipelines", PG_UNTAGGED, {**params, "object_type": "pipeline"}, "",
+        UNTAGGED_PIPELINES, extra_format={"id_col": "pipeline_id", "name_col": "pipeline_name"},
+    )
     results = await asyncio.to_thread(_enrich_pipeline_rows, results)
 
     pipelines = []
@@ -862,7 +874,11 @@ async def get_untagged_warehouses(
         "end_date": end_date or get_default_end_date(),
     }
 
-    results = await asyncio.to_thread(execute_query, UNTAGGED_WAREHOUSES, params)
+    from backend.lakebase_read import PG_UNTAGGED, gold_read
+    results = await asyncio.to_thread(
+        gold_read, "untagged_warehouses", PG_UNTAGGED, {**params, "object_type": "warehouse"}, "",
+        UNTAGGED_WAREHOUSES, extra_format={"id_col": "warehouse_id", "name_col": "warehouse_name"},
+    )
 
     warehouses = []
     total_spend = 0
@@ -901,7 +917,11 @@ async def get_untagged_endpoints(
         "end_date": end_date or get_default_end_date(),
     }
 
-    results = await asyncio.to_thread(execute_query, UNTAGGED_ENDPOINTS, params)
+    from backend.lakebase_read import PG_UNTAGGED, gold_read
+    results = await asyncio.to_thread(
+        gold_read, "untagged_endpoints", PG_UNTAGGED, {**params, "object_type": "endpoint"}, "",
+        UNTAGGED_ENDPOINTS, extra_format={"id_col": "endpoint_name", "name_col": "endpoint_name"},
+    )
 
     endpoints = []
     total_spend = 0
@@ -1225,8 +1245,8 @@ async def get_tagging_dashboard_bundle(
         return execute_query(fallback_sql, query_params)
 
     from backend.lakebase_read import (
-        PG_COST_BY_TAG, PG_COST_BY_TAG_KEY, PG_TAG_COVERAGE_TIMESERIES,
-        dual_read, warehouse_view_fallback,
+        PG_COST_BY_TAG, PG_COST_BY_TAG_KEY, PG_TAG_COVERAGE_TIMESERIES, PG_UNTAGGED,
+        dual_read, gold_read, warehouse_view_fallback,
     )
     live_ok = warehouse_view_fallback()
     mv_ws_clause = wf.build_ws_filter_clause(col="workspace_id", id_list=id_list)
@@ -1235,21 +1255,29 @@ async def get_tagging_dashboard_bundle(
         live = (lambda: execute_query(live_sql, query_params)) if live_ok else None
         return dual_read(name, pg, query_params, ws_pg, fetch_delta=live)
 
+    def _untagged(gold_name: str, kind: str, id_col: str, name_col: str, live_sql: str) -> list[dict[str, Any]]:
+        p = {**params, "object_type": kind}
+        return gold_read(
+            gold_name,
+            PG_UNTAGGED,
+            p,
+            mv_ws_clause,
+            live_sql,
+            extra_format={"id_col": id_col, "name_col": name_col},
+        )
+
     queries = [
         ("summary", lambda: summary_query(params)),
         ("tag_stats", lambda: tag_stats_query(params)),
         ("cost_by_tag", lambda: _tag_gold("cost_by_tag", PG_COST_BY_TAG, params, _ws(COST_BY_TAG), mv_ws_clause)),
         ("tag_keys", lambda: _tag_gold("cost_by_tag_key", PG_COST_BY_TAG_KEY, params, _ws(COST_BY_TAG_KEY), mv_ws_clause)),
         ("timeseries", lambda: _tag_gold("tag_coverage_timeseries", PG_TAG_COVERAGE_TIMESERIES, params, _ws(TAG_COVERAGE_TIMESERIES), mv_ws_clause)),
+        ("clusters", lambda: _untagged("untagged_clusters", "cluster", "cluster_id", "cluster_name", _ws(UNTAGGED_CLUSTERS))),
+        ("jobs", lambda: _untagged("untagged_jobs", "job", "job_id", "job_name", _ws(UNTAGGED_JOBS))),
+        ("pipelines", lambda: _untagged("untagged_pipelines", "pipeline", "pipeline_id", "pipeline_name", _ws(UNTAGGED_PIPELINES))),
+        ("warehouses", lambda: _untagged("untagged_warehouses", "warehouse", "warehouse_id", "warehouse_name", _ws(UNTAGGED_WAREHOUSES))),
+        ("endpoints", lambda: _untagged("untagged_endpoints", "endpoint", "endpoint_name", "endpoint_name", _ws(UNTAGGED_ENDPOINTS))),
     ]
-    if live_ok:
-        queries.extend([
-            ("clusters", lambda: query_with_fallback(_ws(UNTAGGED_CLUSTERS_ENRICHED), _ws(UNTAGGED_CLUSTERS), params)),
-            ("jobs", lambda: lakeflow_query("lakeflow_jobs", _ws(UNTAGGED_JOBS_ENRICHED), _ws(UNTAGGED_JOBS), params, jobs_ok)),
-            ("pipelines", lambda: lakeflow_query("lakeflow_pipelines", _ws(UNTAGGED_PIPELINES_ENRICHED), _ws(UNTAGGED_PIPELINES), params, pipelines_ok)),
-            ("warehouses", lambda: query_with_fallback(_ws(UNTAGGED_WAREHOUSES_ENRICHED), _ws(UNTAGGED_WAREHOUSES), params)),
-            ("endpoints", lambda: execute_query(_ws(UNTAGGED_ENDPOINTS), params)),
-        ])
 
     try:
         results = await asyncio.to_thread(execute_queries_parallel, queries, timeout=90.0)

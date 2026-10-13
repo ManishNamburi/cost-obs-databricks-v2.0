@@ -197,15 +197,57 @@ def _build_recommendation(
 
 
 def _run_health_queries() -> dict[str, Any]:
-    """Execute the three health queries synchronously (called via asyncio.to_thread)."""
+    """Serve Lakebase gold findings; live warehouse SQL only when fallback is allowed."""
+    from backend.lakebase_read import PG_WAREHOUSE_OPTIMIZER, gold_read, warehouse_view_fallback
+
+    gold_rows = gold_read("warehouse_optimizer", PG_WAREHOUSE_OPTIMIZER, {})
+    if gold_rows:
+        recommendations: list[dict] = []
+        seen_wids: set[str] = set()
+        for row in gold_rows:
+            rtype = row.get("recommendation_type") or ""
+            extra = {}
+            if rtype == "IDLE_RUNNING":
+                extra = {"last_event_time": row.get("extra_1")}
+            elif rtype == "OVER_SCALED":
+                extra = {
+                    "max_clusters_observed": row.get("extra_n1"),
+                    "max_concurrent": row.get("extra_n2"),
+                }
+            elif rtype == "OVERSIZED":
+                extra = {
+                    "avg_queue_ms": row.get("extra_n1"),
+                    "median_duration_seconds": row.get("extra_n2"),
+                    "query_count": row.get("extra_n3"),
+                }
+            mapped = {**row, **extra}
+            recommendations.append(_build_recommendation(mapped, rtype, extra))
+            seen_wids.add(row.get("warehouse_id") or "")
+        order = {"IDLE_RUNNING": 0, "OVER_SCALED": 1, "OVERSIZED": 2}
+        recommendations.sort(key=lambda r: order.get(r["recommendation_type"], 9))
+        return {
+            "available": True,
+            "recommendations": recommendations,
+            "warehouses_analyzed": len(seen_wids),
+            "generated_at": datetime.now(timezone.utc).isoformat(),
+        }
+
+    if not warehouse_view_fallback():
+        return {
+            "available": True,
+            "recommendations": [],
+            "warehouses_analyzed": 0,
+            "generated_at": datetime.now(timezone.utc).isoformat(),
+        }
+
     results = execute_queries_parallel([
         ("idle", lambda: execute_query(_SQL_IDLE)),
         ("over_scaled", lambda: execute_query(_SQL_OVER_SCALED)),
         ("oversized", lambda: execute_query(_SQL_OVERSIZED)),
     ], timeout=90.0)
 
-    recommendations: list[dict] = []
-    seen_wids: set[str] = set()
+    recommendations = []
+    seen_wids = set()
 
     for row in (results.get("idle") or []):
         recommendations.append(_build_recommendation(row, "IDLE_RUNNING"))

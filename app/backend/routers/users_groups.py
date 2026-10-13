@@ -462,14 +462,18 @@ async def get_users_groups_bundle(
         "end_date": (date.today() - timedelta(days=1)).isoformat(),
     }
 
+    from backend.lakebase_read import (
+        PG_USERS_BY_WORKSPACE, PG_USERS_GROWTH, PG_USERS_PRODUCT, PG_USERS_SPEND_GROWTH,
+        PG_USERS_SUMMARY, PG_USERS_TIMESERIES, PG_USERS_TOP, gold_read,
+    )
     queries = [
-        ("summary", lambda: execute_query(_ws(USERS_SUMMARY), params)),
-        ("top_users", lambda: execute_query(_ws(USERS_TOP_SPEND), params)),
-        ("product_breakdown", lambda: execute_query(_ws(USERS_PRODUCT_BREAKDOWN), params)),
-        ("timeseries", lambda: execute_query(_ws(USERS_TIMESERIES), params)),
-        ("by_workspace", lambda: execute_query(_ws(USERS_BY_WORKSPACE), params)),
-        ("spend_growth", lambda: execute_query(_ws(USERS_SPEND_GROWTH), growth_params)),
-        ("user_growth", lambda: execute_query(_ws(USERS_GROWTH), growth_date_params)),
+        ("summary", lambda: gold_read("users_summary", PG_USERS_SUMMARY, params, ws_clause, _ws(USERS_SUMMARY))),
+        ("top_users", lambda: gold_read("users_top", PG_USERS_TOP, params, ws_clause, _ws(USERS_TOP_SPEND))),
+        ("product_breakdown", lambda: gold_read("users_product", PG_USERS_PRODUCT, params, ws_clause, _ws(USERS_PRODUCT_BREAKDOWN))),
+        ("timeseries", lambda: gold_read("users_timeseries", PG_USERS_TIMESERIES, params, ws_clause, _ws(USERS_TIMESERIES))),
+        ("by_workspace", lambda: gold_read("users_by_workspace", PG_USERS_BY_WORKSPACE, params, ws_clause, _ws(USERS_BY_WORKSPACE))),
+        ("spend_growth", lambda: gold_read("users_spend_growth", PG_USERS_SPEND_GROWTH, growth_params, ws_clause, _ws(USERS_SPEND_GROWTH))),
+        ("user_growth", lambda: gold_read("users_growth", PG_USERS_GROWTH, growth_date_params, "", USERS_GROWTH)),
     ]
     try:
         results = await asyncio.to_thread(execute_queries_parallel, queries, timeout=90.0)
@@ -600,7 +604,8 @@ async def get_user_growth() -> dict[str, Any]:
     start_date = (date.today() - timedelta(days=182)).isoformat()
 
     params = {"start_date": start_date, "end_date": end_date}
-    rows = await asyncio.to_thread(execute_query, USERS_GROWTH, params)
+    from backend.lakebase_read import PG_USERS_GROWTH, gold_read
+    rows = await asyncio.to_thread(gold_read, "users_growth", PG_USERS_GROWTH, params, "", USERS_GROWTH)
     return {
         "data": [
             {
@@ -688,7 +693,10 @@ async def get_groups_bundle(
     # Fetch group membership and billing data in parallel without blocking the event loop
     import asyncio as _asyncio
     _loop = _asyncio.get_running_loop()
-    billing_fut = _loop.run_in_executor(None, execute_query, USERS_BY_WORKSPACE_DETAIL, params)
+    from backend.lakebase_read import PG_USERS_BY_WORKSPACE_DETAIL, gold_read
+    billing_fut = _loop.run_in_executor(
+        None, gold_read, "users_workspace_detail", PG_USERS_BY_WORKSPACE_DETAIL, params, "", USERS_BY_WORKSPACE_DETAIL
+    )
     groups_fut = _loop.run_in_executor(None, _fetch_workspace_groups, user_token)
     _done, _ = await _asyncio.wait([billing_fut, groups_fut], timeout=30.0)
     try:
@@ -915,7 +923,8 @@ async def send_test_report(
     params = {"start_date": start_date, "end_date": end_date}
 
     try:
-        top_users = await asyncio.to_thread(execute_query, USERS_TOP_SPEND, params)
+        from backend.lakebase_read import PG_USERS_TOP, gold_read
+        top_users = await asyncio.to_thread(gold_read, "users_top", PG_USERS_TOP, params, "", USERS_TOP_SPEND)
     except Exception as e:
         return {"success": False, "error": str(e)}
 

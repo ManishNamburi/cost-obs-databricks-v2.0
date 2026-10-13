@@ -4,6 +4,10 @@ The warehouse still *builds* these from system.* (Postgres cannot see those).
 The app reads the copies, not live system tables.
 """
 
+from backend.materialized_views_remaining import remaining_tables
+
+_REM_CREATE, _REM_MERGE, _REM_REFRESH = remaining_tables()
+
 CREATE_DAILY_SKU_BREAKDOWN = """
 CREATE OR REPLACE TABLE `{catalog}`.`{schema}`.`daily_sku_breakdown` CLUSTER BY (usage_date, workspace_id) AS
 SELECT
@@ -530,6 +534,7 @@ EXTRA_TABLE_REFRESH = {
         "source_date_col": "usage_date",
         "overlap_days": 1,
     },
+    **_REM_REFRESH,
 }
 
 EXTRA_CREATE = {
@@ -541,6 +546,7 @@ EXTRA_CREATE = {
     "daily_aiml_endpoints": CREATE_DAILY_AIML_ENDPOINTS,
     "daily_cloud_actuals": CREATE_DAILY_CLOUD_ACTUALS,
     "daily_dbsql_top": CREATE_DAILY_DBSQL_TOP,
+    **_REM_CREATE,
 }
 
 EXTRA_MERGE = {
@@ -552,6 +558,7 @@ EXTRA_MERGE = {
     "daily_aiml_endpoints": MERGE_DAILY_AIML_ENDPOINTS,
     "daily_cloud_actuals": MERGE_DAILY_CLOUD_ACTUALS,
     "daily_dbsql_top": MERGE_DAILY_DBSQL_TOP,
+    **_REM_MERGE,
 }
 
 # MV reader SQL (Delta dialect). Postgres twins live in lakebase_read.py.

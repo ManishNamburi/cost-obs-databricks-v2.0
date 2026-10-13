@@ -260,58 +260,17 @@ def create_dbsql_router(table_name: str) -> APIRouter:
             ws_clause = wf.build_ws_filter_clause(col="workspace_id", id_list=id_list)
             params = {"start_date": start_date, "end_date": end_date}
 
-            from backend.lakebase_read import warehouse_view_fallback
-            live_ok = warehouse_view_fallback()
+            from backend.lakebase_read import PG_REGION_SCOPE, PG_WH_META, PG_WH_TYPE_BILLING, gold_read
             queries = [
                 ("summary",      lambda: _exec("summary",      params, catalog, schema, ws_clause)),
                 ("by_source",    lambda: _exec("by_source",    params, catalog, schema, ws_clause)),
                 ("by_user",      lambda: _exec("by_user",      params, catalog, schema, ws_clause)),
                 ("by_warehouse", lambda: _exec("by_warehouse", params, catalog, schema, ws_clause)),
                 ("timeseries",   lambda: _exec("timeseries",   params, catalog, schema, ws_clause)),
+                ("wh_meta",      lambda: gold_read("wh_meta", PG_WH_META, params, ws_clause)),
+                ("wh_type_billing", lambda: gold_read("wh_type_billing", PG_WH_TYPE_BILLING, params, ws_clause)),
+                ("region_scope", lambda: gold_read("region_scope", PG_REGION_SCOPE, params)),
             ]
-            if live_ok:
-                queries.extend([
-                ("wh_meta",      lambda: execute_query("""
-                    SELECT w.warehouse_id, MAX(w.warehouse_name) as warehouse_name,
-                           MAX(w.warehouse_type) as warehouse_type, MAX(w.warehouse_size) as warehouse_size,
-                           MAX(w.workspace_id) as workspace_id,
-                           MAX(ws.workspace_name) as workspace_name
-                    FROM system.compute.warehouses w
-                    LEFT JOIN system.access.workspaces_latest ws ON w.workspace_id = ws.workspace_id
-                    GROUP BY w.warehouse_id
-                """)),
-                ("wh_type_billing", lambda: execute_query("""
-                    SELECT
-                      u.usage_date as date,
-                      u.usage_metadata.warehouse_id as warehouse_id,
-                      SUM(u.usage_quantity * COALESCE(p.pricing.default, 0)) as daily_spend
-                    FROM system.billing.usage u
-                    LEFT JOIN system.billing.list_prices p
-                      ON u.sku_name = p.sku_name AND u.cloud = p.cloud AND p.price_end_time IS NULL
-                    WHERE u.billing_origin_product = 'SQL'
-                      AND u.usage_date BETWEEN :start_date AND :end_date
-                      AND u.usage_quantity > 0
-                    GROUP BY u.usage_date, u.usage_metadata.warehouse_id
-                """, params)),
-                # Region-scope detection: system.billing.usage is account-wide (all
-                # regions), but system.compute.warehouses is scoped to the metastore's
-                # region. Count workspaces that have SQL spend in billing vs. workspaces
-                # visible in compute; the difference is workspaces in OTHER regions whose
-                # SQL/warehouse detail this deployment cannot see.
-                ("region_billing_ws", lambda: execute_query("""
-                    SELECT COUNT(DISTINCT u.workspace_id) AS ws_count
-                    FROM system.billing.usage u
-                    WHERE u.billing_origin_product = 'SQL'
-                      AND u.usage_date BETWEEN :start_date AND :end_date
-                      AND u.usage_quantity > 0
-                      AND u.workspace_id IS NOT NULL
-                """, params)),
-                ("region_compute_ws", lambda: execute_query("""
-                    SELECT COUNT(DISTINCT workspace_id) AS ws_count
-                    FROM system.compute.warehouses
-                    WHERE workspace_id IS NOT NULL
-                """)),
-                ])
 
             results = execute_queries_parallel(queries, 120.0)
 
@@ -432,14 +391,19 @@ def create_dbsql_router(table_name: str) -> APIRouter:
             # region_scope — surface when this deployment's region-scoped system tables
             # (system.compute / system.query) cover fewer workspaces than account-wide
             # billing, so the UI can explain why SQL/Optimize detail looks incomplete.
-            def _first_count(key: str) -> int:
+            def _first_count(key: str, col: str) -> int:
                 rows = results.get(key) or []
                 try:
-                    return int(rows[0].get("ws_count") or 0) if rows else 0
+                    return int(rows[0].get(col) or 0) if rows else 0
                 except (ValueError, TypeError, AttributeError):
                     return 0
-            billing_ws = _first_count("region_billing_ws")
-            compute_ws = _first_count("region_compute_ws")
+            scope_rows = results.get("region_scope") or []
+            if scope_rows:
+                billing_ws = int(scope_rows[0].get("billing_ws") or 0)
+                compute_ws = int(scope_rows[0].get("compute_ws") or 0)
+            else:
+                billing_ws = _first_count("region_billing_ws", "ws_count")
+                compute_ws = _first_count("region_compute_ws", "ws_count")
             # Only claim a gap when both counts are trustworthy (>0) and billing exceeds
             # compute. If either query failed/returned 0, stay silent rather than alarm.
             missing_ws = max(billing_ws - compute_ws, 0) if (billing_ws > 0 and compute_ws > 0) else 0

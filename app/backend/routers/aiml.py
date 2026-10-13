@@ -1060,20 +1060,17 @@ def _compute_aiml_bundle(params: dict, id_list: list | None, ws_clause: str, dke
             PG_AIML_CATEGORIES, PG_AIML_ENDPOINTS, PG_AIML_PROVIDERS,
             PG_AIML_TIMESERIES, PG_AIML_TOTALS, warehouse_view_fallback,
         )
-        live_ok = warehouse_view_fallback()
+        from backend.lakebase_read import PG_AIML_AGENTS, PG_AIML_ML_CLUSTERS, PG_AIML_MODELS, gold_read
         queries = [
             ("summary", lambda: _gold_then_live("aiml_summary", PG_AIML_TOTALS, params, _ws(AIML_SUMMARY), ws_clause)),
             ("providers", lambda: _gold_then_live("aiml_providers", PG_AIML_PROVIDERS, params, _ws(FMAPI_PROVIDER_COSTS), ws_clause)),
             ("endpoints", lambda: _gold_then_live("aiml_endpoints", PG_AIML_ENDPOINTS, params, _ws(SERVERLESS_INFERENCE_BY_ENDPOINT), ws_clause)),
             ("categories", lambda: _gold_then_live("aiml_categories", PG_AIML_CATEGORIES, params, _ws(AIML_BY_CATEGORY), ws_clause)),
             ("timeseries", lambda: _gold_then_live("aiml_timeseries", PG_AIML_TIMESERIES, params, _ws(AIML_TIMESERIES), ws_clause)),
+            ("models", lambda: gold_read("aiml_models", PG_AIML_MODELS, params, ws_clause, _ws(AIML_TOP_MODELS_AND_FEATURE_STORES))),
+            ("ml_clusters", lambda: gold_read("aiml_ml_clusters", PG_AIML_ML_CLUSTERS, params, ws_clause, _ws(AIML_ML_RUNTIME_CLUSTERS_FALLBACK))),
+            ("agent_bricks", lambda: gold_read("aiml_agent_bricks", PG_AIML_AGENTS, params, ws_clause, _ws(AIML_AGENT_BRICKS_FALLBACK))),
         ]
-        if live_ok:
-            queries.extend([
-            ("models", lambda: query_with_fallback(_ws(AIML_TOP_MODELS_ENRICHED), _ws(AIML_TOP_MODELS_AND_FEATURE_STORES), params, label="models")),
-            ("ml_clusters", lambda: query_with_fallback(_ws(AIML_ML_RUNTIME_CLUSTERS_ENRICHED), _ws(AIML_ML_RUNTIME_CLUSTERS_FALLBACK), params, label="ml_clusters")),
-            ("agent_bricks", lambda: query_with_fallback(_ws(AIML_AGENT_BRICKS_ENRICHED), _ws(AIML_AGENT_BRICKS_FALLBACK), params, label="agent_bricks")),
-            ])
 
         results = execute_queries_parallel(queries, timeout=90.0)
 

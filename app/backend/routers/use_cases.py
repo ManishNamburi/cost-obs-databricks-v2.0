@@ -711,56 +711,26 @@ async def get_use_case_analytics(
         job_ids = [obj["object_id"] for obj in objects if obj["object_type"] == "job"]
         endpoint_ids = [obj["object_id"] for obj in objects if obj["object_type"] == "endpoint"]
 
-        # Query spend for these objects
-        spend_query = """
-        WITH usage_with_price AS (
-          SELECT
-            u.usage_date,
-            u.usage_metadata.cluster_id as cluster_id,
-            u.usage_metadata.warehouse_id as warehouse_id,
-            u.usage_metadata.job_id as job_id,
-            u.usage_metadata.endpoint_id as endpoint_id,
-            u.usage_quantity,
-            COALESCE(p.pricing.default, 0) as price_per_dbu
-          FROM system.billing.usage u
-          LEFT JOIN system.billing.list_prices p
-            ON u.sku_name = p.sku_name
-            AND u.cloud = p.cloud
-            AND p.price_end_time IS NULL
-          WHERE u.usage_date BETWEEN :start_date AND :end_date
-            AND u.usage_quantity > 0
-        )
-        SELECT
-          usage_date,
-          CASE
-            WHEN cluster_id IN :cluster_ids THEN 'cluster'
-            WHEN warehouse_id IN :warehouse_ids THEN 'warehouse'
-            WHEN job_id IN :job_ids THEN 'job'
-            WHEN endpoint_id IN :endpoint_ids THEN 'endpoint'
-            ELSE 'other'
-          END as object_type,
-          COALESCE(cluster_id, warehouse_id, job_id, endpoint_id, 'unknown') as object_id,
-          SUM(usage_quantity) as total_dbus,
-          SUM(usage_quantity * price_per_dbu) as total_spend
-        FROM usage_with_price
-        WHERE (
-          cluster_id IN :cluster_ids
-          OR warehouse_id IN :warehouse_ids
-          OR job_id IN :job_ids
-          OR endpoint_id IN :endpoint_ids
-        )
-        GROUP BY usage_date, object_type, object_id
-        ORDER BY usage_date
-        """
+        wanted = {
+            ("cluster", oid) for oid in cluster_ids
+        } | {
+            ("warehouse", oid) for oid in warehouse_ids
+        } | {
+            ("job", oid) for oid in job_ids
+        } | {
+            ("endpoint", oid) for oid in endpoint_ids
+        }
 
-        params.update({
-            "cluster_ids": cluster_ids or ["__NONE__"],
-            "warehouse_ids": warehouse_ids or ["__NONE__"],
-            "job_ids": job_ids or ["__NONE__"],
-            "endpoint_ids": endpoint_ids or ["__NONE__"]
-        })
-
-        results = await asyncio.to_thread(execute_query, spend_query, params)
+        from backend.lakebase_read import PG_OBJECT_SPEND, gold_read
+        gold_rows = await asyncio.to_thread(
+            gold_read, "object_spend", PG_OBJECT_SPEND, params, ""
+        )
+        results = [
+            r for r in (gold_rows or [])
+            if (r.get("object_type"), str(r.get("object_id") or "")) in {
+                (t, str(i)) for t, i in wanted
+            }
+        ]
 
         # Process results into analytics
         total_spend = 0
@@ -916,29 +886,7 @@ async def get_monthly_consumption(
         if not end_date:
             end_date = date.today().strftime("%Y-%m-%d")
 
-        # Define queries
-        spend_query = """
-        WITH usage_with_price AS (
-          SELECT
-            date_trunc('month', u.usage_date) as month,
-            u.usage_quantity,
-            COALESCE(p.pricing.default, 0) as price_per_dbu
-          FROM system.billing.usage u
-          LEFT JOIN system.billing.list_prices p
-            ON u.sku_name = p.sku_name
-            AND u.cloud = p.cloud
-            AND p.price_end_time IS NULL
-          WHERE u.usage_date BETWEEN :start_date AND :end_date
-            AND u.usage_quantity > 0
-        )
-        SELECT
-          month,
-          SUM(usage_quantity * price_per_dbu) as total_spend,
-          SUM(usage_quantity) as total_dbus
-        FROM usage_with_price
-        GROUP BY month
-        ORDER BY month
-        """
+        from backend.lakebase_read import PG_MONTHLY_SPEND, gold_read
 
         live_query = """
         SELECT
@@ -956,7 +904,7 @@ async def get_monthly_consumption(
 
         # Execute both queries in parallel for better performance
         query_results = await asyncio.to_thread(execute_queries_parallel, [
-            ("spend", lambda: execute_query(spend_query, query_params)),
+            ("spend", lambda: gold_read("monthly_spend", PG_MONTHLY_SPEND, query_params)),
             ("live", lambda: execute_query(live_query, query_params)),
         ], timeout=60.0)
 
@@ -1118,7 +1066,15 @@ async def get_available_objects(
                 detail=f"Invalid object_type: {object_type}. Must be one of: cluster, pipeline, warehouse, endpoint, job, query, dashboard"
             )
 
-        results = await asyncio.to_thread(execute_query, query, {})
+        from backend.lakebase_read import PG_AVAILABLE_OBJECTS, gold_read, warehouse_view_fallback
+        if object_type in ("cluster", "warehouse", "pipeline", "endpoint", "job"):
+            results = await asyncio.to_thread(
+                gold_read, "available_objects", PG_AVAILABLE_OBJECTS, {"object_type": object_type}
+            )
+        elif warehouse_view_fallback():
+            results = await asyncio.to_thread(execute_query, query, {})
+        else:
+            results = []
 
         objects = []
         for row in results:

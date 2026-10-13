@@ -809,6 +809,280 @@ FROM (
 ) t
 """
 
+PG_USERS_SUMMARY = """
+SELECT COUNT(DISTINCT NULLIF(user_email, '__na__')) AS user_count,
+  COUNT(DISTINCT NULLIF(workspace_id, '__account__')) AS workspace_count,
+  SUM(total_spend) AS total_spend, SUM(total_dbus) AS total_dbus,
+  SUM(total_spend) / NULLIF(COUNT(DISTINCT NULLIF(user_email, '__na__')), 0) AS avg_spend_per_user
+FROM daily_user_spend
+WHERE usage_date BETWEEN %(start_date)s AND %(end_date)s
+  {ws_filter}
+"""
+
+PG_USERS_TOP = """
+SELECT NULLIF(user_email, '__na__') AS user_email, SUM(total_spend) AS total_spend,
+  SUM(total_dbus) AS total_dbus, COUNT(DISTINCT usage_date) AS active_days,
+  COUNT(DISTINCT NULLIF(workspace_id, '__account__')) AS workspace_count
+FROM daily_user_spend
+WHERE usage_date BETWEEN %(start_date)s AND %(end_date)s
+  {ws_filter}
+GROUP BY NULLIF(user_email, '__na__')
+ORDER BY total_spend DESC
+"""
+
+PG_USERS_PRODUCT = """
+SELECT NULLIF(user_email, '__na__') AS user_email, product_category, SUM(total_spend) AS spend
+FROM daily_user_spend
+WHERE usage_date BETWEEN %(start_date)s AND %(end_date)s
+  {ws_filter}
+GROUP BY NULLIF(user_email, '__na__'), product_category
+ORDER BY spend DESC
+LIMIT 5000
+"""
+
+PG_USERS_TIMESERIES = """
+SELECT usage_date AS date, NULLIF(user_email, '__na__') AS user_email, SUM(total_spend) AS daily_spend
+FROM daily_user_spend
+WHERE usage_date BETWEEN %(start_date)s AND %(end_date)s
+  {ws_filter}
+  AND user_email IN (
+    SELECT user_email FROM (
+      SELECT user_email, SUM(total_spend) AS s FROM daily_user_spend
+      WHERE usage_date BETWEEN %(start_date)s AND %(end_date)s {ws_filter}
+      GROUP BY user_email ORDER BY s DESC LIMIT 6
+    ) t
+  )
+GROUP BY usage_date, NULLIF(user_email, '__na__')
+ORDER BY date, daily_spend DESC
+"""
+
+PG_USERS_BY_WORKSPACE = """
+SELECT NULLIF(workspace_id, '__account__') AS workspace_id,
+  COUNT(DISTINCT NULLIF(user_email, '__na__')) AS user_count,
+  SUM(total_spend) AS total_spend
+FROM daily_user_spend
+WHERE usage_date BETWEEN %(start_date)s AND %(end_date)s
+  {ws_filter}
+GROUP BY NULLIF(workspace_id, '__account__')
+ORDER BY total_spend DESC
+LIMIT 20
+"""
+
+PG_USERS_SPEND_GROWTH = """
+SELECT CASE WHEN usage_date <= %(mid_date)s THEN 'first_half' ELSE 'second_half' END AS period,
+  SUM(total_spend) AS total_spend
+FROM daily_user_spend
+WHERE usage_date BETWEEN %(start_date)s AND %(end_date)s
+  {ws_filter}
+GROUP BY 1
+"""
+
+PG_USERS_BY_WORKSPACE_DETAIL = """
+SELECT NULLIF(workspace_id, '__account__') AS workspace_id,
+  NULLIF(user_email, '__na__') AS user_email,
+  product_category, SUM(total_spend) AS spend
+FROM daily_user_spend
+WHERE usage_date BETWEEN %(start_date)s AND %(end_date)s
+  {ws_filter}
+GROUP BY NULLIF(workspace_id, '__account__'), NULLIF(user_email, '__na__'), product_category
+ORDER BY spend DESC
+LIMIT 2000
+"""
+
+PG_USERS_GROWTH = """
+WITH base AS (
+  SELECT date_trunc('month', usage_date)::date AS month, NULLIF(user_email, '__na__') AS user_id
+  FROM daily_user_spend
+  WHERE usage_date BETWEEN %(start_date)s AND %(end_date)s
+    AND user_email IS NOT NULL AND user_email <> '__na__'
+),
+user_first AS (SELECT user_id, MIN(month) AS first_month FROM base GROUP BY user_id)
+SELECT to_char(b.month, 'YYYY-MM') AS month,
+  COUNT(DISTINCT b.user_id) AS active_users,
+  COUNT(DISTINCT CASE WHEN b.month = f.first_month THEN b.user_id END) AS new_users
+FROM base b JOIN user_first f ON b.user_id = f.user_id
+GROUP BY b.month
+ORDER BY month
+"""
+
+PG_UNTAGGED = """
+SELECT object_id AS {id_col}, MAX(NULLIF(object_name, '__na__')) AS {name_col},
+  MAX(NULLIF(owner, '__na__')) AS owner, MAX(NULLIF(extra, '__na__')) AS cluster_source,
+  MAX(NULLIF(workspace_id, '__account__')) AS workspace_id,
+  SUM(total_dbus) AS total_dbus, SUM(total_spend) AS total_spend,
+  COUNT(DISTINCT usage_date) AS days_active
+FROM daily_untagged_objects
+WHERE usage_date BETWEEN %(start_date)s AND %(end_date)s
+  AND object_type = %(object_type)s
+  {ws_filter}
+GROUP BY object_id
+ORDER BY total_spend DESC
+LIMIT 1000
+"""
+
+PG_AIML_MODELS = """
+SELECT NULLIF(model_name, '__na__') AS model_name, model_type,
+  SUM(total_dbus) AS total_dbus, SUM(total_spend) AS total_spend,
+  COUNT(DISTINCT usage_date) AS days_active,
+  COUNT(DISTINCT NULLIF(workspace_id, '__account__')) AS workspace_count
+FROM daily_aiml_models
+WHERE usage_date BETWEEN %(start_date)s AND %(end_date)s
+  {ws_filter}
+GROUP BY NULLIF(model_name, '__na__'), model_type
+ORDER BY total_spend DESC
+LIMIT 50
+"""
+
+PG_AIML_ML_CLUSTERS = """
+SELECT MAX(NULLIF(cluster_name, '__na__')) AS cluster_name,
+  NULLIF(cluster_id, '__na__') AS cluster_id,
+  MAX(NULLIF(runtime_version, '__na__')) AS runtime_version,
+  MAX(NULLIF(owner, '__na__')) AS owner,
+  MAX(NULLIF(workspace_id, '__account__')) AS workspace_id,
+  SUM(total_dbus) AS total_dbus, SUM(total_spend) AS total_spend,
+  COUNT(DISTINCT usage_date) AS days_active
+FROM daily_aiml_ml_clusters
+WHERE usage_date BETWEEN %(start_date)s AND %(end_date)s
+  {ws_filter}
+GROUP BY NULLIF(cluster_id, '__na__')
+ORDER BY total_spend DESC
+"""
+
+PG_AIML_AGENTS = """
+SELECT NULLIF(agent_name, '__na__') AS agent_name,
+  MAX(NULLIF(endpoint_id, '__na__')) AS endpoint_id,
+  MAX(NULLIF(workspace_id, '__account__')) AS workspace_id,
+  MAX(billing_origin_product) AS billing_origin_product,
+  MAX(NULLIF(served_entity_name, '__na__')) AS served_entity_name,
+  MAX(agent_type) AS agent_type,
+  SUM(total_dbus) AS total_dbus, SUM(total_spend) AS total_spend,
+  COUNT(DISTINCT usage_date) AS days_active,
+  COUNT(DISTINCT NULLIF(workspace_id, '__account__')) AS workspace_count,
+  MIN(usage_date) AS first_seen, MAX(usage_date) AS last_seen,
+  SUM(total_spend) / NULLIF(COUNT(DISTINCT usage_date), 0) AS avg_daily_spend
+FROM daily_aiml_agents
+WHERE usage_date BETWEEN %(start_date)s AND %(end_date)s
+  {ws_filter}
+GROUP BY NULLIF(agent_name, '__na__')
+ORDER BY total_spend DESC
+"""
+
+PG_INFRA_CLUSTERS = """
+SELECT NULLIF(cluster_id, '__na__') AS cluster_id,
+  MAX(NULLIF(cluster_name, '__na__')) AS cluster_name,
+  MAX(NULLIF(driver_instance_type, '__na__')) AS driver_instance_type,
+  MAX(NULLIF(worker_instance_type, '__na__')) AS worker_instance_type,
+  MAX(NULLIF(cluster_source, '__na__')) AS cluster_source,
+  MAX(NULLIF(workspace_id, '__account__')) AS workspace_id,
+  MAX(NULLIF(workspace_name, '__na__')) AS workspace_name,
+  MAX(cloud) AS cloud,
+  SUM(total_dbu_hours) AS total_dbu_hours,
+  COUNT(DISTINCT usage_date) AS days_active
+FROM daily_infra_cluster_spend
+WHERE usage_date BETWEEN %(start_date)s AND %(end_date)s
+  {ws_filter}
+GROUP BY NULLIF(cluster_id, '__na__')
+ORDER BY total_dbu_hours DESC
+LIMIT 100
+"""
+
+PG_INFRA_TIMESERIES = """
+SELECT usage_date, MAX(cloud) AS cloud, SUM(total_dbu_hours) AS total_dbu_hours
+FROM daily_infra_cluster_spend
+WHERE usage_date BETWEEN %(start_date)s AND %(end_date)s
+  {ws_filter}
+GROUP BY usage_date
+ORDER BY usage_date
+"""
+
+PG_INFRA_SUMMARY = """
+SELECT SUM(daily_cost) AS total_cost, AVG(daily_clusters) AS avg_clusters_per_day,
+  CASE WHEN AVG(daily_clusters) > 0 THEN AVG(daily_cost / daily_clusters) ELSE 0 END AS avg_cost_per_cluster,
+  COUNT(*) AS days_in_range
+FROM (
+  SELECT usage_date, SUM(total_dbu_hours) AS daily_cost,
+    COUNT(DISTINCT NULLIF(cluster_id, '__na__')) AS daily_clusters
+  FROM daily_infra_cluster_spend
+  WHERE usage_date BETWEEN %(start_date)s AND %(end_date)s
+    {ws_filter}
+  GROUP BY usage_date
+) d
+"""
+
+PG_WH_META = """
+SELECT NULLIF(warehouse_id, '__na__') AS warehouse_id,
+  MAX(NULLIF(warehouse_name, '__na__')) AS warehouse_name,
+  MAX(warehouse_type) AS warehouse_type,
+  MAX(warehouse_size) AS warehouse_size,
+  MAX(NULLIF(workspace_id, '__account__')) AS workspace_id,
+  MAX(NULLIF(workspace_name, '__na__')) AS workspace_name
+FROM daily_dbsql_warehouse_type
+WHERE usage_date BETWEEN %(start_date)s AND %(end_date)s
+  {ws_filter}
+GROUP BY NULLIF(warehouse_id, '__na__')
+"""
+
+PG_WH_TYPE_BILLING = """
+SELECT usage_date AS date, NULLIF(warehouse_id, '__na__') AS warehouse_id, SUM(daily_spend) AS daily_spend
+FROM daily_dbsql_warehouse_type
+WHERE usage_date BETWEEN %(start_date)s AND %(end_date)s
+  {ws_filter}
+GROUP BY usage_date, NULLIF(warehouse_id, '__na__')
+"""
+
+PG_REGION_SCOPE = """
+SELECT billing_ws_count AS billing_ws, compute_ws_count AS compute_ws
+FROM daily_dbsql_region_scope
+ORDER BY snapshot_date DESC
+LIMIT 1
+"""
+
+PG_WAREHOUSE_OPTIMIZER = """
+SELECT * FROM warehouse_optimizer_findings
+WHERE snapshot_date = (SELECT MAX(snapshot_date) FROM warehouse_optimizer_findings)
+"""
+
+PG_OBJECT_SPEND = """
+SELECT usage_date, object_type, NULLIF(object_id, '__na__') AS object_id,
+  SUM(total_dbus) AS total_dbus, SUM(total_spend) AS total_spend
+FROM daily_object_spend
+WHERE usage_date BETWEEN %(start_date)s AND %(end_date)s
+  {ws_filter}
+GROUP BY usage_date, object_type, NULLIF(object_id, '__na__')
+"""
+
+PG_AVAILABLE_OBJECTS = """
+SELECT object_type, NULLIF(object_id, '__na__') AS object_id,
+  MAX(NULLIF(object_name, '__na__')) AS object_name,
+  MAX(NULLIF(workspace_id, '__account__')) AS workspace_id
+FROM daily_object_spend
+WHERE usage_date >= CURRENT_DATE - INTERVAL '90 days'
+  AND object_type = %(object_type)s
+GROUP BY object_type, NULLIF(object_id, '__na__')
+ORDER BY object_id
+LIMIT 100
+"""
+
+PG_MONTHLY_SPEND = """
+SELECT date_trunc('month', usage_date)::date AS month,
+  SUM(total_spend) AS total_spend, SUM(total_dbus) AS total_dbus
+FROM daily_usage_summary
+WHERE usage_date BETWEEN %(start_date)s AND %(end_date)s
+GROUP BY 1
+ORDER BY 1
+"""
+
+PG_AI_GATEWAY_ROWS = """
+SELECT usage_date, NULLIF(workspace_id, '__account__') AS workspace_id,
+  NULLIF(route_name, '__na__') AS route_name,
+  NULLIF(model_name, '__na__') AS model_name,
+  client_user, request_count, input_tokens, output_tokens, total_tokens,
+  avg_latency_ms, error_count, success_count
+FROM daily_ai_gateway
+WHERE usage_date BETWEEN %(start_date)s AND %(end_date)s
+  {ws_filter}
+"""
+
 KPI_TREND_PG = {
     "total_spend": PG_KPI_TREND_SPEND,
     "avg_daily_spend": PG_KPI_TREND_SPEND,
@@ -968,6 +1242,31 @@ def dual_read_mv(
     except Exception as e:
         logger.debug("dual_read_mv error (non-fatal, serving Delta): %s", e)
         return _resolve_delta(delta_result, fetch_delta)
+
+
+def gold_read(
+    name: str,
+    pg_tmpl: str,
+    params: dict[str, Any],
+    ws_clause: str = "",
+    live_sql: str | None = None,
+    extra_format: dict[str, str] | None = None,
+) -> list[dict]:
+    """Postgres first, warehouse gold on miss, live system SQL only when fallback is allowed."""
+    from backend.db import apply_mv_overrides, execute_query, get_catalog_schema
+    from backend.materialized_views_remaining import REMAINING_GOLD_SQL
+
+    def _fetch():
+        gold = REMAINING_GOLD_SQL.get(name)
+        if gold:
+            cat, sch = get_catalog_schema()
+            sql = gold.format(catalog=cat, schema=sch, ws_filter=ws_clause)
+            return execute_query(apply_mv_overrides(sql, cat, sch), params)
+        if warehouse_view_fallback() and live_sql:
+            return execute_query(live_sql, params)
+        return []
+
+    return dual_read(name, pg_tmpl, params, ws_clause, extra_format=extra_format, fetch_delta=_fetch)
 
 
 def _run_shadow(name: str, pg_sql: str, pg_params: dict, key_cols: list[str], delta_result: list[dict]) -> None:

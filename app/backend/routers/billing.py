@@ -711,7 +711,10 @@ async def get_infra_costs(
 
     try:
         # Single query — instance families are derived in Python from cluster results
-        cluster_results = await asyncio.to_thread(execute_query, INFRA_COST_ESTIMATE, params)
+        from backend.lakebase_read import PG_INFRA_CLUSTERS, gold_read
+        cluster_results = await asyncio.to_thread(
+            gold_read, "infra_clusters", PG_INFRA_CLUSTERS, params, "", INFRA_COST_ESTIMATE
+        )
 
         # Detect cloud from results, fall back to host URL detection
         host = get_host_url()
@@ -816,7 +819,10 @@ async def get_infra_costs_timeseries(
     }
 
     try:
-        results = await asyncio.to_thread(execute_query, INFRA_COST_TIMESERIES, params)
+        from backend.lakebase_read import PG_INFRA_TIMESERIES, gold_read
+        results = await asyncio.to_thread(
+            gold_read, "infra_timeseries", PG_INFRA_TIMESERIES, params, "", INFRA_COST_TIMESERIES
+        )
 
         # Detect cloud from host URL, override with billing data if available
         host = get_host_url()
@@ -923,10 +929,11 @@ async def get_infra_bundle(
     _clusters_sql = _inject_ws_filter(INFRA_COST_ESTIMATE, _ws_clause)
     _ts_sql = _inject_ws_filter(INFRA_COST_TIMESERIES, _ws_clause)
     try:
+        from backend.lakebase_read import PG_INFRA_CLUSTERS, PG_INFRA_SUMMARY, PG_INFRA_TIMESERIES, gold_read
         query_results = await asyncio.to_thread(execute_queries_parallel, [
-            ("clusters", lambda: execute_query(_clusters_sql, params)),
-            ("timeseries", lambda: execute_query(_ts_sql, params)),
-            ("billing_summary", lambda: execute_query(_infra_sql, params)),
+            ("clusters", lambda: gold_read("infra_clusters", PG_INFRA_CLUSTERS, params, _ws_clause, _clusters_sql)),
+            ("timeseries", lambda: gold_read("infra_timeseries", PG_INFRA_TIMESERIES, params, _ws_clause, _ts_sql)),
+            ("billing_summary", lambda: gold_read("infra_summary", PG_INFRA_SUMMARY, params, _ws_clause, _infra_sql)),
         ], timeout=90.0)
 
         cluster_results = query_results.get("clusters") or []
@@ -1079,7 +1086,10 @@ async def get_aws_costs(
 
     try:
         # Get detailed cluster costs
-        cluster_results = await asyncio.to_thread(execute_query, AWS_COST_ESTIMATE, params)
+        from backend.lakebase_read import PG_INFRA_CLUSTERS, gold_read
+        cluster_results = await asyncio.to_thread(
+            gold_read, "infra_clusters", PG_INFRA_CLUSTERS, params, "", AWS_COST_ESTIMATE
+        )
 
         clusters = []
         total_estimated_cost = 0
@@ -1251,6 +1261,10 @@ async def get_dashboard_bundle(
         "end_date": end_date or get_default_end_date(),
     }
 
+    from backend.lakebase_read import (
+        PG_INFRA_CLUSTERS, PG_INFRA_TIMESERIES, gold_read, warehouse_view_fallback,
+    )
+
     # Execute all queries in parallel
     queries = [
         ("summary", lambda: execute_query(BILLING_SUMMARY, params)),
@@ -1261,9 +1275,9 @@ async def get_dashboard_bundle(
         ("etl_breakdown", lambda: execute_query(ETL_BREAKDOWN, params)),
         ("pipeline_objects", lambda: _enrich_pipeline_results(execute_query(PIPELINE_OBJECTS, params))),
         ("interactive", lambda: execute_query(INTERACTIVE_BREAKDOWN, params)),
-        ("aws_clusters", lambda: execute_query(AWS_COST_ESTIMATE, params)),
-        ("aws_instances", lambda: execute_query(AWS_COST_BY_INSTANCE_TYPE, params)),
-        ("aws_timeseries", lambda: execute_query(AWS_COST_TIMESERIES, params)),
+        ("aws_clusters", lambda: gold_read("infra_clusters", PG_INFRA_CLUSTERS, params, "", AWS_COST_ESTIMATE)),
+        ("aws_instances", lambda: execute_query(AWS_COST_BY_INSTANCE_TYPE, params) if warehouse_view_fallback() else []),
+        ("aws_timeseries", lambda: gold_read("infra_timeseries", PG_INFRA_TIMESERIES, params, "", AWS_COST_TIMESERIES)),
     ]
 
     try:

@@ -234,6 +234,85 @@ def _apply_workspace_filter(sql: str, workspace_ids: list[str] | None, table_ali
     return sql.replace("{workspace_filter}", ""), {}
 
 
+def _aggregate_gateway_rows(rows: list[dict]) -> dict[str, Any]:
+    """Turn daily_ai_gateway grain into the dashboard's summary / model / route / user / ts views."""
+    total_req = sum(int(r.get("request_count") or 0) for r in rows)
+    errors = sum(int(r.get("error_count") or 0) for r in rows)
+    successes = sum(int(r.get("success_count") or 0) for r in rows)
+    routes = {r.get("route_name") for r in rows if r.get("route_name")}
+    models = {r.get("model_name") for r in rows if r.get("model_name")}
+    users = {r.get("client_user") for r in rows if r.get("client_user")}
+    lat_w = sum(float(r.get("avg_latency_ms") or 0) * int(r.get("request_count") or 0) for r in rows)
+    summary = {
+        "total_requests": total_req,
+        "success_count": successes,
+        "error_count": errors,
+        "error_rate_pct": round(errors / total_req * 100, 1) if total_req else 0.0,
+        "route_count": len(routes),
+        "model_count": len(models),
+        "user_count": len(users),
+        "total_input_tokens": sum(int(r.get("input_tokens") or 0) for r in rows),
+        "total_output_tokens": sum(int(r.get("output_tokens") or 0) for r in rows),
+        "total_tokens": sum(int(r.get("total_tokens") or 0) for r in rows),
+        "avg_latency_ms": round(lat_w / total_req, 1) if total_req else 0.0,
+    }
+    by_model: dict[str, dict] = {}
+    by_route: dict[tuple, dict] = {}
+    by_user: dict[str, dict] = {}
+    ts: dict[tuple, dict] = {}
+    for r in rows:
+        n = int(r.get("request_count") or 0)
+        model = r.get("model_name")
+        route = r.get("route_name")
+        user = r.get("client_user") or "(unknown)"
+        day = str(r.get("usage_date"))
+        bm = by_model.setdefault(model, {"model_name": model, "request_count": 0, "input_tokens": 0, "output_tokens": 0, "total_tokens": 0, "avg_latency_ms": 0.0, "error_count": 0, "_lat": 0.0})
+        bm["request_count"] += n
+        bm["input_tokens"] += int(r.get("input_tokens") or 0)
+        bm["output_tokens"] += int(r.get("output_tokens") or 0)
+        bm["total_tokens"] += int(r.get("total_tokens") or 0)
+        bm["error_count"] += int(r.get("error_count") or 0)
+        bm["_lat"] += float(r.get("avg_latency_ms") or 0) * n
+        br = by_route.setdefault((route, model), {"route_name": route, "model_name": model, "request_count": 0, "input_tokens": 0, "output_tokens": 0, "total_tokens": 0, "avg_latency_ms": 0.0, "error_count": 0, "_lat": 0.0})
+        br["request_count"] += n
+        br["input_tokens"] += int(r.get("input_tokens") or 0)
+        br["output_tokens"] += int(r.get("output_tokens") or 0)
+        br["total_tokens"] += int(r.get("total_tokens") or 0)
+        br["error_count"] += int(r.get("error_count") or 0)
+        br["_lat"] += float(r.get("avg_latency_ms") or 0) * n
+        bu = by_user.setdefault(user, {"client_user": user, "request_count": 0, "routes_used": set(), "input_tokens": 0, "output_tokens": 0, "total_tokens": 0, "avg_latency_ms": 0.0, "_lat": 0.0})
+        bu["request_count"] += n
+        bu["routes_used"].add(route)
+        bu["input_tokens"] += int(r.get("input_tokens") or 0)
+        bu["output_tokens"] += int(r.get("output_tokens") or 0)
+        bu["total_tokens"] += int(r.get("total_tokens") or 0)
+        bu["_lat"] += float(r.get("avg_latency_ms") or 0) * n
+        t = ts.setdefault((day, model), {"usage_date": day, "model_name": model, "request_count": 0, "input_tokens": 0, "output_tokens": 0, "total_tokens": 0, "avg_latency_ms": 0.0, "_lat": 0.0})
+        t["request_count"] += n
+        t["input_tokens"] += int(r.get("input_tokens") or 0)
+        t["output_tokens"] += int(r.get("output_tokens") or 0)
+        t["total_tokens"] += int(r.get("total_tokens") or 0)
+        t["_lat"] += float(r.get("avg_latency_ms") or 0) * n
+    def _fin(d):
+        req = d.get("request_count") or 0
+        d["avg_latency_ms"] = round(d.pop("_lat", 0) / req, 1) if req else 0.0
+        if "routes_used" in d and isinstance(d["routes_used"], set):
+            d["routes_used"] = len(d["routes_used"])
+        return d
+    model_rows = _enrich_model_costs(sorted((_fin(v) for v in by_model.values()), key=lambda x: x["request_count"], reverse=True)[:50])
+    route_rows = _enrich_model_costs(sorted((_fin(v) for v in by_route.values()), key=lambda x: x["request_count"], reverse=True)[:100])
+    user_rows = sorted((_fin(v) for v in by_user.values()), key=lambda x: x["request_count"], reverse=True)[:100]
+    ts_rows = _annotate_costs(sorted((_fin(v) for v in ts.values()), key=lambda x: (x["usage_date"], x["model_name"])), {})
+    summary["total_estimated_cost_usd"] = round(sum(r.get("estimated_cost_usd", 0) for r in model_rows), 2)
+    return {
+        "summary": summary,
+        "by_model": model_rows,
+        "by_route": route_rows,
+        "top_users": user_rows[:25],
+        "timeseries": ts_rows,
+    }
+
+
 def _annotate_costs(rows: list[dict], billing_by_date: dict) -> list[dict]:
     """Attach estimated_cost_usd to timeseries rows from billing correlation + token pricing."""
     for row in rows:
@@ -516,6 +595,27 @@ async def get_ai_gateway_dashboard_bundle(
         return cached
 
     params: dict[str, Any] = {"start_date": start_date, "end_date": end_date}
+    ws_clause = ""
+    if workspace_ids:
+        quoted = ", ".join(f"'{w}'" for w in workspace_ids)
+        ws_clause = f"AND CAST(workspace_id AS STRING) IN ({quoted})"
+
+    from backend.lakebase_read import PG_AI_GATEWAY_ROWS, gold_read
+
+    def _gold_run():
+        rows = gold_read("ai_gateway_rows", PG_AI_GATEWAY_ROWS, params, ws_clause)
+        if rows:
+            agg = _aggregate_gateway_rows(rows)
+            bundle = {
+                "configured": True,
+                "table": tbl,
+                "start_date": start_date,
+                "end_date": end_date,
+                **agg,
+            }
+            delta_cache_put(cache_key, "ai-gateway-bundle", bundle, ttl_seconds=_BUNDLE_TTL)
+            return bundle
+        return None
 
     def _make_sql(template: str) -> tuple[str, dict]:
         sql, ws_p = _apply_workspace_filter(template.format(table=tbl), workspace_ids)
@@ -537,6 +637,19 @@ async def get_ai_gateway_dashboard_bundle(
     loop = asyncio.get_running_loop()
 
     def _run():
+        gold_bundle = _gold_run()
+        if gold_bundle:
+            return gold_bundle
+        from backend.lakebase_read import warehouse_view_fallback
+        if not warehouse_view_fallback():
+            empty = _aggregate_gateway_rows([])
+            return {
+                "configured": True,
+                "table": tbl,
+                "start_date": start_date,
+                "end_date": end_date,
+                **empty,
+            }
         results = execute_queries_parallel([
             ("summary",  lambda: execute_query(summary_sql, summary_p)),
             ("by_model", lambda: execute_query(model_sql, model_p)),
