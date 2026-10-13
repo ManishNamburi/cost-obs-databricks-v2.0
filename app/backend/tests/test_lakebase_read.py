@@ -311,3 +311,40 @@ def test_viewer_gold_pg_templates_are_postgres():
     assert "daily_gcp_actuals" in PG_GCP_SUMMARY
     assert "use_case_query_objects" in PG_AVAILABLE_QUERIES
     assert "system." not in PLATFORM_KPI_TREND_PG["total_queries"].format(ws_filter="")
+
+
+def test_families_from_cluster_rows_rolls_driver_and_worker():
+    from backend.routers.billing import _families_from_cluster_rows
+
+    rows = [
+        {
+            "cluster_id": "c1",
+            "driver_instance_type": "m5d.xlarge",
+            "worker_instance_type": "m5d.xlarge",
+            "total_dbu_hours": 10,
+            "days_active": 2,
+        },
+        {
+            "cluster_id": "c2",
+            "driver_instance_type": "r5d.2xlarge",
+            "worker_instance_type": None,
+            "total_dbu_hours": 4,
+            "days_active": 1,
+        },
+    ]
+    families = _families_from_cluster_rows(rows, "AWS")
+    by_name = {f["instance_family"]: f for f in families}
+    assert "m5d" in by_name
+    assert by_name["m5d"]["total_dbu_hours"] == 20  # driver + worker
+    assert by_name["r5d"]["total_dbu_hours"] == 4
+
+
+def test_format_aws_timeseries_from_infra_gold():
+    from backend.routers.billing import _format_aws_timeseries
+
+    out = _format_aws_timeseries(
+        [{"usage_date": "2026-01-01", "cloud": "AWS", "total_dbu_hours": 10}],
+        {"start_date": "2026-01-01", "end_date": "2026-01-02"},
+    )
+    assert out["timeseries"][0]["AWS Cost"] == 5.0
+    assert "Infrastructure" in out["instance_families"]

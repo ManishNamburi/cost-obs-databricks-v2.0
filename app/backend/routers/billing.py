@@ -15,7 +15,6 @@ from backend.db import execute_query, execute_queries_parallel, get_catalog_sche
 from backend import cache_ttls
 from backend.queries import (
     ACCOUNT_INFO,
-    AWS_COST_BY_INSTANCE_TYPE,
     AWS_COST_ESTIMATE,
     AWS_COST_TIMESERIES,
     BILLING_BY_PRODUCT,
@@ -1121,17 +1120,7 @@ async def get_aws_costs(
                 else 0
             )
 
-        # Get instance family breakdown
-        family_results = await asyncio.to_thread(execute_query, AWS_COST_BY_INSTANCE_TYPE, params)
-        instance_families = []
-        for row in family_results:
-            instance_families.append(
-                {
-                    "instance_family": row.get("instance_family"),
-                    "total_dbu_hours": float(row.get("total_dbu_hours") or 0),
-                    "days_active": row.get("days_active") or 0,
-                }
-            )
+        instance_families = _families_from_cluster_rows(cluster_results, "AWS")
 
         return {
             "clusters": clusters,
@@ -1166,7 +1155,10 @@ async def get_aws_costs_timeseries(
     }
 
     try:
-        results = await asyncio.to_thread(execute_query, AWS_COST_TIMESERIES, params)
+        from backend.lakebase_read import PG_INFRA_TIMESERIES, gold_read
+        results = await asyncio.to_thread(
+            gold_read, "infra_timeseries", PG_INFRA_TIMESERIES, params, "", AWS_COST_TIMESERIES
+        )
         return _format_aws_timeseries(results, params)
     except Exception as e:
         return {
@@ -1261,9 +1253,7 @@ async def get_dashboard_bundle(
         "end_date": end_date or get_default_end_date(),
     }
 
-    from backend.lakebase_read import (
-        PG_INFRA_CLUSTERS, PG_INFRA_TIMESERIES, gold_read, warehouse_view_fallback,
-    )
+    from backend.lakebase_read import PG_INFRA_CLUSTERS, PG_INFRA_TIMESERIES, gold_read
 
     # Execute all queries in parallel
     queries = [
@@ -1276,7 +1266,6 @@ async def get_dashboard_bundle(
         ("pipeline_objects", lambda: _enrich_pipeline_results(execute_query(PIPELINE_OBJECTS, params))),
         ("interactive", lambda: execute_query(INTERACTIVE_BREAKDOWN, params)),
         ("aws_clusters", lambda: gold_read("infra_clusters", PG_INFRA_CLUSTERS, params, "", AWS_COST_ESTIMATE)),
-        ("aws_instances", lambda: execute_query(AWS_COST_BY_INSTANCE_TYPE, params) if warehouse_view_fallback() else []),
         ("aws_timeseries", lambda: gold_read("infra_timeseries", PG_INFRA_TIMESERIES, params, "", AWS_COST_TIMESERIES)),
     ]
 
@@ -1294,7 +1283,7 @@ async def get_dashboard_bundle(
             "pipeline_objects": _format_pipeline_objects(results.get("pipeline_objects"), params),
             "interactive": _format_interactive(results.get("interactive"), params),
             "aws": {
-                "clusters": _format_aws_clusters(results.get("aws_clusters"), results.get("aws_instances"), params),
+                "clusters": _format_aws_clusters(results.get("aws_clusters"), None, params),
                 "timeseries": _format_aws_timeseries(results.get("aws_timeseries"), params),
             },
         }
@@ -1917,6 +1906,34 @@ def _format_interactive(results: list[dict[str, Any]] | None, params: dict[str, 
     }
 
 
+def _families_from_cluster_rows(
+    cluster_results: list[dict[str, Any]] | None,
+    cloud: str = "AWS",
+) -> list[dict[str, Any]]:
+    """Roll instance families from gold cluster rows — no warehouse family query."""
+    if not cluster_results:
+        return []
+    family_agg: dict[str, dict[str, Any]] = {}
+    for row in cluster_results:
+        dbu_hours = float(row.get("total_dbu_hours") or 0)
+        days = int(row.get("days_active") or 0)
+        for itype in (row.get("driver_instance_type"), row.get("worker_instance_type")):
+            if not itype:
+                continue
+            family = get_instance_family(itype, cloud)
+            existing = family_agg.get(family)
+            if existing:
+                existing["total_dbu_hours"] += dbu_hours
+                existing["days_active"] = max(existing["days_active"], days)
+            else:
+                family_agg[family] = {
+                    "instance_family": family,
+                    "total_dbu_hours": dbu_hours,
+                    "days_active": days,
+                }
+    return sorted(family_agg.values(), key=lambda f: f["total_dbu_hours"], reverse=True)
+
+
 def _format_aws_clusters(
     cluster_results: list[dict[str, Any]] | None,
     instance_results: list[dict[str, Any]] | None,
@@ -1953,6 +1970,8 @@ def _format_aws_clusters(
                 "total_dbu_hours": float(row.get("total_dbu_hours") or 0),
                 "days_active": int(row.get("days_active") or 0),
             })
+    else:
+        instance_families = _families_from_cluster_rows(cluster_results, "AWS")
 
     return {
         "clusters": clusters,
@@ -1978,8 +1997,11 @@ def _format_aws_timeseries(results: list[dict[str, Any]] | None, params: dict[st
 
     for row in results:
         d = str(row.get("usage_date"))
-        family = row.get("instance_family") or "unknown"
-        cost = float(row.get("estimated_aws_cost") or 0)
+        family = row.get("instance_family") or "Infrastructure"
+        if row.get("estimated_aws_cost") is not None:
+            cost = float(row.get("estimated_aws_cost") or 0)
+        else:
+            cost = float(row.get("total_dbu_hours") or 0) * 0.50
         date_totals[d] += cost
         date_family[d][family] += cost
         all_families.add(family)
