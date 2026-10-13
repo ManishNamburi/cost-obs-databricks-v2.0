@@ -15,7 +15,26 @@ targets:
       lakebase_project_name: cost-obs-db-v21
       lakebase_endpoint_name: projects/cost-obs-db-v21/branches/production/endpoints/primary
       lakebase_read_mode: on
+      genie_space_id: "01f1c74dbd881472b50b041c6519fb01"
     resources:
+      apps:
+        cost_obs_app:
+          config:
+            env:
+              - name: COST_OBS_CATALOG
+                value: ${var.catalog}
+              - name: COST_OBS_SCHEMA
+                value: ${var.schema}
+              - name: ENDPOINT_NAME
+                value: ${var.lakebase_endpoint_name}
+              - name: DATABRICKS_WAREHOUSE_ID
+                value_from: sql-warehouse
+              - name: COST_OBS_LAKEBASE_READ
+                value: ${var.lakebase_read_mode}
+              - name: COST_OBS_SETUP_JOB_ID
+                value: ${resources.jobs.cost_obs_setup.id}
+              - name: GENIE_SPACE_ID
+                value: ${var.genie_space_id}
       postgres_projects:
         cost_obs_db:
           project_id: ${var.lakebase_project_name}

@@ -470,17 +470,28 @@ def _ensure_genie_space(w) -> str:
     if not warehouse_id:
         print("[seed_genie] Cannot create a Genie space — DATABRICKS_WAREHOUSE_ID is empty.")
         return ""
+    from genie_curation import INSTRUCTIONS, TRUSTED_ASSETS
+    # identifiers must be sorted or the Genie API rejects the export proto
+    tables = sorted(
+        ({"identifier": t, "column_configs": []} for t in TRUSTED_ASSETS),
+        key=lambda r: r["identifier"],
+    )
+    serialized = json.dumps(
+        {"version": 2, "data_sources": {"tables": tables}, "benchmarks": {"questions": []}},
+        indent=2,
+    )
     body = {
         "warehouse_id": warehouse_id,
         "display_name": _GENIE_SPACE_NAME,
         "title": _GENIE_SPACE_NAME,
         "description": "Cost observability — natural-language questions over Databricks billing system tables.",
+        "serialized_space": serialized,
     }
     try:
         created = w.api_client.do("POST", "/api/2.0/genie/spaces", body=body)
     except Exception as exc:
         print(f"[seed_genie] Create Genie space failed ({type(exc).__name__}): {exc}")
-        return ""
+        raise
     space_id = str(created.get("space_id") or created.get("id") or "").strip()
     if space_id:
         print(f"[seed_genie] Created Genie space {space_id} ({_GENIE_SPACE_NAME})")
@@ -504,8 +515,7 @@ def seed_genie() -> None:
     w = _get_workspace_client()
     genie_space_id = _ensure_genie_space(w)
     if not genie_space_id:
-        print("[seed_genie] Could not create or resolve a Genie space — skipping.")
-        return
+        raise RuntimeError("Could not create or resolve a Genie space for cost-obs.")
     _persist_genie_space_id(genie_space_id)
 
     from genie_curation import (
