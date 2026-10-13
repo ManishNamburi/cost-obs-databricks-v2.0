@@ -810,6 +810,12 @@ def _compute_apps_bundle(params: dict, id_list: list | None, active_only: bool, 
                     logger.warning("apps %s MV path failed (%s); falling back to raw scan", name, type(e).__name__)
             return raw_fallback()
 
+        from backend.lakebase_read import PG_APPS_IDENTITIES, gold_read, warehouse_view_fallback
+
+        def _gold_sps():
+            live = _ws(APPS_SERVICE_PRINCIPALS) if warehouse_view_fallback() else None
+            return gold_read("apps_identities", PG_APPS_IDENTITIES, params, ws_clause, live)
+
         queries = [
             ("summary", lambda: _mv_query("summary", MV_APPS_SUMMARY, lambda: execute_query(_ws(APPS_SUMMARY), params))),
             ("apps", lambda: _mv_query("apps", MV_APPS_BY_APP_FULL, lambda: execute_query(_ws(APPS_BY_APP_FULL), params))),
@@ -818,7 +824,7 @@ def _compute_apps_bundle(params: dict, id_list: list | None, active_only: bool, 
             ("avg_cost_per_app", lambda: _mv_query("avg_cost_per_app", MV_APPS_AVG_COST_PER_APP, lambda: execute_query(avg_cost_per_app_query, params), app_filter=_mv_app_filter)),
             ("sku_breakdown", lambda: _mv_query("sku_breakdown", MV_APPS_BY_APP_SKU, lambda: execute_query(_ws(APPS_BY_APP_SKU), params))),
             ("workspaces", lambda: _query_app_workspaces(params, ws_clause)),
-            ("service_principals", lambda: execute_query(_ws(APPS_SERVICE_PRINCIPALS), params)),
+            ("service_principals", lambda: _gold_sps()),
         ]
 
         results = execute_queries_parallel(queries, 75.0)

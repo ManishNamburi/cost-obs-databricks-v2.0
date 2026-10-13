@@ -571,9 +571,15 @@ async def get_warehouse_idle_time(
         "end_date": ed,
     }
 
+    from backend.lakebase_read import (
+        PG_WAREHOUSE_IDLE, PG_WAREHOUSE_IDLE_SERVERLESS, gold_read, warehouse_view_fallback,
+    )
     sql = _build_idle_time_sql(ws_clause, ws_clause_wh)
     try:
-        rows = await asyncio.to_thread(execute_query, sql, params)
+        rows = await asyncio.to_thread(
+            gold_read, "warehouse_idle", PG_WAREHOUSE_IDLE, params, ws_clause,
+            sql if warehouse_view_fallback() else None,
+        )
     except Exception as e:
         logger.warning("warehouse idle-time query failed: %s", e)
         return {"available": False, "error": str(e), "warehouses": [], "serverless_detected": False,
@@ -594,9 +600,25 @@ async def get_warehouse_idle_time(
             # so it's bounded by wall-clock even under high concurrency.
             "busy_union_minutes": int(row.get("busy_union_minutes") or 0),
             "idle_minutes": int(row.get("idle_minutes") or 0),
-            "idle_pct": float(row.get("idle_pct") or 0),
+            "idle_pct": (
+                float(row.get("idle_pct") or 0)
+                if row.get("idle_pct") is not None
+                else (
+                    round(100.0 * int(row.get("idle_minutes") or 0)
+                          / int(row.get("total_running_minutes") or 0), 1)
+                    if int(row.get("total_running_minutes") or 0) > 0 else 0.0
+                )
+            ),
             "warm_hold_minutes": int(row.get("warm_hold_minutes") or 0),
-            "keep_alive_score": float(row.get("keep_alive_score") or 0),
+            "keep_alive_score": (
+                float(row.get("keep_alive_score") or 0)
+                if row.get("keep_alive_score") is not None
+                else (
+                    round(100.0 * int(row.get("warm_hold_minutes") or 0)
+                          / (int(row.get("busy_union_minutes") or 0) + int(row.get("warm_hold_minutes") or 0)), 1)
+                    if (int(row.get("busy_union_minutes") or 0) + int(row.get("warm_hold_minutes") or 0)) > 0 else 0.0
+                )
+            ),
             "auto_stop_mins": int(row.get("auto_stop_mins") or 10),
             "max_num_clusters": int(row.get("max_num_clusters") or 1),
             "total_spend": float(row.get("total_spend") or 0),
@@ -605,13 +627,23 @@ async def get_warehouse_idle_time(
             "estimated_idle_spend": float(_est_idle) if _est_idle is not None else None,
             "low_confidence": bool(row.get("low_confidence") or False),
         })
+    lookback_min = max((
+        ( _date.fromisoformat(ed) - _date.fromisoformat(sd) ).days + 1
+    ) * 1440, 1)
+    for wh in warehouses:
+        if (wh.get("warehouse_type") == "SERVERLESS"
+                and wh.get("total_running_minutes", 0) >= 0.95 * lookback_min):
+            wh["low_confidence"] = True
 
     # If no classic warehouses found, check whether serverless warehouses exist (can't generate lifecycle events)
     serverless_detected = False
     if not warehouses:
         try:
             check_sql = _build_serverless_check_sql(ws_clause_wh)
-            check_rows = await asyncio.to_thread(execute_query, check_sql)
+            check_rows = await asyncio.to_thread(
+                gold_read, "warehouse_idle_serverless", PG_WAREHOUSE_IDLE_SERVERLESS, {}, "",
+                check_sql if warehouse_view_fallback() else None,
+            )
             serverless_detected = bool(check_rows and int(check_rows[0].get("serverless_count") or 0) > 0)
         except Exception:
             pass

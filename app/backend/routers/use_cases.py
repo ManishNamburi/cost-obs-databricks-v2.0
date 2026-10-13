@@ -1066,10 +1066,23 @@ async def get_available_objects(
                 detail=f"Invalid object_type: {object_type}. Must be one of: cluster, pipeline, warehouse, endpoint, job, query, dashboard"
             )
 
-        from backend.lakebase_read import PG_AVAILABLE_OBJECTS, gold_read, warehouse_view_fallback
+        from backend.lakebase_read import (
+            PG_AVAILABLE_DASHBOARDS, PG_AVAILABLE_OBJECTS, PG_AVAILABLE_QUERIES,
+            gold_read, warehouse_view_fallback,
+        )
         if object_type in ("cluster", "warehouse", "pipeline", "endpoint", "job"):
             results = await asyncio.to_thread(
                 gold_read, "available_objects", PG_AVAILABLE_OBJECTS, {"object_type": object_type}
+            )
+        elif object_type == "query":
+            results = await asyncio.to_thread(
+                gold_read, "available_queries", PG_AVAILABLE_QUERIES, {}, "",
+                query if warehouse_view_fallback() else None,
+            )
+        elif object_type == "dashboard":
+            results = await asyncio.to_thread(
+                gold_read, "available_dashboards", PG_AVAILABLE_DASHBOARDS, {}, "",
+                query if warehouse_view_fallback() else None,
             )
         elif warehouse_view_fallback():
             results = await asyncio.to_thread(execute_query, query, {})

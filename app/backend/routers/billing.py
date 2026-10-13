@@ -1417,6 +1417,14 @@ async def get_workspace_list(
         ORDER BY workspace_id
     """
     def _fetch_rows() -> list:
+        from backend.lakebase_read import PG_WORKSPACE_LIST, gold_read, warehouse_view_fallback
+        rows = gold_read("workspace_list", PG_WORKSPACE_LIST, params, ws_clause)
+        if rows:
+            if _account_ws_names:
+                rows = [{**r, "workspace_name": _account_ws_names.get(str(r["workspace_id"])) or r["workspace_name"]} for r in rows]
+            return rows
+        if not warehouse_view_fallback():
+            return []
         try:
             rows = execute_query(sql_with_names, params)
         except Exception as e:
@@ -1550,24 +1558,16 @@ async def get_dashboard_bundle_fast(
         # Also fetch most-recent-day workspace count; MV summary gives period-total DISTINCT
         # which is always >= any single day and mismatches the daily trend chart.
         _mv_ws_filter = wf.build_ws_filter_clause(col="workspace_id", id_list=id_list)
-        _WORKSPACE_COUNT_QUERY_MV = f"""
-        SELECT daily_ws as workspace_count FROM (
-          SELECT usage_date, COUNT(DISTINCT workspace_id) as daily_ws
-          FROM system.billing.usage
-          WHERE usage_date BETWEEN :start_date AND :end_date AND usage_quantity > 0
-          {_mv_ws_filter}
-          GROUP BY usage_date
-          ORDER BY usage_date DESC
-          LIMIT 1
-        )
-        """
+        from backend.lakebase_read import PG_WORKSPACE_COUNT_LATEST, gold_read
         queries = [
             ("summary", _mv_summary),
             ("products", _mv_products),
             ("workspaces", _mv_workspaces),
             ("timeseries", _mv_timeseries),
             ("etl_breakdown", lambda: _exec_mv(MV_ETL_BREAKDOWN, params, mv_ws)),
-            ("workspace_count", lambda: _live_if_allowed(_WORKSPACE_COUNT_QUERY_MV, params)),
+            ("workspace_count", lambda: gold_read(
+                "workspace_count_latest", PG_WORKSPACE_COUNT_LATEST, params, _mv_ws_filter,
+            )),
         ]
     else:
         # Fall back to fast queries without MVs; inject workspace filter when active.
@@ -2302,9 +2302,13 @@ async def get_platform_kpis(
         except Exception as e:
             logger.debug(f"MV query stats failed: {e}")
 
-    # Get billing-based stats (always use fast query for these)
-    query = PLATFORM_KPIS_FAST if fast or use_mv else PLATFORM_KPIS
-    results = await asyncio.to_thread(execute_query, query, params)
+    from backend.lakebase_read import PG_KPI_BILLING, gold_read, warehouse_view_fallback
+    results = await asyncio.to_thread(
+        gold_read, "kpi_billing", PG_KPI_BILLING, params, "",
+        PLATFORM_KPIS_FAST if (fast or use_mv) and warehouse_view_fallback() else (
+            PLATFORM_KPIS if warehouse_view_fallback() else None
+        ),
+    )
 
     if results and len(results) > 0:
         row = results[0]
@@ -2368,17 +2372,25 @@ async def get_kpis_bundle(
 
     anomalies_sql = SPEND_ANOMALIES
 
-    # BILLING_KPIS_FAST has no table alias — use unqualified column name for the workspace filter.
-    # ws_clause uses "u.workspace_id" (for aliased queries); build a separate clause here.
+    from backend.lakebase_read import (
+        PG_AVG_DAILY_MODELS, PG_KPI_BILLING, PG_KPI_LAKEFLOW, PG_QUERY_USER_COUNT,
+        PG_SPEND_ANOMALIES, PG_STICKINESS, PG_TOTAL_WORKSPACES, gold_read,
+        warehouse_view_fallback,
+    )
     billing_ws_clause = wf.build_ws_filter_clause(id_list=id_list, col="workspace_id")
-    billing_kpis_sql = _inject_ws_filter(BILLING_KPIS_FAST, billing_ws_clause)
+    live_ok = warehouse_view_fallback()
+    billing_kpis_sql = _inject_ws_filter(BILLING_KPIS_FAST, billing_ws_clause) if live_ok else None
 
-    # Run billing and lakeflow queries separately so a lakeflow permission failure
-    # doesn't zero out the billing-backed KPIs (jobs, workspaces, clusters).
     parallel_queries: list[tuple[str, Any]] = [
-        ("billing_kpis", lambda: execute_query(billing_kpis_sql, params)),
-        ("lakeflow_kpis", lambda: execute_query(LAKEFLOW_JOB_STATS, params)),
-        ("anomalies", lambda: execute_query(_inject_ws_filter(anomalies_sql, ws_clause), params)),
+        ("billing_kpis", lambda: gold_read("kpi_billing", PG_KPI_BILLING, params, billing_ws_clause, billing_kpis_sql)),
+        ("lakeflow_kpis", lambda: gold_read(
+            "kpi_lakeflow", PG_KPI_LAKEFLOW, params, billing_ws_clause,
+            LAKEFLOW_JOB_STATS if live_ok else None,
+        )),
+        ("anomalies", lambda: gold_read(
+            "spend_anomalies", PG_SPEND_ANOMALIES, params, ws_clause,
+            _inject_ws_filter(anomalies_sql, ws_clause) if live_ok else None,
+        )),
     ]
     if use_mv:
         parallel_queries.append(("avg_daily_ws", lambda: _exec_mv(AVG_DAILY_WORKSPACES, params, mv_ws)))
@@ -2390,15 +2402,23 @@ async def get_kpis_bundle(
     else:
         parallel_queries.append(("delta_query_stats", lambda: execute_query(delta_query_stats_sql, params)))
 
-    # Supplemental user count from materialized table — failures handled inside execute_query
-    parallel_queries.append(("user_count", lambda: execute_query(USER_COUNT_QUERY, params)))
-    # Workspace count (all-time) and avg daily model endpoints — fast billing scans
-    parallel_queries.append(("total_workspaces", lambda: execute_query(TOTAL_WORKSPACES_ALLTIME, {})))
-    avg_daily_models_sql = _inject_ws_filter(AVG_DAILY_MODELS, billing_ws_clause)
-    parallel_queries.append(("avg_daily_models", lambda: execute_query(avg_daily_models_sql, params)))
+    parallel_queries.append(("user_count", lambda: gold_read(
+        "query_user_count", PG_QUERY_USER_COUNT, params, billing_ws_clause,
+        USER_COUNT_QUERY if live_ok else None,
+    )))
+    parallel_queries.append(("total_workspaces", lambda: gold_read(
+        "total_workspaces_alltime", PG_TOTAL_WORKSPACES, {}, "",
+        TOTAL_WORKSPACES_ALLTIME if live_ok else None,
+    )))
+    avg_daily_models_sql = _inject_ws_filter(AVG_DAILY_MODELS, billing_ws_clause) if live_ok else None
+    parallel_queries.append(("avg_daily_models", lambda: gold_read(
+        "avg_daily_models", PG_AVG_DAILY_MODELS, params, billing_ws_clause, avg_daily_models_sql,
+    )))
     _qh_ws = ws_clause if ws_clause else ""
-    stickiness_sql = STICKINESS_PCT_QH.format(ws_filter=_qh_ws)
-    parallel_queries.append(("stickiness_pct", lambda: execute_query(stickiness_sql, params)))
+    stickiness_sql = STICKINESS_PCT_QH.format(ws_filter=_qh_ws) if live_ok else None
+    parallel_queries.append(("stickiness_pct", lambda: gold_read(
+        "stickiness_pct", PG_STICKINESS, params, billing_ws_clause, stickiness_sql,
+    )))
 
     try:
         query_results = await asyncio.to_thread(execute_queries_parallel, parallel_queries, timeout=90.0)
@@ -3297,6 +3317,38 @@ async def get_platform_kpi_trend(
         return data
 
     ws_clause = wf.build_ws_filter_clause(col="workspace_id", id_list=id_list)
+    from backend.lakebase_read import PLATFORM_KPI_TREND_PG, gold_read, warehouse_view_fallback
+    pg_tmpl = PLATFORM_KPI_TREND_PG.get(kpi)
+    if pg_tmpl:
+        rows = await asyncio.to_thread(
+            gold_read, f"platform_kpi_trend_{kpi}", pg_tmpl, params, ws_clause,
+        )
+        if rows or not warehouse_view_fallback():
+            daily_points = [{"date": str(r["date"])[:10], "value": float(r.get("value") or 0)} for r in rows]
+            PLATFORM_AVG_KPIS = {"avg_query_duration"}
+            if granularity == "weekly" and daily_points:
+                from datetime import datetime, timedelta
+                buckets: dict[str, list[float]] = {}
+                for dp in daily_points:
+                    d = datetime.strptime(dp["date"], "%Y-%m-%d")
+                    week_start = d - timedelta(days=d.weekday())
+                    buckets.setdefault(week_start.strftime("%Y-%m-%d"), []).append(dp["value"])
+                data_points = [
+                    {"date": key, "value": (sum(v) / len(v) if kpi in PLATFORM_AVG_KPIS else sum(v))}
+                    for key, v in sorted(buckets.items())
+                ]
+            elif granularity == "monthly" and daily_points:
+                buckets_m: dict[str, list[float]] = {}
+                for dp in daily_points:
+                    buckets_m.setdefault(str(dp["date"])[:7] + "-01", []).append(dp["value"])
+                data_points = [
+                    {"date": key, "value": (sum(v) / len(v) if kpi in PLATFORM_AVG_KPIS else sum(v))}
+                    for key, v in sorted(buckets_m.items())
+                ]
+            else:
+                data_points = daily_points
+            return _resp(_build_platform_kpi_response(kpi, granularity, data_points))
+
     # KPIs sourced from system.query.history (workspace_id filter via _inject_qh_ws_filter)
     _QH_KPIS = frozenset({"total_queries", "total_rows_read", "total_bytes_read",
                            "total_compute_seconds", "total_users", "avg_query_duration",

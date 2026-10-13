@@ -668,9 +668,14 @@ REMAINING_MERGE = {
 
 def remaining_tables() -> tuple[dict, dict, dict]:
     """Include AI Gateway gold only when the shared usage table is configured."""
+    from backend.materialized_views_viewer import viewer_tables
+    _v_create, _v_merge, _v_refresh = viewer_tables()
     create = dict(REMAINING_CREATE)
+    create.update(_v_create)
     merge = dict(REMAINING_MERGE)
+    merge.update(_v_merge)
     refresh = dict(REMAINING_TABLE_REFRESH)
+    refresh.update(_v_refresh)
     tbl = os.environ.get("AI_GATEWAY_USAGE_TABLE", "").strip()
     if tbl:
         create["daily_ai_gateway"] = CREATE_DAILY_AI_GATEWAY.replace("{ai_gateway_table}", tbl)
@@ -887,3 +892,6 @@ FROM `{catalog}`.`{schema}`.`daily_ai_gateway`
 WHERE usage_date BETWEEN :start_date AND :end_date {ws_filter}
 """,
 }
+
+from backend.materialized_views_viewer import VIEWER_GOLD_SQL
+REMAINING_GOLD_SQL.update(VIEWER_GOLD_SQL)

@@ -264,12 +264,21 @@ def test_remaining_gold_tables_registered():
         "daily_infra_cluster_spend",
         "daily_dbsql_warehouse_type",
         "warehouse_optimizer_findings",
+        "daily_warehouse_idle",
+        "daily_kpi_facts",
+        "daily_query_users",
+        "daily_apps_identities",
+        "use_case_query_objects",
+        "daily_azure_actuals",
+        "daily_gcp_actuals",
     ):
         assert name in EXTRA_CREATE
         assert name in EXTRA_TABLE_REFRESH
         assert "{catalog}" in EXTRA_CREATE[name]
     assert "daily_user_spend" in EXTRA_MERGE
+    assert "daily_warehouse_idle" in EXTRA_MERGE
     assert "warehouse_optimizer_findings" not in EXTRA_MERGE  # always full rebuild
+    assert "use_case_query_objects" not in EXTRA_MERGE
 
 
 def test_remaining_pg_templates_are_postgres():
@@ -285,3 +294,20 @@ def test_remaining_pg_templates_are_postgres():
     untagged = PG_UNTAGGED.format(ws_filter="", id_col="cluster_id", name_col="cluster_name")
     assert "FROM daily_untagged_objects" in untagged
     assert "`" not in untagged
+
+
+def test_viewer_gold_pg_templates_are_postgres():
+    from backend.lakebase_read import (
+        PG_APPS_IDENTITIES, PG_AVAILABLE_QUERIES, PG_AZURE_SUMMARY, PG_GCP_SUMMARY,
+        PG_KPI_BILLING, PG_STICKINESS, PG_WAREHOUSE_IDLE, PG_WORKSPACE_LIST,
+        PLATFORM_KPI_TREND_PG,
+    )
+    for sql in (PG_WORKSPACE_LIST, PG_WAREHOUSE_IDLE, PG_KPI_BILLING, PG_STICKINESS, PG_APPS_IDENTITIES):
+        formatted = sql.format(ws_filter="")
+        assert "`" not in formatted
+        assert "system." not in formatted
+        assert "%(start_date)s" in formatted
+    assert "daily_azure_actuals" in PG_AZURE_SUMMARY
+    assert "daily_gcp_actuals" in PG_GCP_SUMMARY
+    assert "use_case_query_objects" in PG_AVAILABLE_QUERIES
+    assert "system." not in PLATFORM_KPI_TREND_PG["total_queries"].format(ws_filter="")

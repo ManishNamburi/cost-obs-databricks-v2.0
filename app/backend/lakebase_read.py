@@ -1083,6 +1083,366 @@ WHERE usage_date BETWEEN %(start_date)s AND %(end_date)s
   {ws_filter}
 """
 
+PG_WORKSPACE_LIST = """
+SELECT NULLIF(workspace_id, '__account__') AS workspace_id,
+  MAX(NULLIF(workspace_name, '__na__')) AS workspace_name
+FROM daily_workspace_breakdown
+WHERE usage_date BETWEEN %(start_date)s AND %(end_date)s
+  AND workspace_id IS NOT NULL AND workspace_id <> '__account__'
+  {ws_filter}
+GROUP BY NULLIF(workspace_id, '__account__')
+ORDER BY COALESCE(MAX(NULLIF(workspace_name, '__na__')), NULLIF(workspace_id, '__account__'))
+"""
+
+PG_WORKSPACE_COUNT_LATEST = """
+SELECT daily_ws AS workspace_count FROM (
+  SELECT usage_date, COUNT(DISTINCT NULLIF(workspace_id, '__account__')) AS daily_ws
+  FROM daily_workspace_breakdown
+  WHERE usage_date BETWEEN %(start_date)s AND %(end_date)s
+    {ws_filter}
+  GROUP BY usage_date
+  ORDER BY usage_date DESC
+  LIMIT 1
+) t
+"""
+
+PG_WAREHOUSE_IDLE = """
+SELECT NULLIF(warehouse_id, '__na__') AS warehouse_id,
+  MAX(NULLIF(warehouse_name, '__na__')) AS warehouse_name,
+  MAX(warehouse_size) AS warehouse_size,
+  MAX(warehouse_type) AS warehouse_type,
+  MAX(NULLIF(workspace_id, '__account__')) AS workspace_id,
+  CASE WHEN MAX(CASE WHEN uptime_source = 'events' THEN 1 ELSE 0 END) = 1 THEN 'events' ELSE 'billing' END AS uptime_source,
+  SUM(total_running_minutes) AS total_running_minutes,
+  SUM(busy_union_minutes) AS busy_union_minutes,
+  SUM(idle_minutes) AS idle_minutes,
+  SUM(warm_hold_minutes) AS warm_hold_minutes,
+  MAX(auto_stop_mins) AS auto_stop_mins,
+  MAX(max_num_clusters) AS max_num_clusters,
+  SUM(total_spend) AS total_spend,
+  SUM(estimated_idle_spend) AS estimated_idle_spend
+FROM daily_warehouse_idle
+WHERE usage_date BETWEEN %(start_date)s AND %(end_date)s
+  {ws_filter}
+GROUP BY NULLIF(warehouse_id, '__na__')
+HAVING SUM(total_running_minutes) >= 10
+ORDER BY COALESCE(SUM(estimated_idle_spend), -1) DESC, SUM(warm_hold_minutes) DESC, SUM(total_spend) DESC
+LIMIT 25
+"""
+
+PG_WAREHOUSE_IDLE_SERVERLESS = """
+SELECT COUNT(DISTINCT NULLIF(warehouse_id, '__na__')) AS serverless_count
+FROM daily_warehouse_idle
+WHERE warehouse_type = 'SERVERLESS'
+"""
+
+PG_KPI_BILLING = """
+SELECT
+  COUNT(DISTINCT NULLIF(workspace_id, '__account__')) AS active_workspaces,
+  SUM(distinct_jobs) AS total_jobs,
+  SUM(job_run_rows) AS total_job_runs,
+  SUM(distinct_job_owners) AS unique_job_owners,
+  SUM(distinct_clusters) AS total_clusters,
+  SUM(distinct_sql_warehouses) AS sql_warehouses,
+  SUM(sql_dbus) AS sql_dbus,
+  SUM(distinct_models) AS models_served,
+  SUM(serving_dbus) AS total_serving_dbus
+FROM daily_kpi_facts
+WHERE usage_date BETWEEN %(start_date)s AND %(end_date)s
+  {ws_filter}
+"""
+
+PG_KPI_LAKEFLOW = """
+SELECT SUM(total_runs) AS total_runs, SUM(successful_runs) AS successful_runs,
+  SUM(total_run_hours) AS total_run_hours
+FROM daily_lakeflow_stats
+WHERE usage_date BETWEEN %(start_date)s AND %(end_date)s
+  {ws_filter}
+"""
+
+PG_TOTAL_WORKSPACES = """
+SELECT COUNT(DISTINCT NULLIF(workspace_id, '__account__')) AS total_workspaces
+FROM daily_workspace_breakdown
+"""
+
+PG_AVG_DAILY_MODELS = """
+SELECT COALESCE(ROUND(AVG(daily_models)), 0) AS avg_daily_models
+FROM (
+  SELECT usage_date, SUM(distinct_models) AS daily_models
+  FROM daily_kpi_facts
+  WHERE usage_date BETWEEN %(start_date)s AND %(end_date)s
+    {ws_filter}
+  GROUP BY usage_date
+) t
+"""
+
+PG_QUERY_USER_COUNT = """
+SELECT COUNT(DISTINCT NULLIF(user_id, '__na__')) AS unique_query_users
+FROM daily_query_users
+WHERE usage_date BETWEEN %(start_date)s AND %(end_date)s
+  {ws_filter}
+"""
+
+PG_STICKINESS = """
+WITH total_users AS (
+  SELECT COUNT(DISTINCT NULLIF(user_id, '__na__')) AS total
+  FROM daily_query_users
+  WHERE usage_date BETWEEN %(start_date)s AND %(end_date)s
+    {ws_filter}
+),
+daily_users AS (
+  SELECT usage_date, COUNT(DISTINCT NULLIF(user_id, '__na__')) AS dau
+  FROM daily_query_users
+  WHERE usage_date BETWEEN %(start_date)s AND %(end_date)s
+    {ws_filter}
+  GROUP BY usage_date
+)
+SELECT ROUND(AVG(100.0 * d.dau / NULLIF(t.total, 0))::numeric, 1) AS stickiness_pct
+FROM daily_users d CROSS JOIN total_users t
+"""
+
+PG_SPEND_ANOMALIES = """
+WITH daily_stats AS (
+  SELECT usage_date, SUM(total_spend) AS daily_spend
+  FROM daily_usage_summary
+  WHERE usage_date BETWEEN %(start_date)s AND %(end_date)s
+    {ws_filter}
+  GROUP BY usage_date
+),
+with_lag AS (
+  SELECT usage_date, daily_spend,
+    LAG(daily_spend) OVER (ORDER BY usage_date) AS prev_day_spend
+  FROM daily_stats
+)
+SELECT usage_date, daily_spend, prev_day_spend,
+  daily_spend - prev_day_spend AS change_amount,
+  ROUND((100.0 * (daily_spend - prev_day_spend) / NULLIF(prev_day_spend, 0))::numeric, 2) AS change_percent
+FROM with_lag
+WHERE prev_day_spend IS NOT NULL AND prev_day_spend > 0
+ORDER BY ABS(change_percent) DESC
+LIMIT 20
+"""
+
+PG_APPS_IDENTITIES = """
+SELECT NULLIF(app_id, '__na__') AS app_id, NULLIF(run_as, '__na__') AS run_as
+FROM daily_apps_identities
+WHERE usage_date BETWEEN %(start_date)s AND %(end_date)s
+  {ws_filter}
+GROUP BY NULLIF(app_id, '__na__'), NULLIF(run_as, '__na__')
+"""
+
+PG_AVAILABLE_QUERIES = """
+SELECT NULLIF(object_id, '__na__') AS object_id,
+  MAX(NULLIF(object_name, '__na__')) AS object_name,
+  MAX(NULLIF(workspace_id, '__account__')) AS workspace_id
+FROM use_case_query_objects
+WHERE snapshot_date = (SELECT MAX(snapshot_date) FROM use_case_query_objects)
+GROUP BY NULLIF(object_id, '__na__')
+LIMIT 100
+"""
+
+PG_AVAILABLE_DASHBOARDS = """
+SELECT NULLIF(object_id, '__na__') AS object_id,
+  MAX(NULLIF(object_name, '__na__')) AS object_name,
+  MAX(NULLIF(workspace_id, '__account__')) AS workspace_id
+FROM use_case_dashboard_objects
+WHERE snapshot_date = (SELECT MAX(snapshot_date) FROM use_case_dashboard_objects)
+GROUP BY NULLIF(object_id, '__na__')
+LIMIT 100
+"""
+
+PG_AZURE_SUMMARY = """
+SELECT SUM(total_cost) AS total_cost, SUM(total_cost_usd) AS total_cost_usd,
+  COUNT(DISTINCT NULLIF(cluster_id, '__na__')) AS cluster_count,
+  COUNT(DISTINCT NULLIF(warehouse_id, '__na__')) AS warehouse_count,
+  COUNT(DISTINCT usage_date) AS days_in_range
+FROM daily_azure_actuals
+WHERE usage_date >= %(start_date)s AND usage_date < %(end_date)s
+"""
+
+PG_AZURE_BY_CLUSTER = """
+SELECT NULLIF(cluster_id, '__na__') AS cluster_id,
+  SUM(CASE WHEN charge_type = 'Compute' THEN total_cost ELSE 0 END) AS compute_cost,
+  SUM(CASE WHEN charge_type = 'Storage' THEN total_cost ELSE 0 END) AS storage_cost,
+  SUM(CASE WHEN charge_type = 'Networking' THEN total_cost ELSE 0 END) AS network_cost,
+  SUM(total_cost) AS total_cost, COUNT(DISTINCT usage_date) AS days_active
+FROM daily_azure_actuals
+WHERE usage_date >= %(start_date)s AND usage_date < %(end_date)s
+  AND cluster_id IS NOT NULL AND cluster_id <> '__na__'
+GROUP BY NULLIF(cluster_id, '__na__')
+ORDER BY total_cost DESC
+LIMIT 100
+"""
+
+PG_AZURE_BY_CHARGE_TYPE = """
+SELECT charge_type, SUM(total_cost) AS total_cost, SUM(total_cost_usd) AS total_cost_usd
+FROM daily_azure_actuals
+WHERE usage_date >= %(start_date)s AND usage_date < %(end_date)s
+GROUP BY charge_type
+ORDER BY total_cost DESC
+"""
+
+PG_AZURE_TIMESERIES = """
+SELECT usage_date AS date, charge_type, SUM(total_cost) AS daily_cost
+FROM daily_azure_actuals
+WHERE usage_date >= %(start_date)s AND usage_date < %(end_date)s
+GROUP BY usage_date, charge_type
+ORDER BY date
+"""
+
+PG_GCP_SUMMARY = """
+SELECT SUM(total_cost) AS total_cost, MAX(currency) AS currency,
+  COUNT(DISTINCT NULLIF(project_id, '__na__')) AS project_count,
+  COUNT(DISTINCT service) AS service_count,
+  COUNT(DISTINCT usage_date) AS days_in_range
+FROM daily_gcp_actuals
+WHERE usage_date >= %(start_date)s AND usage_date < %(end_date)s
+"""
+
+PG_GCP_BY_SERVICE = """
+SELECT service, SUM(total_cost) AS total_cost, COUNT(DISTINCT usage_date) AS days_active
+FROM daily_gcp_actuals
+WHERE usage_date >= %(start_date)s AND usage_date < %(end_date)s
+GROUP BY service
+ORDER BY total_cost DESC
+LIMIT 50
+"""
+
+PG_GCP_BY_PROJECT = """
+SELECT NULLIF(project_id, '__na__') AS project_id, MAX(project_name) AS project_name,
+  SUM(total_cost) AS total_cost, COUNT(DISTINCT service) AS service_count
+FROM daily_gcp_actuals
+WHERE usage_date >= %(start_date)s AND usage_date < %(end_date)s
+GROUP BY NULLIF(project_id, '__na__')
+ORDER BY total_cost DESC
+LIMIT 50
+"""
+
+PG_GCP_TIMESERIES = """
+SELECT usage_date AS date, service, SUM(total_cost) AS daily_cost
+FROM daily_gcp_actuals
+WHERE usage_date >= %(start_date)s AND usage_date < %(end_date)s
+GROUP BY usage_date, service
+ORDER BY date
+"""
+
+PG_GCP_BY_SKU = """
+SELECT service, sku, SUM(total_cost) AS total_cost
+FROM daily_gcp_actuals
+WHERE usage_date >= %(start_date)s AND usage_date < %(end_date)s
+GROUP BY service, sku
+ORDER BY total_cost DESC
+LIMIT 100
+"""
+
+PG_KPI_TREND_QUERIES = """
+SELECT usage_date AS date, SUM(total_queries) AS value
+FROM daily_query_stats
+WHERE usage_date BETWEEN %(start_date)s AND %(end_date)s {ws_filter}
+GROUP BY usage_date ORDER BY usage_date
+"""
+
+PG_KPI_TREND_ROWS = """
+SELECT usage_date AS date, SUM(total_rows_read) AS value
+FROM daily_query_stats
+WHERE usage_date BETWEEN %(start_date)s AND %(end_date)s {ws_filter}
+GROUP BY usage_date ORDER BY usage_date
+"""
+
+PG_KPI_TREND_BYTES = """
+SELECT usage_date AS date, SUM(total_bytes_read) AS value
+FROM daily_query_stats
+WHERE usage_date BETWEEN %(start_date)s AND %(end_date)s {ws_filter}
+GROUP BY usage_date ORDER BY usage_date
+"""
+
+PG_KPI_TREND_COMPUTE = """
+SELECT usage_date AS date, SUM(total_compute_seconds) AS value
+FROM daily_query_stats
+WHERE usage_date BETWEEN %(start_date)s AND %(end_date)s {ws_filter}
+GROUP BY usage_date ORDER BY usage_date
+"""
+
+PG_KPI_TREND_USERS = """
+SELECT usage_date AS date, COUNT(DISTINCT NULLIF(user_id, '__na__')) AS value
+FROM daily_query_users
+WHERE usage_date BETWEEN %(start_date)s AND %(end_date)s {ws_filter}
+GROUP BY usage_date ORDER BY usage_date
+"""
+
+PG_KPI_TREND_JOBS = """
+SELECT usage_date AS date, SUM(distinct_jobs) AS value
+FROM daily_kpi_facts
+WHERE usage_date BETWEEN %(start_date)s AND %(end_date)s {ws_filter}
+GROUP BY usage_date ORDER BY usage_date
+"""
+
+PG_KPI_TREND_JOB_RUNS = """
+SELECT usage_date AS date, SUM(job_run_rows) AS value
+FROM daily_kpi_facts
+WHERE usage_date BETWEEN %(start_date)s AND %(end_date)s {ws_filter}
+GROUP BY usage_date ORDER BY usage_date
+"""
+
+PG_KPI_TREND_CLUSTERS = """
+SELECT usage_date AS date, SUM(distinct_clusters) AS value
+FROM daily_kpi_facts
+WHERE usage_date BETWEEN %(start_date)s AND %(end_date)s {ws_filter}
+GROUP BY usage_date ORDER BY usage_date
+"""
+
+PG_KPI_TREND_MODELS = """
+SELECT usage_date AS date, SUM(distinct_models) AS value
+FROM daily_kpi_facts
+WHERE usage_date BETWEEN %(start_date)s AND %(end_date)s {ws_filter}
+GROUP BY usage_date ORDER BY usage_date
+"""
+
+PG_KPI_TREND_LAKEFLOW_SUCCESS = """
+SELECT usage_date AS date, SUM(successful_runs) AS value
+FROM daily_lakeflow_stats
+WHERE usage_date BETWEEN %(start_date)s AND %(end_date)s {ws_filter}
+GROUP BY usage_date ORDER BY usage_date
+"""
+
+PG_KPI_TREND_STICKINESS = """
+WITH total_users AS (
+  SELECT COUNT(DISTINCT NULLIF(user_id, '__na__')) AS total
+  FROM daily_query_users
+  WHERE usage_date BETWEEN %(start_date)s AND %(end_date)s {ws_filter}
+),
+daily_users AS (
+  SELECT usage_date AS date, COUNT(DISTINCT NULLIF(user_id, '__na__')) AS dau
+  FROM daily_query_users
+  WHERE usage_date BETWEEN %(start_date)s AND %(end_date)s {ws_filter}
+  GROUP BY usage_date
+)
+SELECT d.date, 100.0 * d.dau / NULLIF(t.total, 0) AS value
+FROM daily_users d CROSS JOIN total_users t
+ORDER BY d.date
+"""
+
+PLATFORM_KPI_TREND_PG = {
+    "total_queries": PG_KPI_TREND_QUERIES,
+    "total_rows_read": PG_KPI_TREND_ROWS,
+    "total_bytes_read": PG_KPI_TREND_BYTES,
+    "total_compute_seconds": PG_KPI_TREND_COMPUTE,
+    "total_users": PG_KPI_TREND_USERS,
+    "total_jobs": PG_KPI_TREND_JOBS,
+    "total_job_runs": PG_KPI_TREND_JOB_RUNS,
+    "active_notebooks": PG_KPI_TREND_CLUSTERS,
+    "active_workspaces": PG_KPI_TREND_WORKSPACES,
+    "models_served": PG_KPI_TREND_MODELS,
+    "successful_runs": PG_KPI_TREND_LAKEFLOW_SUCCESS,
+    "stickiness": PG_KPI_TREND_STICKINESS,
+    "unique_warehouses": """
+SELECT usage_date AS date, COUNT(DISTINCT NULLIF(warehouse_id, '__na__')) AS value
+FROM daily_dbsql_warehouse_type
+WHERE usage_date BETWEEN %(start_date)s AND %(end_date)s {ws_filter}
+GROUP BY usage_date ORDER BY usage_date
+""",
+}
+
 KPI_TREND_PG = {
     "total_spend": PG_KPI_TREND_SPEND,
     "avg_daily_spend": PG_KPI_TREND_SPEND,

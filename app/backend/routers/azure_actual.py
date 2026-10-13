@@ -130,9 +130,17 @@ async def get_azure_status() -> dict[str, Any]:
         available = _azure_status_cache["available"]
     else:
         try:
-            query = CHECK_AZURE_TABLES.format(catalog=catalog, schema=schema, table="actuals_gold")
-            results = await asyncio.to_thread(execute_query, query)
-            available = len(results) > 0
+            from backend.lakebase_read import warehouse_view_fallback
+            if not warehouse_view_fallback():
+                from backend.db import lakebase_query
+                rows = await asyncio.to_thread(
+                    lakebase_query, "SELECT 1 FROM daily_azure_actuals LIMIT 1", {}
+                )
+                available = bool(rows)
+            else:
+                query = CHECK_AZURE_TABLES.format(catalog=catalog, schema=schema, table="actuals_gold")
+                results = await asyncio.to_thread(execute_query, query)
+                available = len(results) > 0
         except Exception as e:
             logger.warning(f"Azure cost tables not available: {e}")
             available = False
@@ -162,10 +170,17 @@ async def get_azure_actual_summary(
     if not status["azure_available"]:
         return {"available": False, "message": "Azure cost data not configured.", "start_date": start_date, "end_date": end_date}
 
-    results = await asyncio.to_thread(execute_query, 
-        AZURE_ACTUAL_SUMMARY.format(catalog=catalog, schema=schema),
-        {"start_date": start_date, "end_date": end_date},
-    )
+    qparams = {"start_date": start_date, "end_date": end_date}
+    query = AZURE_ACTUAL_SUMMARY.format(catalog=catalog, schema=schema)
+
+    def _azure_summary():
+        from backend.lakebase_read import PG_AZURE_SUMMARY, gold_read, warehouse_view_fallback
+        return gold_read(
+            "azure_summary", PG_AZURE_SUMMARY, qparams, "",
+            query if warehouse_view_fallback() else None,
+        )
+
+    results = await asyncio.to_thread(_azure_summary)
     if not results:
         return {"available": True, "total_cost": 0, "total_cost_usd": 0, "cluster_count": 0, "warehouse_count": 0, "days_in_range": 0, "start_date": start_date, "end_date": end_date}
 
@@ -197,10 +212,17 @@ async def get_azure_costs_by_cluster(
     if not status["azure_available"]:
         return {"available": False, "clusters": [], "start_date": start_date, "end_date": end_date}
 
-    results = await asyncio.to_thread(execute_query, 
-        AZURE_COSTS_BY_CLUSTER.format(catalog=catalog, schema=schema),
-        {"start_date": start_date, "end_date": end_date},
-    )
+    qparams = {"start_date": start_date, "end_date": end_date}
+    query = AZURE_COSTS_BY_CLUSTER.format(catalog=catalog, schema=schema)
+
+    def _azure_clusters():
+        from backend.lakebase_read import PG_AZURE_BY_CLUSTER, gold_read, warehouse_view_fallback
+        return gold_read(
+            "azure_by_cluster", PG_AZURE_BY_CLUSTER, qparams, "",
+            query if warehouse_view_fallback() else None,
+        )
+
+    results = await asyncio.to_thread(_azure_clusters)
 
     clusters = []
     total_cost = 0
@@ -236,10 +258,17 @@ async def get_azure_costs_by_charge_type(
     if not status["azure_available"]:
         return {"available": False, "charge_types": [], "start_date": start_date, "end_date": end_date}
 
-    results = await asyncio.to_thread(execute_query, 
-        AZURE_COSTS_BY_CHARGE_TYPE.format(catalog=catalog, schema=schema),
-        {"start_date": start_date, "end_date": end_date},
-    )
+    qparams = {"start_date": start_date, "end_date": end_date}
+    query = AZURE_COSTS_BY_CHARGE_TYPE.format(catalog=catalog, schema=schema)
+
+    def _azure_charge():
+        from backend.lakebase_read import PG_AZURE_BY_CHARGE_TYPE, gold_read, warehouse_view_fallback
+        return gold_read(
+            "azure_by_charge_type", PG_AZURE_BY_CHARGE_TYPE, qparams, "",
+            query if warehouse_view_fallback() else None,
+        )
+
+    results = await asyncio.to_thread(_azure_charge)
     total = sum(float(r.get("total_cost") or 0) for r in results)
     charge_types = [
         {
@@ -268,10 +297,17 @@ async def get_azure_costs_timeseries(
     if not status["azure_available"]:
         return {"available": False, "timeseries": [], "charge_types": [], "start_date": start_date, "end_date": end_date}
 
-    results = await asyncio.to_thread(execute_query, 
-        AZURE_COSTS_TIMESERIES.format(catalog=catalog, schema=schema),
-        {"start_date": start_date, "end_date": end_date},
-    )
+    qparams = {"start_date": start_date, "end_date": end_date}
+    query = AZURE_COSTS_TIMESERIES.format(catalog=catalog, schema=schema)
+
+    def _azure_ts():
+        from backend.lakebase_read import PG_AZURE_TIMESERIES, gold_read, warehouse_view_fallback
+        return gold_read(
+            "azure_timeseries", PG_AZURE_TIMESERIES, qparams, "",
+            query if warehouse_view_fallback() else None,
+        )
+
+    results = await asyncio.to_thread(_azure_ts)
 
     data_by_date: dict[str, dict] = {}
     charge_types_set: set[str] = set()

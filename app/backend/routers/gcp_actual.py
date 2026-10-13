@@ -174,10 +174,19 @@ async def get_gcp_status() -> dict[str, Any]:
         available = _gcp_status_cache["available"]
     else:
         try:
-            results = await asyncio.to_thread(execute_query, 
-                CHECK_GCP_TABLE.format(catalog=catalog, schema=schema, table=table)
-            )
-            available = len(results) > 0
+            from backend.lakebase_read import warehouse_view_fallback
+            if not warehouse_view_fallback():
+                from backend.db import lakebase_query
+                rows = await asyncio.to_thread(
+                    lakebase_query, "SELECT 1 FROM daily_gcp_actuals LIMIT 1", {}
+                )
+                available = bool(rows)
+            else:
+                results = await asyncio.to_thread(
+                    execute_query,
+                    CHECK_GCP_TABLE.format(catalog=catalog, schema=schema, table=table),
+                )
+                available = len(results) > 0
         except Exception as e:
             logger.warning(f"GCP billing tables not available: {e}")
             available = False
@@ -210,10 +219,17 @@ async def get_gcp_actual_summary(
             "end_date": end_date,
         }
 
-    results = await asyncio.to_thread(execute_query, 
-        GCP_ACTUAL_SUMMARY.format(catalog=catalog, schema=schema, table=table),
-        {"start_date": start_date, "end_date": end_date},
-    )
+    qparams = {"start_date": start_date, "end_date": end_date}
+    query = GCP_ACTUAL_SUMMARY.format(catalog=catalog, schema=schema, table=table)
+
+    def _gcp_summary():
+        from backend.lakebase_read import PG_GCP_SUMMARY, gold_read, warehouse_view_fallback
+        return gold_read(
+            "gcp_summary", PG_GCP_SUMMARY, qparams, "",
+            query if warehouse_view_fallback() else None,
+        )
+
+    results = await asyncio.to_thread(_gcp_summary)
 
     if not results:
         return {
@@ -253,10 +269,14 @@ async def get_gcp_costs_by_service(
     if not status["gcp_available"]:
         return {"available": False, "services": [], "start_date": start_date, "end_date": end_date}
 
-    results = await asyncio.to_thread(execute_query, 
-        GCP_COSTS_BY_SERVICE.format(catalog=catalog, schema=schema, table=table),
-        {"start_date": start_date, "end_date": end_date},
-    )
+    qparams = {"start_date": start_date, "end_date": end_date}
+    query = GCP_COSTS_BY_SERVICE.format(catalog=catalog, schema=schema, table=table)
+
+    def _gcp_svc():
+        from backend.lakebase_read import PG_GCP_BY_SERVICE, gold_read, warehouse_view_fallback
+        return gold_read("gcp_by_service", PG_GCP_BY_SERVICE, qparams, "", query if warehouse_view_fallback() else None)
+
+    results = await asyncio.to_thread(_gcp_svc)
 
     total_cost = sum(float(r.get("total_cost") or 0) for r in results)
     services = [
@@ -291,10 +311,14 @@ async def get_gcp_costs_by_project(
     if not status["gcp_available"]:
         return {"available": False, "projects": [], "start_date": start_date, "end_date": end_date}
 
-    results = await asyncio.to_thread(execute_query, 
-        GCP_COSTS_BY_PROJECT.format(catalog=catalog, schema=schema, table=table),
-        {"start_date": start_date, "end_date": end_date},
-    )
+    qparams = {"start_date": start_date, "end_date": end_date}
+    query = GCP_COSTS_BY_PROJECT.format(catalog=catalog, schema=schema, table=table)
+
+    def _gcp_proj():
+        from backend.lakebase_read import PG_GCP_BY_PROJECT, gold_read, warehouse_view_fallback
+        return gold_read("gcp_by_project", PG_GCP_BY_PROJECT, qparams, "", query if warehouse_view_fallback() else None)
+
+    results = await asyncio.to_thread(_gcp_proj)
 
     total_cost = sum(float(r.get("total_cost") or 0) for r in results)
     projects = [
@@ -330,10 +354,14 @@ async def get_gcp_costs_by_sku(
     if not status["gcp_available"]:
         return {"available": False, "skus": [], "start_date": start_date, "end_date": end_date}
 
-    results = await asyncio.to_thread(execute_query, 
-        GCP_COSTS_BY_SKU.format(catalog=catalog, schema=schema, table=table),
-        {"start_date": start_date, "end_date": end_date},
-    )
+    qparams = {"start_date": start_date, "end_date": end_date}
+    query = GCP_COSTS_BY_SKU.format(catalog=catalog, schema=schema, table=table)
+
+    def _gcp_sku():
+        from backend.lakebase_read import PG_GCP_BY_SKU, gold_read, warehouse_view_fallback
+        return gold_read("gcp_by_sku", PG_GCP_BY_SKU, qparams, "", query if warehouse_view_fallback() else None)
+
+    results = await asyncio.to_thread(_gcp_sku)
 
     total_cost = sum(float(r.get("total_cost") or 0) for r in results)
     skus = [
@@ -368,10 +396,14 @@ async def get_gcp_costs_timeseries(
     if not status["gcp_available"]:
         return {"available": False, "timeseries": [], "services": [], "start_date": start_date, "end_date": end_date}
 
-    results = await asyncio.to_thread(execute_query, 
-        GCP_COSTS_TIMESERIES.format(catalog=catalog, schema=schema, table=table),
-        {"start_date": start_date, "end_date": end_date},
-    )
+    qparams = {"start_date": start_date, "end_date": end_date}
+    query = GCP_COSTS_TIMESERIES.format(catalog=catalog, schema=schema, table=table)
+
+    def _gcp_ts():
+        from backend.lakebase_read import PG_GCP_TIMESERIES, gold_read, warehouse_view_fallback
+        return gold_read("gcp_timeseries", PG_GCP_TIMESERIES, qparams, "", query if warehouse_view_fallback() else None)
+
+    results = await asyncio.to_thread(_gcp_ts)
 
     data_by_date: dict[str, dict] = {}
     services_set: set[str] = set()
