@@ -1035,6 +1035,30 @@ _TABLE_REFRESH_CONFIG: dict[str, dict] = {
 from backend.materialized_views_extra import EXTRA_TABLE_REFRESH, EXTRA_CREATE, EXTRA_MERGE
 _TABLE_REFRESH_CONFIG.update(EXTRA_TABLE_REFRESH)
 
+# Cloud invoice gold is only valid when CUR / Cost Management / GCP export
+# is connected. A missing source must not fail the whole rebuild.
+OPTIONAL_GOLD_TABLES = frozenset({
+    "daily_cloud_actuals",
+    "daily_azure_actuals",
+    "daily_gcp_actuals",
+})
+
+
+def gold_refresh_status(table_name: str, exc: BaseException | None = None, ok: str = "created") -> str:
+    """Map a per-table outcome to the rebuild log. Optional misses are not errors."""
+    if exc is None:
+        return ok
+    msg = str(exc)
+    missing = (
+        "TABLE_OR_VIEW_NOT_FOUND" in msg
+        or "42P01" in msg
+        or "cannot be found" in msg.lower()
+        or "table or view" in msg.lower()
+    )
+    if table_name in OPTIONAL_GOLD_TABLES and missing:
+        return "skipped: optional source not connected"
+    return f"error: {exc}"
+
 _OPTIMIZE_EVERY_N_REFRESHES = 12
 
 # Step 6: MERGE templates for incremental refresh
@@ -1801,10 +1825,16 @@ def _create_materialized_views_impl(catalog: str | None = None, schema: str | No
             return table_name, "created", elapsed
         except Exception as e:
             elapsed = _time.monotonic() - t0
-            logger.error(f"✗ Failed to refresh {table_name}: {e}")
-            if on_table_event:
-                on_table_event(table_name, "error")
-            return table_name, f"error: {e}", elapsed
+            status = gold_refresh_status(table_name, e)
+            if status.startswith("skipped"):
+                logger.info("Skipping %s — optional source is not connected (%s)", table_name, e)
+                if on_table_event:
+                    on_table_event(table_name, "done")
+            else:
+                logger.error(f"✗ Failed to refresh {table_name}: {e}")
+                if on_table_event:
+                    on_table_event(table_name, "error")
+            return table_name, status, elapsed
 
     mv_timings: dict[str, float] = {}
     with ThreadPoolExecutor(max_workers=len(tables)) as executor:

@@ -96,6 +96,65 @@ const CHIP: Record<ChipKind, { bg: string; fg: string; border?: string }> = {
   workspace: { bg: C.oatMed, fg: C.slate },
 };
 
+export function TabInfoBanner({
+  title,
+  items,
+  minimized,
+  onToggle,
+  footer,
+}: {
+  title: string;
+  items: { label: string; text: ReactNode }[];
+  minimized: boolean;
+  onToggle: (next: boolean) => void;
+  footer?: ReactNode;
+}) {
+  return (
+    <div className="p-4" style={{ background: C.oatMed, borderRadius: 10 }}>
+      <div className="flex">
+        <div className="flex-shrink-0" style={{ color: C.lava }}>
+          <svg className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+            <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clipRule="evenodd" />
+          </svg>
+        </div>
+        <div className="ml-3 flex-1">
+          <button className="flex w-full items-center justify-between" onClick={() => onToggle(!minimized)}>
+            <h3 className="text-sm font-semibold" style={{ color: C.navy }}>{title}</h3>
+            <svg className={`h-4 w-4 transition-transform ${minimized ? "" : "rotate-180"}`} style={{ color: C.slate }} fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+            </svg>
+          </button>
+          {!minimized && (
+            <>
+              <div className="mt-2 text-sm" style={{ color: C.body }}>
+                <ul className="grid grid-cols-1 gap-1 sm:grid-cols-2">
+                  {items.map((item) => (
+                    <li key={item.label}>
+                      <strong style={{ color: C.navy }}>{item.label}:</strong> {item.text}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+              <div className="mt-3 flex items-center justify-between gap-3">
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={minimized}
+                    onChange={(e) => onToggle(e.target.checked)}
+                    className="h-3.5 w-3.5 rounded border-orange-300 text-orange-600 focus:ring-orange-500"
+                  />
+                  <span className="text-xs text-orange-600">Minimize from now on</span>
+                </label>
+                {footer}
+              </div>
+            </>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export function Chip({ kind = "neutral", children, className }: { kind?: ChipKind; children: ReactNode; className?: string }) {
   const t = CHIP[kind];
   return (

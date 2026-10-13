@@ -63,11 +63,7 @@ resources:
             permission: CAN_CONNECT_AND_CREATE
 
         # NOTE: the Genie space is intentionally NOT declared as an app resource
-        # binding here. genie_space_id is empty by default (the space is created
-        # by the customer, often after the first deploy), and a binding with an
-        # empty space_id is emitted verbatim to the Apps API — which rejects it.
-        # Instead, the app reads GENIE_SPACE_ID from the env var above, and the
-        # setup job's seed_genie task grants the app SP CAN_RUN on the space at
-        # runtime when a space_id is configured (best-effort; falls back to a
-        # documented manual grant). This matches the Lakebase pattern where
-        # grants that Terraform can't issue at plan time live in the setup job.
+        # binding here. An empty space_id binding is rejected by the Apps API.
+        # seed_genie creates the customer space on setup, stores the id in
+        # Lakebase, and grants the app SP CAN_RUN. The app reads GENIE_SPACE_ID
+        # from env when set, otherwise the stored Lakebase id.

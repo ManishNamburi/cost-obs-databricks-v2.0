@@ -36,7 +36,7 @@ import { AWSActualView } from "./AWSActualView";
 import { CloudIntegrationWizard } from "./CloudIntegrationWizard";
 import type { CloudIntegration } from "./CloudIntegrationWizard";
 import { C } from "@/theme";
-import { PageHero, Chip } from "@/components/brand";
+import { PageHero, Chip, TabInfoBanner } from "@/components/brand";
 
 type CostMode = "estimated" | "actual";
 
@@ -457,69 +457,38 @@ export function CloudCostsView({
   ) : null;
 
   const EstimationInfoBox = data && (
-    <div className="rounded-lg border border-orange-200 bg-orange-50 p-4">
-      <div className="flex">
-        <div className="flex-shrink-0">
-          <svg className="h-5 w-5 text-orange-400" viewBox="0 0 20 20" fill="currentColor">
-            <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clipRule="evenodd" />
-          </svg>
-        </div>
-        <div className="ml-3 flex-1">
-          <button
-            className="flex w-full items-center justify-between"
-            onClick={() => handleMinimizeToggle(!infoMinimized)}
-          >
-            <h3 className="text-sm font-medium text-orange-800">Estimated {cloudDisplayName} Infrastructure Cost — Methodology</h3>
-            <svg className={`h-4 w-4 text-orange-500 transition-transform ${infoMinimized ? "" : "rotate-180"}`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-            </svg>
-          </button>
-          {!infoMinimized && (
-            <>
-              <div className="mt-2 text-sm text-orange-700">
-                {isAzure ? (
-                  <ul className="list-inside list-disc space-y-1">
-                    <li>Estimates <strong>Azure VM Pay-As-You-Go</strong> costs (East US, Linux) per node based on cluster instance types</li>
-                    <li>Node uptime is derived from DBU hours — clusters are billed for every node-hour while running</li>
-                    <li>Pricing sourced from Azure public pricing (2025); East US rates used as baseline</li>
-                    <li><strong>Not included:</strong> Managed Disk storage (P10 ~$19.71/mo, P20 ~$38.40/mo per disk), outbound bandwidth ($0.087/GB)</li>
-                    <li>Actual costs may vary by region, SKU availability, and subscription discounts</li>
-                  </ul>
-                ) : isGCP ? (
-                  <ul className="list-inside list-disc space-y-1">
-                    <li>Estimates <strong>Compute Engine On-Demand</strong> costs (us-central1, Linux) per node based on cluster machine types</li>
-                    <li>Node uptime is derived from DBU hours — clusters are billed for every node-hour while running</li>
-                    <li>Pricing sourced from GCP public pricing (2025); us-central1 rates used as baseline</li>
-                    <li><strong>Not included:</strong> Persistent Disk storage (~$0.04/GB-month SSD), egress charges, Google Cloud Storage</li>
-                    <li>Actual costs may vary by region, Committed Use Discounts, and Spot VM usage</li>
-                  </ul>
-                ) : (
-                  <ul className="list-inside list-disc space-y-1">
-                    <li>Estimates <strong>EC2 On-Demand</strong> costs (us-east-1, Linux) per node based on cluster instance types</li>
-                    <li>Node uptime is derived from DBU hours — clusters are billed for every node-hour while running</li>
-                    <li>Pricing sourced from AWS public pricing (2025); us-east-1 rates used as baseline</li>
-                    <li><strong>Not included:</strong> EBS gp3 storage (~$0.08–$0.10/GB-month), data transfer, Route 53</li>
-                    <li>Actual costs may vary by region, purchasing model, and AWS organization discounts</li>
-                  </ul>
-                )}
-              </div>
-              <div className="mt-3 flex items-center justify-between">
-                <label className="flex items-center gap-2 cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={infoMinimized}
-                    onChange={(e) => handleMinimizeToggle(e.target.checked)}
-                    className="h-3.5 w-3.5 rounded border-orange-300 text-orange-600 focus:ring-orange-500"
-                  />
-                  <span className="text-xs text-orange-600">Minimize from now on</span>
-                </label>
-                <span className="text-xs text-orange-500 italic">For exact costs, integrate {isAzure ? "Azure Cost Management" : isGCP ? "GCP Billing Export" : "AWS CUR 2.0"} below ↓</span>
-              </div>
-            </>
-          )}
-        </div>
-      </div>
-    </div>
+    <TabInfoBanner
+      title={`${cloudDisplayName} Cloud — What's on this tab`}
+      minimized={infoMinimized}
+      onToggle={handleMinimizeToggle}
+      items={
+        isAzure
+          ? [
+              { label: "Estimated VM Spend", text: "Azure Pay-As-You-Go (East US, Linux) from cluster instance types and DBU hours" },
+              { label: "Cluster Table", text: "Per-cluster estimated cloud cost, instance types, and runtime" },
+              { label: "Not Included", text: "Managed Disk, outbound bandwidth, and subscription discounts" },
+              { label: "Cloud Invoices", text: "Optional Azure Cost Management export for actuals, when connected" },
+            ]
+          : isGCP
+            ? [
+                { label: "Estimated VM Spend", text: "Compute Engine On-Demand (us-central1, Linux) from cluster machine types and DBU hours" },
+                { label: "Cluster Table", text: "Per-cluster estimated cloud cost, machine types, and runtime" },
+                { label: "Not Included", text: "Persistent Disk, egress, GCS, and committed-use discounts" },
+                { label: "Cloud Invoices", text: "Optional GCP Billing export for actuals, when connected" },
+              ]
+            : [
+                { label: "Estimated VM Spend", text: "EC2 On-Demand (us-east-1, Linux) from cluster instance types and DBU hours" },
+                { label: "Cluster Table", text: "Per-cluster estimated cloud cost, instance types, and runtime" },
+                { label: "Not Included", text: "EBS, data transfer, Route 53, and organization discounts" },
+                { label: "Cloud Invoices", text: "Optional AWS CUR for actuals, when connected" },
+              ]
+      }
+      footer={
+        <span className="text-xs italic" style={{ color: C.slate }}>
+          For exact costs, integrate {isAzure ? "Azure Cost Management" : isGCP ? "GCP Billing Export" : "AWS CUR 2.0"} below ↓
+        </span>
+      }
+    />
   );
 
   const CurSetupBanner = !actualAvailable ? (

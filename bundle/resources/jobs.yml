@@ -50,7 +50,7 @@ resources:
           environment_key: default
 
         - task_key: seed_genie
-          description: Create and configure Genie space with cost system tables (skipped if no space ID)
+          description: Create and configure the customer Genie space (creates one if GENIE_SPACE_ID is empty)
           depends_on:
             - task_key: bootstrap_lakebase
           notebook_task:

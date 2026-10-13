@@ -25,10 +25,9 @@ export function Footer() {
   return (
     <footer className="mt-8 py-8" style={{ background: C.navy, color: C.white }}>
       <div className="mx-auto max-w-5xl px-4 sm:px-6 lg:px-8">
-        <div className="mb-6 flex flex-wrap items-center gap-3">
+        <div className="mb-6 flex flex-wrap items-center justify-center gap-3">
           <CostObsLockup variant="white" />
           <VersionPill />
-          <span className="text-sm" style={{ color: "rgba(255,255,255,0.7)" }}>Cost observability for Databricks.</span>
         </div>
         <div className="flex justify-center gap-16 text-left">
           <div>

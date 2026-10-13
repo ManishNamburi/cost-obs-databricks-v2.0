@@ -1087,27 +1087,38 @@ def _compute_aiml_bundle(params: dict, id_list: list | None, ws_clause: str, dke
 
         # Format summary
         summary_data = results.get("summary", [])
+        ep_raw = results.get("endpoints") or []
+        ep_names = {
+            r.get("endpoint_name")
+            for r in ep_raw
+            if r.get("endpoint_name") and r.get("endpoint_name") != "UNKNOWN"
+        }
         if summary_data:
             row = summary_data[0]
             days = row.get("days_in_range") or 1
             total_spend = float(row.get("total_spend") or 0)
+            endpoint_count = round(float(row.get("avg_endpoints_per_day") or row.get("endpoint_count") or 0))
+            if endpoint_count == 0:
+                endpoint_count = len(ep_names)
+            avg_cost = float(row.get("avg_cost_per_endpoint") or 0)
+            if avg_cost == 0 and endpoint_count > 0 and days:
+                avg_cost = total_spend / endpoint_count / days
             summary = {
                 "total_dbus": float(row.get("total_dbus") or 0),
                 "total_spend": total_spend,
                 "workspace_count": row.get("workspace_count") or 0,
-                "endpoint_count": round(float(row.get("avg_endpoints_per_day") or row.get("endpoint_count") or 0)),
+                "endpoint_count": endpoint_count,
                 "days_in_range": days,
                 "avg_daily_spend": total_spend / days if days > 0 else 0,
-                "avg_cost_per_endpoint": float(row.get("avg_cost_per_endpoint") or 0),
+                "avg_cost_per_endpoint": avg_cost,
             }
         else:
             ts_raw = results.get("timeseries") or []
-            ep_raw = results.get("endpoints") or []
             ts_dates = {str(r.get("usage_date")) for r in ts_raw}
             days = max(len(ts_dates), 1)
             total_dbus = sum(float(r.get("total_dbus") or 0) for r in ts_raw)
             total_spend = sum(float(r.get("total_spend") or 0) for r in ts_raw)
-            endpoint_count = len({r.get("endpoint_name") for r in ep_raw if r.get("endpoint_name") and r.get("endpoint_name") != "UNKNOWN"})
+            endpoint_count = len(ep_names)
             summary = {
                 "total_dbus": total_dbus,
                 "total_spend": total_spend,

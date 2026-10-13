@@ -14,6 +14,7 @@ running and write a completion marker on success.
 
 from __future__ import annotations
 
+import json
 import os
 import time
 from contextlib import contextmanager
@@ -407,35 +408,105 @@ def bootstrap_lakebase() -> None:
         print("[bootstrap_lakebase] Complete.")
 
 
+_GENIE_SPACE_NAME = "cost-obs"
+
+
+def _persist_genie_space_id(space_id: str) -> None:
+    """Store the space id so the app can find it without a DAB env binding."""
+    payload = json.dumps({"space_id": space_id})
+    try:
+        with pg_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    INSERT INTO app_config (key, value, updated_at)
+                    VALUES ('genie_space_id', %s::jsonb, now())
+                    ON CONFLICT (key) DO UPDATE
+                      SET value = EXCLUDED.value, updated_at = now()
+                    """,
+                    (payload,),
+                )
+        print(f"[seed_genie] Wrote space_id={space_id} to Lakebase app_config.")
+    except Exception as exc:
+        print(f"[seed_genie] WARNING — could not persist space id to Lakebase: {type(exc).__name__}: {exc}")
+
+
+def _ensure_genie_space(w) -> str:
+    """Reuse GENIE_SPACE_ID, a stored id, or an existing cost-obs space; else create one."""
+    env_id = os.environ.get("GENIE_SPACE_ID", "").strip()
+    if env_id:
+        print(f"[seed_genie] Using GENIE_SPACE_ID from env: {env_id}")
+        return env_id
+    try:
+        with pg_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute("SELECT value FROM app_config WHERE key = %s", ("genie_space_id",))
+                row = cur.fetchone()
+        if row and row[0]:
+            val = row[0]
+            if isinstance(val, dict):
+                stored = str(val.get("space_id") or "").strip()
+            else:
+                stored = str(val).strip().strip('"')
+            if stored:
+                print(f"[seed_genie] Reusing stored space_id={stored}")
+                return stored
+    except Exception as exc:
+        print(f"[seed_genie] No stored space id yet ({type(exc).__name__}).")
+
+    try:
+        listed = w.api_client.do("GET", "/api/2.0/genie/spaces")
+        spaces = listed.get("spaces") or listed.get("data") or []
+        for space in spaces:
+            name = space.get("title") or space.get("display_name") or space.get("name") or ""
+            sid = space.get("space_id") or space.get("id") or ""
+            if name == _GENIE_SPACE_NAME and sid:
+                print(f"[seed_genie] Reusing existing '{_GENIE_SPACE_NAME}' space {sid}")
+                return str(sid)
+    except Exception as exc:
+        print(f"[seed_genie] Could not list Genie spaces ({type(exc).__name__}): {exc}")
+
+    warehouse_id = os.environ.get("DATABRICKS_WAREHOUSE_ID", "").strip()
+    if not warehouse_id:
+        print("[seed_genie] Cannot create a Genie space — DATABRICKS_WAREHOUSE_ID is empty.")
+        return ""
+    body = {
+        "warehouse_id": warehouse_id,
+        "display_name": _GENIE_SPACE_NAME,
+        "title": _GENIE_SPACE_NAME,
+        "description": "Cost observability — natural-language questions over Databricks billing system tables.",
+    }
+    try:
+        created = w.api_client.do("POST", "/api/2.0/genie/spaces", body=body)
+    except Exception as exc:
+        print(f"[seed_genie] Create Genie space failed ({type(exc).__name__}): {exc}")
+        return ""
+    space_id = str(created.get("space_id") or created.get("id") or "").strip()
+    if space_id:
+        print(f"[seed_genie] Created Genie space {space_id} ({_GENIE_SPACE_NAME})")
+    else:
+        print(f"[seed_genie] Create returned no space id: {created}")
+    return space_id
+
+
 def seed_genie() -> None:
-    """Configure the Genie space with the four-table spine + curated instructions +
-    example SQL + benchmark questions per V2.1_SPEC §4.2.
+    """Create (if needed) and curate the customer Genie space.
 
-    Programmatic Genie-space curation via the Databricks REST API is not yet
-    universally available across workspace regions. This function does three
-    things in order of decreasing certainty:
-
-      1. Verifies GENIE_SPACE_ID is set and the app SP can reach the space
-         via w.genie.start_conversation() (a no-op probe).
-      2. Attempts to POST the curated instructions + example SQL via the
-         workspace API. Silently degrades if endpoints aren't reachable.
-      3. Always writes the full curated content to a workspace file at
-         /Workspace/Shared/cost-obs/genie_curation.md so an operator can
-         paste it into the Genie space UI. This is the guaranteed-working
-         fallback and the recommended way to finish setup today.
-
-    The step is marked complete once either path succeeds (or the manual
-    fallback file is written). Re-running is idempotent.
+    Empty DAB genie bindings break deploy, so this task creates the space at
+    setup time, stores the id in Lakebase, grants the app SP CAN_RUN, and
+    best-effort seeds instructions. Re-running is idempotent.
     """
-    genie_space_id = os.environ.get("GENIE_SPACE_ID", "").strip()
-    if not genie_space_id:
-        print("[seed_genie] GENIE_SPACE_ID not set — skipping.")
-        return
-
     with pg_conn() as conn:
         if _is_step_done(conn, "seed_genie"):
             print("[seed_genie] Already complete — skipping.")
             return
+
+    w = _get_workspace_client()
+    genie_space_id = _ensure_genie_space(w)
+    if not genie_space_id:
+        print("[seed_genie] Could not create or resolve a Genie space — skipping.")
+        return
+    _persist_genie_space_id(genie_space_id)
 
     from genie_curation import (
         TRUSTED_ASSETS,
@@ -444,8 +515,6 @@ def seed_genie() -> None:
         BENCHMARK_QUESTIONS,
         render_manual_setup_doc,
     )
-
-    w = _get_workspace_client()
 
     # (1) Reachability probe — a read-only GET on the space. This does NOT
     # create a throwaway conversation (the old probe did) and doesn't depend on

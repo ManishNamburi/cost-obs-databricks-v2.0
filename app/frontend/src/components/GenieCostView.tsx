@@ -11,7 +11,7 @@ import type {
   GenieCostWorkspaceRow,
 } from "@/types/billing";
 import { formatCurrency } from "@/utils/formatters";
-import { PageHero } from "@/components/brand";
+import { PageHero, TabInfoBanner } from "@/components/brand";
 import { C } from "@/theme";
 import { useGenieCostDiagnostics } from "@/hooks/useBillingData";
 
@@ -301,6 +301,7 @@ interface GenieCostViewProps {
 
 export function GenieCostView({ data, isLoading }: GenieCostViewProps) {
   const [subTab, setSubTab] = useState<SubTab>("overview");
+  const [infoMinimized, setInfoMinimized] = useState(false);
 
   if (isLoading) {
     return (
@@ -336,6 +337,18 @@ export function GenieCostView({ data, isLoading }: GenieCostViewProps) {
           subtitle={summary ? `${summary.start_date} → ${summary.end_date} · ${summary.workspace_count} workspace${summary.workspace_count === 1 ? "" : "s"} with Genie spend` : undefined}
         />
       </div>
+
+      <TabInfoBanner
+        title="Genie — What's on this tab"
+        minimized={infoMinimized}
+        onToggle={setInfoMinimized}
+        items={[
+          { label: "Genie Spend", text: "DBU cost for Genie, AI/BI, and related SKUs in the selected range" },
+          { label: "By Surface", text: "Split across Genie Code, Genie One, Agents, and other surfaces" },
+          { label: "Workspaces", text: "Which workspaces drive Genie spend" },
+          { label: "Diagnostics", text: "Raw billing SKUs that mapped to Genie so you can check coverage" },
+        ]}
+      />
 
       {/* Sub-tab strip */}
       <div className="flex gap-1 border-b border-gray-200">

@@ -19,7 +19,7 @@ import type { TaggingDashboardBundle } from "@/types/billing";
 import { KPITrendModal } from "./KPITrendModal";
 import { VirtualizedList } from "./VirtualizedList";
 import { C } from "@/theme";
-import { PageHero, Chip } from "@/components/brand";
+import { PageHero, Chip, TabInfoBanner } from "@/components/brand";
 
 interface TagObject {
   object_id?: string | null;
@@ -402,47 +402,17 @@ export function TaggingHub({ data, isLoading, host, startDate, endDate, workspac
         }
       />
 
-      {/* Info Banner */}
-      <div className="rounded-lg border border-orange-200 bg-orange-50 p-4">
-        <div className="flex">
-          <div className="flex-shrink-0">
-            <svg className="h-5 w-5 text-orange-400" viewBox="0 0 20 20" fill="currentColor">
-              <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clipRule="evenodd" />
-            </svg>
-          </div>
-          <div className="ml-3 flex-1">
-            <button className="flex w-full items-center justify-between" onClick={() => handleMinimizeToggle(!infoMinimized)}>
-              <h3 className="text-sm font-medium text-orange-800">Tagging Best Practices</h3>
-              <svg className={`h-4 w-4 text-orange-500 transition-transform ${infoMinimized ? "" : "rotate-180"}`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-              </svg>
-            </button>
-            {!infoMinimized && (
-              <>
-                <div className="mt-2 text-sm text-orange-700">
-                  <ul className="list-inside list-disc space-y-1">
-                    <li>Add <strong>custom_tags</strong> to clusters, jobs, and endpoints for cost attribution</li>
-                    <li>Use consistent tag keys like <code>Owner</code>, <code>Team</code>, <code>Project</code>, <code>CostCenter</code></li>
-                    <li>Tags propagate to billing usage records for chargeback and reporting</li>
-                    <li>Higher tag coverage = better cost visibility and accountability</li>
-                  </ul>
-                </div>
-                <div className="mt-3 flex justify-start">
-                  <label className="flex items-center gap-2 cursor-pointer">
-                    <input
-                      type="checkbox"
-                      checked={infoMinimized}
-                      onChange={(e) => handleMinimizeToggle(e.target.checked)}
-                      className="h-3.5 w-3.5 rounded border-orange-300 text-orange-600 focus:ring-orange-500"
-                    />
-                    <span className="text-xs text-orange-600">Minimize from now on</span>
-                  </label>
-                </div>
-              </>
-            )}
-          </div>
-        </div>
-      </div>
+      <TabInfoBanner
+        title="Tagging — What's on this tab"
+        minimized={infoMinimized}
+        onToggle={handleMinimizeToggle}
+        items={[
+          { label: "Tag Coverage", text: "Share of spend with custom tags for chargeback" },
+          { label: "Tag Keys", text: "Owner, Team, Project, CostCenter and other keys in use" },
+          { label: "Untagged Resources", text: "Clusters, jobs, and endpoints missing tags" },
+          { label: "Suggested Tags", text: "Recommended keys for this environment" },
+        ]}
+      />
 
       {/* Summary Cards */}
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">

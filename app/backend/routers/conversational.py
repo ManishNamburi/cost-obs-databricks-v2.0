@@ -34,7 +34,7 @@ from typing import Any
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
-from backend.db import get_user_workspace_client
+from backend.db import get_user_workspace_client, lb_get_config
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -58,15 +58,28 @@ class ReplyRequest(BaseModel):
     message: str = Field(min_length=1, max_length=4000)
 
 
-def _space_id() -> str:
+def configured_space_id() -> str:
+    """Bundle env first; Lakebase next (setup job writes the ID when it creates the space)."""
     sid = (os.environ.get("GENIE_SPACE_ID") or "").strip()
+    if sid:
+        return sid
+    cfg = lb_get_config("genie_space_id")
+    if isinstance(cfg, dict):
+        return str(cfg.get("space_id") or "").strip()
+    if isinstance(cfg, str):
+        return cfg.strip()
+    return ""
+
+
+def _space_id() -> str:
+    sid = configured_space_id()
     if not sid:
         raise HTTPException(
             status_code=503,
             detail=(
-                "Conversational surface is not configured. Set GENIE_SPACE_ID "
-                "in the app resource bindings (or the databricks.yml bundle "
-                "variable) to enable it."
+                "Conversational surface is not configured yet. The setup job "
+                "creates the Genie space on deploy; wait for that step or set "
+                "GENIE_SPACE_ID in the bundle."
             ),
         )
     return sid
@@ -167,9 +180,12 @@ def _build_response(
 @router.get("/status")
 def get_status() -> dict[str, Any]:
     """Report whether the conversational surface can serve requests."""
-    space_id = (os.environ.get("GENIE_SPACE_ID") or "").strip()
+    space_id = configured_space_id()
     if not space_id:
-        return {"configured": False, "reason": "GENIE_SPACE_ID env var is empty"}
+        return {
+            "configured": False,
+            "reason": "Genie space is not set yet. The setup job creates it on deploy.",
+        }
 
     try:
         w = get_user_workspace_client()

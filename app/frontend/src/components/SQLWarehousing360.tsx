@@ -21,7 +21,7 @@ import type { GranularBreakdownResponse, DBSQLDashboardBundle, QueryCostByWareho
 import { KPITrendModal } from "./KPITrendModal";
 import { VirtualizedList } from "./VirtualizedList";
 import { C } from "@/theme";
-import { PageHero, Chip } from "@/components/brand";
+import { PageHero, Chip, TabInfoBanner } from "@/components/brand";
 
 interface SQLWarehousing360Props {
   sqlBreakdownData: GranularBreakdownResponse | undefined;
@@ -499,47 +499,17 @@ export function SQLWarehousing360({ sqlBreakdownData: _sqlBreakdownData, queryDa
             }
           />
 
-          {/* Info Banner */}
-          <div className="p-4" style={{ background: C.oatMed, borderRadius: 10 }}>
-            <div className="flex">
-              <div className="flex-shrink-0" style={{ color: C.lava }}>
-                <svg className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
-                  <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clipRule="evenodd" />
-                </svg>
-              </div>
-              <div className="ml-3 flex-1">
-                <button className="flex w-full items-center justify-between" onClick={() => handleMinimizeToggle(!infoMinimized)}>
-                  <h3 className="text-sm font-semibold" style={{ color: C.navy }}>SQL Warehousing — What's on this tab</h3>
-                  <svg className={`h-4 w-4 transition-transform ${infoMinimized ? "" : "rotate-180"}`} style={{ color: C.slate }} fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-                  </svg>
-                </button>
-                {!infoMinimized && (
-                  <>
-                    <div className="mt-2 text-sm" style={{ color: C.body }}>
-                      <ul className="grid grid-cols-1 gap-1 sm:grid-cols-2">
-                        <li><strong style={{ color: C.navy }}>Spend by Source:</strong> Click any source (Genie, AI/BI, SQL Editor, Jobs, Notebooks) to drill into the top queries from that source</li>
-                        <li><strong style={{ color: C.navy }}>Warehouse Spend:</strong> Breakdown by warehouse type and utilization patterns</li>
-                        <li><strong style={{ color: C.navy }}>SKU Breakdown:</strong> Spend split across Serverless, Pro, Classic, and other SQL SKUs</li>
-                        <li><strong style={{ color: C.navy }}>Top Users by Query Spend:</strong> Human users and service principals ranked by SQL query cost</li>
-                      </ul>
-                    </div>
-                    <div className="mt-3 flex justify-start">
-                      <label className="flex items-center gap-2 cursor-pointer">
-                        <input
-                          type="checkbox"
-                          checked={infoMinimized}
-                          onChange={(e) => handleMinimizeToggle(e.target.checked)}
-                          className="h-3.5 w-3.5 rounded border-orange-300 text-orange-600 focus:ring-orange-500"
-                        />
-                        <span className="text-xs text-orange-600">Minimize from now on</span>
-                      </label>
-                    </div>
-                  </>
-                )}
-              </div>
-            </div>
-          </div>
+          <TabInfoBanner
+            title="SQL Warehousing — What's on this tab"
+            minimized={infoMinimized}
+            onToggle={handleMinimizeToggle}
+            items={[
+              { label: "Spend by Source", text: "Click any source (Genie, AI/BI, SQL Editor, Jobs, Notebooks) to drill into the top queries from that source" },
+              { label: "Warehouse Spend", text: "Breakdown by warehouse type and utilization patterns" },
+              { label: "SKU Breakdown", text: "Spend split across Serverless, Pro, Classic, and other SQL SKUs" },
+              { label: "Top Users by Query Spend", text: "Human users and service principals ranked by SQL query cost" },
+            ]}
+          />
 
           {/* Stale data warning — shown when MV exists but has no data in the selected range */}
           {summary?.total_queries === 0 && (summary?.data_range?.total_rows ?? 0) > 0 && (() => {
@@ -1434,54 +1404,17 @@ export function OptimizeMethodologyPanel() {
     v ? localStorage.setItem(MINIMIZE_KEY, "true") : localStorage.removeItem(MINIMIZE_KEY);
   };
   return (
-    <div className="rounded-lg border border-orange-200 bg-orange-50 p-4">
-      <div className="flex items-start gap-3">
-        <div className="mt-0.5 shrink-0">
-          <svg className="h-5 w-5 text-orange-400" viewBox="0 0 20 20" fill="currentColor">
-            <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clipRule="evenodd" />
-          </svg>
-        </div>
-        <div className="ml-1 flex-1">
-          <button className="flex w-full items-center justify-between" onClick={() => toggle(!minimized)}>
-            <h3 className="text-sm font-medium text-orange-800">Optimize — Methodology</h3>
-            <svg className={`h-4 w-4 text-orange-500 transition-transform ${minimized ? "" : "rotate-180"}`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-            </svg>
-          </button>
-          {!minimized && (
-            <>
-              <div className="mt-2 text-sm text-orange-700">
-                <p className="mb-2 font-medium">Idle Time</p>
-                <ul className="list-inside list-disc space-y-1">
-                  <li><strong>Uptime</strong>: Derived from <code className="rounded bg-orange-100 px-1 text-xs">system.compute.warehouse_events</code> — the delta between START and STOP lifecycle events per warehouse</li>
-                  <li><strong>Active query time</strong>: Sum of query durations from <code className="rounded bg-orange-100 px-1 text-xs">system.query.history</code> for the same warehouse and window</li>
-                  <li><strong>Idle time</strong>: Uptime minus active query time (floored at zero)</li>
-                  <li><strong>Est. idle spend</strong>: <code className="rounded bg-orange-100 px-1 text-xs">total_billed_spend × (idle_minutes / uptime_minutes)</code> — prorated from Databricks billing data</li>
-                  <li>Serverless warehouses are excluded — they scale per-query and do not emit start/stop events</li>
-                </ul>
-                <p className="mb-2 mt-3 font-medium">Rightsizing</p>
-                <ul className="list-inside list-disc space-y-1">
-                  <li><strong>Over-Scaled</strong>: Warehouse has multiple clusters (auto-scaling enabled) but median concurrency per query window never exceeded 1 — extra clusters never needed</li>
-                  <li><strong>Oversized</strong>: Warehouse size (M, L, XL…) is larger than query complexity warrants — average query duration and data scanned suggest a smaller size would suffice</li>
-                  <li>Recommendations are based on the <code className="rounded bg-orange-100 px-1 text-xs">system.compute.warehouse_events</code> and <code className="rounded bg-orange-100 px-1 text-xs">system.query.history</code> system tables over the selected date range</li>
-                </ul>
-              </div>
-              <div className="mt-3 flex justify-start">
-                <label className="flex items-center gap-2 cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={minimized}
-                    onChange={(e) => toggle(e.target.checked)}
-                    className="h-3.5 w-3.5 rounded border-orange-300 text-orange-600 focus:ring-orange-500"
-                  />
-                  <span className="text-xs text-orange-600">Minimize from now on</span>
-                </label>
-              </div>
-            </>
-          )}
-        </div>
-      </div>
-    </div>
+    <TabInfoBanner
+      title="Optimize — What's on this tab"
+      minimized={minimized}
+      onToggle={toggle}
+      items={[
+        { label: "Idle Time", text: "Warehouse uptime minus query time; estimated idle spend is billed spend times that share. Serverless is excluded." },
+        { label: "Over-Scaled", text: "Extra auto-scale clusters that never ran concurrent work" },
+        { label: "Oversized", text: "Warehouse size larger than query complexity warrants" },
+        { label: "Sources", text: "warehouse_events and query.history over the selected range" },
+      ]}
+    />
   );
 }
 

@@ -89,8 +89,8 @@ export function ConversationalDrawer({ open, onClose }: ConversationalDrawerProp
             <div>
               <p className="mb-2 font-medium text-gray-900">Genie space not configured.</p>
               <p>
-                Set the <code className="rounded bg-gray-100 px-1">GENIE_SPACE_ID</code> variable in your
-                bundle and redeploy to enable this surface.
+                The setup job creates this Genie space on deploy. After that
+                step finishes, refresh this panel.
               </p>
               {status.reason && (
                 <p className="mt-3 text-xs text-gray-500">Reason: {status.reason}</p>
