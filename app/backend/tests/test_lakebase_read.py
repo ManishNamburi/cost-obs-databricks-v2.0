@@ -326,9 +326,23 @@ def test_kpi_trend_pg_covers_sparkline_kpis():
     tags = PG_AVAILABLE_TAGS
     assert "daily_tag_summary" in tags
     assert "system." not in tags
-    ws = PG_APPS_WORKSPACES.format(ws_filter="")
+    ws = PG_APPS_WORKSPACES.format(ws_filter="AND workspace_id IN ('1')")
     assert "daily_apps_summary" in ws
     assert "system." not in ws
+    # Filter must sit in the inner scan so the join's workspace_id is not ambiguous.
+    inner = ws.split("LEFT JOIN")[0]
+    assert "AND workspace_id IN ('1')" in inner
+
+
+def test_cluster_vm_cost_uses_instance_pricing_when_gold_has_no_dollars():
+    from backend.routers.billing import _cluster_vm_cost
+    row = {
+        "driver_instance_type": "m5.xlarge",
+        "worker_instance_type": "m5.xlarge",
+        "total_dbu_hours": 10,
+    }
+    assert _cluster_vm_cost(row, "AWS") > 0
+    assert _cluster_vm_cost({"estimated_aws_cost": 3, "total_dbu_hours": 10}, "AWS") == 3.0
 
 
 def test_kpi_trend_response_empty_and_daily():

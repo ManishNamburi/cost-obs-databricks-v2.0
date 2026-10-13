@@ -1098,7 +1098,7 @@ async def get_aws_costs(
         total_dbu_hours = 0
 
         for row in cluster_results:
-            cost = float(row.get("estimated_aws_cost") or 0)
+            cost = _cluster_vm_cost(row, "AWS")
             dbu_hours = float(row.get("total_dbu_hours") or 0)
             total_estimated_cost += cost
             total_dbu_hours += dbu_hours
@@ -1912,6 +1912,16 @@ def _format_interactive(results: list[dict[str, Any]] | None, params: dict[str, 
     }
 
 
+def _cluster_vm_cost(row: dict[str, Any], cloud: str = "AWS") -> float:
+    """Price a gold cluster row. Gold copies store DBU hours, not a precomputed dollar estimate."""
+    if row.get("estimated_aws_cost") is not None:
+        return float(row.get("estimated_aws_cost") or 0)
+    dbu_hours = float(row.get("total_dbu_hours") or 0)
+    driver_cost = get_instance_pricing(row.get("driver_instance_type"), cloud)
+    worker_cost = get_instance_pricing(row.get("worker_instance_type"), cloud)
+    return dbu_hours * (driver_cost + worker_cost * 2) / 2
+
+
 def _families_from_cluster_rows(
     cluster_results: list[dict[str, Any]] | None,
     cloud: str = "AWS",
@@ -1950,12 +1960,12 @@ def _format_aws_clusters(
         return {"clusters": [], "instance_families": [], "total_estimated_cost": 0, "total_dbu_hours": 0,
                 "start_date": params["start_date"], "end_date": params["end_date"]}
 
-    total_cost = sum(float(row.get("estimated_aws_cost") or 0) for row in cluster_results)
+    total_cost = sum(_cluster_vm_cost(row, "AWS") for row in cluster_results)
     total_dbu_hours = sum(float(row.get("total_dbu_hours") or 0) for row in cluster_results)
 
     clusters = []
     for row in cluster_results:
-        cost = float(row.get("estimated_aws_cost") or 0)
+        cost = _cluster_vm_cost(row, "AWS")
         clusters.append({
             "cluster_id": row.get("cluster_id"),
             "cluster_name": row.get("cluster_name"),

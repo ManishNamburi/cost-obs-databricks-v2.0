@@ -792,7 +792,10 @@ def _compute_apps_bundle(params: dict, id_list: list | None, active_only: bool, 
         # scan for the four heavy slots when the MV is available. Each helper
         # falls back to its raw counterpart on any exception so a broken MV
         # never blocks a page load.
-        _use_mv = _check_mv_available()
+        from backend.lakebase_read import PG_APPS_IDENTITIES, dual_read_mv, gold_read, warehouse_view_fallback
+        live_ok = warehouse_view_fallback()
+        # Lakebase-on viewers skip the warehouse DESCRIBE; dual_read still serves Postgres first.
+        _use_mv = True if not live_ok else _check_mv_available()
         _mv_ws_clause = wf.build_ws_filter_clause(col="workspace_id", id_list=id_list) if _use_mv else ""
         # MV column is bare `app_id`; the raw filter uses `u.usage_metadata.app_id`
         _mv_app_filter = ""
@@ -800,23 +803,27 @@ def _compute_apps_bundle(params: dict, id_list: list | None, active_only: bool, 
             _mv_app_filter = "AND app_id IN (" + ", ".join(f"'{uid}'" for uid in registry) + ")"
 
         def _mv_query(name: str, mv_sql_tpl: str, raw_fallback: Any, **fmt_kwargs: str) -> list[dict[str, Any]]:
-            """Try the MV path; fall back to raw on any exception."""
+            """Postgres first. Warehouse gold only if Postgres misses."""
             if _use_mv:
-                try:
+                def _gold() -> list[dict[str, Any]]:
                     cat, sch = get_catalog_schema()
-                    mv_sql = mv_sql_tpl.format(catalog=cat, schema=sch, ws_filter=_mv_ws_clause + source_label_filter_clause(), **fmt_kwargs)
+                    mv_sql = mv_sql_tpl.format(
+                        catalog=cat, schema=sch,
+                        ws_filter=_mv_ws_clause + source_label_filter_clause(),
+                        **fmt_kwargs,
+                    )
                     mv_sql = apply_mv_overrides(mv_sql, cat, sch)
-                    delta = execute_query(mv_sql, params)
-                    from backend.lakebase_read import dual_read_mv
+                    return execute_query(mv_sql, params)
+
+                try:
                     return dual_read_mv(
-                        mv_sql_tpl, params, _mv_ws_clause, delta,
+                        mv_sql_tpl, params, _mv_ws_clause,
                         extra_format={"app_filter": fmt_kwargs.get("app_filter", "")},
+                        fetch_delta=_gold,
                     )
                 except Exception as e:
                     logger.warning("apps %s MV path failed (%s); falling back to raw scan", name, type(e).__name__)
-            return raw_fallback()
-
-        from backend.lakebase_read import PG_APPS_IDENTITIES, gold_read, warehouse_view_fallback
+            return raw_fallback() if live_ok else []
 
         def _gold_sps():
             live = _ws(APPS_SERVICE_PRINCIPALS) if warehouse_view_fallback() else None

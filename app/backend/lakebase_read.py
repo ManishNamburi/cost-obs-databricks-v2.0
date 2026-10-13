@@ -1610,14 +1610,17 @@ PG_APPS_WORKSPACES = """
 SELECT NULLIF(a.app_id, 'Unknown') AS app_id,
   NULLIF(a.workspace_id, '__account__') AS workspace_id,
   MAX(NULLIF(w.workspace_name, '__na__')) AS workspace_name
-FROM daily_apps_summary a
+FROM (
+  SELECT app_id, workspace_id
+  FROM daily_apps_summary
+  WHERE usage_date BETWEEN %(start_date)s AND %(end_date)s
+    {ws_filter}
+) a
 LEFT JOIN (
   SELECT workspace_id, MAX(NULLIF(workspace_name, '__na__')) AS workspace_name
   FROM daily_workspace_breakdown
   GROUP BY workspace_id
 ) w ON w.workspace_id = a.workspace_id
-WHERE a.usage_date BETWEEN %(start_date)s AND %(end_date)s
-  {ws_filter}
 GROUP BY NULLIF(a.app_id, 'Unknown'), NULLIF(a.workspace_id, '__account__')
 """
 
