@@ -3,7 +3,7 @@ import { APP_VERSION, C, FONT_MONO, FONT_SANS } from "@/theme";
 import { cn } from "@/lib/utils";
 
 export function CostObsMark({ className, whiteOrbit = false }: { className?: string; whiteOrbit?: boolean }) {
-  const orbit = whiteOrbit ? C.white : C.navy;
+  const orbit = whiteOrbit ? C.white : C.ink;
   return (
     <svg viewBox="0 0 48 48" fill="none" className={className} aria-hidden="true">
       <path d="M3 24 a21 8 0 0 1 42 0" stroke={orbit} strokeWidth="2.6" strokeLinecap="round" />
@@ -25,9 +25,9 @@ export function CostObsLockup({
   const light = variant === "light";
   return (
     <span className={cn("inline-flex items-center gap-2", className)}>
-      <CostObsMark className="h-[30px] w-[30px]" whiteOrbit={!light} />
+      <CostObsMark className="h-9 w-9" whiteOrbit={!light} />
       <span
-        className="text-[21px] font-bold leading-none tracking-tight"
+        className="text-[24px] font-bold leading-none tracking-tight"
         style={{ color: light ? C.ink : C.white, fontFamily: FONT_SANS }}
       >
         cost-obs
@@ -49,12 +49,28 @@ export function PageHero({
   title,
   subtitle,
   action,
+  dateRange,
+  workspaceScope,
+  sourceLabels = [],
 }: {
   icon: ReactNode;
   title: string;
   subtitle?: ReactNode;
   action?: ReactNode;
+  dateRange?: { startDate?: string; endDate?: string };
+  workspaceScope?: ReactNode;
+  sourceLabels?: string[];
 }) {
+  const formatDate = (value?: string) => value
+    ? new Date(`${value}T00:00:00`).toLocaleDateString("en-US", {
+        month: "short",
+        day: "numeric",
+        year: "numeric",
+      })
+    : "";
+  const dateLabel = dateRange?.startDate && dateRange?.endDate
+    ? `${formatDate(dateRange.startDate)} to ${formatDate(dateRange.endDate)}`
+    : null;
   return (
     <div className="mb-6 flex items-start justify-between gap-4">
       <div className="flex items-start gap-3">
@@ -80,7 +96,26 @@ export function PageHero({
           )}
         </div>
       </div>
-      {action}
+      <div className="ml-auto flex shrink-0 items-start justify-end gap-2">
+        {workspaceScope && (
+          <Chip kind="workspace" label="Workspace(s)" wrapperClassName="min-w-[150px]">
+            {workspaceScope}
+          </Chip>
+        )}
+        {sourceLabels.length > 0 && (
+          <Chip kind="filter" label="Data source(s)" wrapperClassName="min-w-[112px]">
+            {sourceLabels.length === 1
+              ? sourceLabels[0]
+              : `${sourceLabels.length} sources`}
+          </Chip>
+        )}
+        {dateLabel && (
+          <Chip kind="filter" label="Date range">
+            {dateLabel}
+          </Chip>
+        )}
+        {action}
+      </div>
     </div>
   );
 }
@@ -88,12 +123,12 @@ export function PageHero({
 type ChipKind = "neutral" | "serverless" | "historical" | "filter" | "idle" | "workspace";
 
 const CHIP: Record<ChipKind, { bg: string; fg: string; border?: string }> = {
-  neutral: { bg: C.oatPage, fg: C.ink, border: C.hairline },
-  serverless: { bg: C.greenTint, fg: C.greenInk },
-  historical: { bg: C.amberTint, fg: C.amberInk },
-  filter: { bg: C.coralTint, fg: C.lavaHover },
-  idle: { bg: C.maroonTint, fg: C.maroon },
-  workspace: { bg: C.oatMed, fg: C.slate },
+  neutral: { bg: C.oatMed, fg: C.slate, border: C.hairline },
+  serverless: { bg: C.oatMed, fg: C.slate, border: C.hairline },
+  historical: { bg: C.oatMed, fg: C.slate, border: C.hairline },
+  filter: { bg: C.oatMed, fg: C.slate, border: C.hairline },
+  idle: { bg: C.oatMed, fg: C.slate, border: C.hairline },
+  workspace: { bg: C.oatMed, fg: C.slate, border: C.hairline },
 };
 
 export function TabInfoBanner({
@@ -141,9 +176,10 @@ export function TabInfoBanner({
                     type="checkbox"
                     checked={minimized}
                     onChange={(e) => onToggle(e.target.checked)}
-                    className="h-3.5 w-3.5 rounded border-orange-300 text-orange-600 focus:ring-orange-500"
+                    className="h-3.5 w-3.5 rounded"
+                    style={{ accentColor: C.navy }}
                   />
-                  <span className="text-xs text-orange-600">Minimize from now on</span>
+                  <span className="text-xs" style={{ color: C.slate }}>Minimize from now on</span>
                 </label>
                 {footer}
               </div>
@@ -155,14 +191,71 @@ export function TabInfoBanner({
   );
 }
 
-export function Chip({ kind = "neutral", children, className }: { kind?: ChipKind; children: ReactNode; className?: string }) {
-  const t = CHIP[kind];
+export function SourceCapabilityNotice({
+  title,
+  description,
+  requiredAggregates = [],
+  onRetry,
+}: {
+  title: string;
+  description: string;
+  requiredAggregates?: string[];
+  onRetry?: () => void;
+}) {
+  const aggregateLabel = `Required shared ${requiredAggregates.length === 1 ? "aggregate" : "aggregates"}`;
+
   return (
+    <div className="rounded-lg border border-gray-200 bg-gray-50 p-4 text-gray-700">
+      <div className="flex items-start gap-3">
+        <svg className="mt-0.5 h-4 w-4 shrink-0 text-gray-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+        </svg>
+        <div>
+          <p className="text-sm font-semibold">{title}</p>
+          <p className="mt-1 text-sm text-gray-500">{description}</p>
+          {requiredAggregates.length > 0 && (
+            <p className="mt-2 text-xs text-gray-500">
+              {aggregateLabel}:{" "}
+              {requiredAggregates.map((aggregate, index) => (
+                <span key={aggregate}>
+                  {index > 0 && ", "}
+                  <code className="rounded bg-gray-200 px-1 py-0.5 text-[11px] text-gray-700">{aggregate}</code>
+                </span>
+              ))}
+            </p>
+          )}
+          {onRetry && (
+            <button
+              type="button"
+              onClick={onRetry}
+              className="mt-3 rounded-md border border-gray-300 bg-white px-3 py-1.5 text-sm font-medium text-gray-700 hover:bg-gray-100"
+            >
+              Retry
+            </button>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+export function Chip({ kind = "neutral", children, className, label, wrapperClassName }: { kind?: ChipKind; children: ReactNode; className?: string; label?: string; wrapperClassName?: string }) {
+  const t = CHIP[kind];
+  const chip = (
     <span
-      className={cn("inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium", className)}
+      className={cn("inline-flex h-6 items-center rounded-(--r-chip) px-2 text-xs font-medium", className)}
       style={{ background: t.bg, color: t.fg, border: t.border ? `1px solid ${t.border}` : undefined }}
     >
       {children}
+    </span>
+  );
+  if (!label) return chip;
+  return (
+    <span className={cn("inline-flex flex-col items-start gap-0.5", wrapperClassName)}>
+      <span className="text-[9px] font-semibold uppercase leading-none tracking-wide text-gray-500">
+        {label}
+      </span>
+      {chip}
     </span>
   );
 }

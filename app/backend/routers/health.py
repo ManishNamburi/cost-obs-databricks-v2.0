@@ -11,6 +11,22 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
+_PROCESS_STARTED_AT = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+
+
+@router.get("/deployment")
+async def deployment_metadata() -> dict[str, Any]:
+    """Best-effort deploy badge for the account rail. Process start if Apps API is absent."""
+    import os
+
+    return {
+        "deployed_at": os.getenv("DATABRICKS_APP_DEPLOYED_AT") or _PROCESS_STARTED_AT,
+        "deployer": os.getenv("DATABRICKS_APP_DEPLOYER"),
+        "commit_sha": os.getenv("GIT_COMMIT") or os.getenv("DATABRICKS_APP_COMMIT"),
+        "available": True,
+        "source": "process_start" if not os.getenv("DATABRICKS_APP_DEPLOYED_AT") else "env",
+    }
+
 
 @router.get("/ping")
 async def ping() -> dict[str, bool]:

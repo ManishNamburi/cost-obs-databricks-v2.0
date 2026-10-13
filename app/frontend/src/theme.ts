@@ -22,6 +22,8 @@ export const C = {
   green: "var(--green)",
   greenInk: "var(--green-ink)",
   greenTint: "var(--green-tint)",
+  successFill: "var(--success-fill)",
+  successFillHover: "var(--success-fill-hover)",
   amber: "var(--amber)",
   amberInk: "var(--amber-ink)",
   amberTint: "var(--amber-tint)",
@@ -46,10 +48,11 @@ export const SERIES = [C.s1, C.s2, C.s3, C.s4, C.s5] as const;
 /** Product identity colors (spec §2 / §6). */
 export function productColor(name: string): string {
   const n = name.toLowerCase();
-  if (n.includes("sql") || n.includes("dbsql") || n.includes("genie") || n.includes("warehouse")) return C.s2;
-  if (n.includes("interactive") || n.includes("all-purpose") || n.includes("notebook")) return C.s4;
   if (n.includes("serverless")) return C.s3;
+  if (n.includes("interactive") || n.includes("all-purpose") || n.includes("notebook")) return C.s4;
+  if (n.includes("streaming")) return C.s1;
   if (n.includes("etl") || n.includes("job") || n.includes("pipeline")) return C.s3;
+  if (n.includes("sql") || n.includes("dbsql") || n.includes("genie") || n.includes("warehouse")) return C.s2;
   return C.s5;
 }
 
@@ -58,7 +61,7 @@ export function seriesColor(index: number): string {
 }
 
 export function rankedBarColor(rank: number): string {
-  return rank === 1 ? C.s1 : C.s2;
+  return seriesColor(Math.max(0, rank - 1));
 }
 
 export const FONT_SANS = "var(--sans)";

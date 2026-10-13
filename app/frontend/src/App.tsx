@@ -18,11 +18,11 @@ import { PricingProvider, usePricing } from "@/context/PricingContext";
 import { SpNameMapContext } from "@/utils/identity";
 import { Footer } from "@/components/Footer";
 import { C } from "@/theme";
-import { CostObsLockup, VersionPill, PageHero, Chip } from "@/components/brand";
+import { CostObsLockup, VersionPill, PageHero } from "@/components/brand";
 import { Spinner } from "@/components/Spinner";
-import awsLogo from "@/assets/aws.png";
-import azureLogo from "@/assets/azure.png";
-import gcpLogo from "@/assets/gcp.svg";
+import { UserMenu } from "@/components/UserMenu";
+import { DeploymentBadgeFromApi } from "@/components/DeploymentBadge";
+import { Bot, Check, Copy, Settings } from "lucide-react";
 
 // Retry a dynamic import once on failure (handles cold-start chunk load errors)
 function lazyWithRetry<T>(factory: () => Promise<T>): Promise<T> {
@@ -128,6 +128,137 @@ interface User {
   email: string;
   name: string;
   role?: "admin" | "consumer";
+}
+
+const RAIL_STATUS_BADGE_CLASS = "rail-status-badge relative inline-flex h-[22px] w-[104px] min-w-0 shrink-0 items-center justify-center gap-[3px] overflow-hidden rounded-[4px] bg-green-500/20 px-[6px] text-[10px] font-bold leading-[10px] text-green-200";
+
+function DuBoisAccountIcon() {
+  return (
+    <svg className="h-2.5 w-2.5 opacity-70" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+      <path fill="currentColor" d="M4 8.75h8v-1.5H4zM7 5.75H4v-1.5h3zM4 11.75h8v-1.5H4z" />
+      <path fill="currentColor" fillRule="evenodd" d="M1.75 1a.75.75 0 0 0-.75.75v12.5c0 .414.336.75.75.75h12.5a.75.75 0 0 0 .75-.75V5a.75.75 0 0 0-.75-.75H10v-2.5A.75.75 0 0 0 9.25 1zm.75 1.5h6V5c0 .414.336.75.75.75h4.25v7.75h-11z" clipRule="evenodd" />
+    </svg>
+  );
+}
+
+function DatabricksSqlProductIcon() {
+  return (
+    <svg className="h-3 w-3 opacity-70" viewBox="0 0 512 512" fill="none" aria-hidden="true">
+      <path fill="currentColor" fillRule="evenodd" d="M152 448h296V272H152c-48.601 0-88 39.399-88 88s39.399 88 88 88m0-48c22.091 0 40-17.909 40-40s-17.909-40-40-40-40 17.909-40 40 17.909 40 40 40" clipRule="evenodd" />
+      <path fill="currentColor" fillRule="evenodd" d="M360 240c48.601 0 88-39.399 88-88s-39.399-88-88-88H64v176zm0-48c22.091 0 40-17.909 40-40s-17.909-40-40-40-40 17.909-40 40 17.909 40 40 40" clipRule="evenodd" />
+    </svg>
+  );
+}
+
+function compactRailBadgeText(value: string): string {
+  const text = value.trim();
+  const maxLength = /^\d/.test(text) ? 8 : 11;
+  return text.length > maxLength ? text.slice(0, maxLength) : text;
+}
+
+function RailBadgeTooltip({
+  text,
+  children,
+  align = "center",
+}: {
+  text: React.ReactNode;
+  children: React.ReactNode;
+  align?: "start" | "center" | "end";
+}) {
+  const tooltipId = React.useId();
+  const [visible, setVisible] = useState(false);
+  useEffect(() => {
+    const handleOpen = (event: Event) => {
+      setVisible((event as CustomEvent<string>).detail === tooltipId);
+    };
+    window.addEventListener("cost-obs:rail-tooltip-open", handleOpen);
+    return () => window.removeEventListener("cost-obs:rail-tooltip-open", handleOpen);
+  }, [tooltipId]);
+  const open = () => {
+    window.dispatchEvent(new CustomEvent("cost-obs:rail-tooltip-open", {
+      detail: tooltipId,
+    }));
+  };
+  return (
+    <span
+      className="relative inline-flex shrink-0"
+      onMouseEnter={open}
+      onMouseLeave={() => setVisible(false)}
+      onFocusCapture={open}
+      onBlurCapture={(event) => {
+        if (!event.currentTarget.contains(event.relatedTarget as Node | null)) {
+          setVisible(false);
+        }
+      }}
+    >
+      {children}
+      <span
+        role="tooltip"
+        aria-hidden={!visible}
+        className={`pointer-events-none absolute top-[calc(100%+8px)] z-50 w-max max-w-[min(360px,calc(100vw-24px))] rounded-[5px] bg-[#263238] px-2.5 py-1.5 text-left text-[11px] font-medium leading-4 text-white shadow-lg transition-opacity ${align === "start" ? "left-0" : align === "end" ? "right-0" : "left-1/2 -translate-x-1/2"} ${visible ? "opacity-100" : "opacity-0"}`}
+      >
+        {text}
+      </span>
+    </span>
+  );
+}
+
+function CopyableRailBadge({
+  value,
+  text,
+  label,
+  entity,
+  icon,
+  tooltipAlign = "center",
+}: {
+  value: string;
+  text: string;
+  label: string;
+  entity: string;
+  icon: React.ReactNode;
+  tooltipAlign?: "start" | "center" | "end";
+}) {
+  const [copied, setCopied] = useState(false);
+  const copyValue = async () => {
+    await navigator.clipboard.writeText(value);
+    setCopied(true);
+    window.setTimeout(() => setCopied(false), 1600);
+  };
+  return (
+    <RailBadgeTooltip align={tooltipAlign} text={
+      <span className="block space-y-0.5">
+        <span className="block">
+          <strong>{entity} display name:</strong>{" "}
+          <code className="font-mono text-[10.5px]">{text}</code>
+        </span>
+        <span className="block">
+          <strong>{entity} ID:</strong>{" "}
+          <code className="font-mono text-[10.5px]">{value}</code>
+          {copied ? " (copied)" : ""}
+        </span>
+      </span>
+    }>
+      <button
+        type="button"
+        aria-label={copied ? `${label} copied` : `Copy ${label}`}
+        onClick={() => { void copyValue(); }}
+        className={`group ${RAIL_STATUS_BADGE_CLASS} appearance-none transition-colors hover:bg-green-400/25 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-green-300/40`}
+      >
+        <span className="rail-status-dot healthy-status-dot h-[5px] w-[5px] rounded-full bg-green-400" />
+        <span className="min-w-0 overflow-hidden whitespace-nowrap">{compactRailBadgeText(text)}</span>
+        {copied ? (
+          <Check className="h-2.5 w-2.5" aria-hidden="true" />
+        ) : (
+          <span className="relative inline-flex h-2.5 w-2.5 shrink-0 items-center justify-center">
+            <span className="inline-flex group-hover:hidden group-focus:hidden" aria-hidden="true">
+              {icon}
+            </span>
+            <Copy className="hidden h-2.5 w-2.5 opacity-80 group-hover:block group-focus:block" aria-hidden="true" />
+          </span>
+        )}
+      </button>
+    </RailBadgeTooltip>
+  );
 }
 
 function AccountPricingBanner() {
@@ -379,19 +510,16 @@ function Dashboard() {
     staleTime: 60 * 1000,
   });
 
-  // Detect cloud from browser URL instantly (no API call needed)
-  const detectedCloudFromUrl = useMemo(() => {
-    const host = window.location.hostname.toLowerCase();
-    if (host.includes("azure") || host.includes(".azure.")) return "AZURE";
-    if (host.includes(".gcp.") || host.includes("gcp.databricks")) return "GCP";
-    return "AWS";
-  }, []);
-
   const { applyPricing, multiplier: pricingMultiplier } = usePricing();
 
   // Central warehouse warming poller — single source of truth for warehouse state.
   // Polls every 5s while warming_up, 15s once warm (catches post-idle auto-stop within ~15s).
-  const { data: warehouseStatus } = useQuery<{ status: "warm" | "warming_up" | "unavailable"; state?: string }>({
+  const { data: warehouseStatus } = useQuery<{
+    status: "warm" | "warming_up" | "unavailable";
+    state?: string;
+    warehouse_id?: string | null;
+    warehouse_name?: string | null;
+  }>({
     queryKey: ["health", "sql-warehouse"],
     queryFn: () => fetch("/api/health/sql-warehouse").then(r => r.ok ? r.json().catch(() => ({ status: "warm" })) : { status: "warm" }).catch(() => ({ status: "warm" })),
     refetchInterval: (query) => (query.state.data?.status === "warming_up") ? 5000 : 15000,
@@ -797,190 +925,136 @@ function Dashboard() {
 
       {/* Sticky top chrome: navy account bar + white title/tabs */}
       <div className="sticky top-0 z-30 shadow">
-      {/* Account Info Banner */}
-      <div className="text-white" style={{ backgroundColor: C.navy, height: 46 }}>
-        <div className="mx-auto max-w-7xl px-4 py-3 sm:px-6 lg:px-8">
-          <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-            <div className="flex items-center gap-4">
-              <div className="flex items-center gap-2">
-                <svg className="h-5 w-5" viewBox="0 0 24 24" fill="white">
-                  <path d="M20 4H4L7 8L4 12H20L17 8L20 4Z" opacity="0.9"/>
-                  <path d="M20 8H4L7 12L4 16H20L17 12L20 8Z" opacity="0.7"/>
-                  <path d="M20 12H4L7 16L4 20H20L17 16L20 12Z" opacity="0.5"/>
+      <div data-testid="account-rail" className="min-h-[52px] overflow-visible bg-[#1B3139] text-white">
+        <div className="flex min-h-[52px] w-full min-w-0 flex-wrap items-center gap-[8px] px-[12px] py-[8px] min-[1280px]:gap-[14px] min-[1280px]:px-[20px]">
+          <a
+            href="https://www.databricks.com"
+            target="_blank"
+            rel="noreferrer"
+            className="flex shrink-0 items-center gap-[10px] rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#FF3621]/35"
+          >
+            <img src="/brand/databricks-symbol-white.svg" alt="" className="h-[19px] w-[17px]" />
+            <span className="hidden flex-col gap-[1px] min-[1180px]:flex">
+              <span className="text-[8.5px] font-semibold tracking-[.14em] text-[#E9EFED]/60">BUILT ON</span>
+              <span className="text-[14px] font-semibold leading-none text-white">Databricks</span>
+            </span>
+          </a>
+
+          <DeploymentBadgeFromApi variant="control" />
+
+          <span className="hidden h-[22px] w-px shrink-0 bg-white/[.16] min-[1180px]:block" aria-hidden="true" />
+
+          <div className="order-last flex w-full min-w-0 items-center gap-[8px] sm:order-none sm:w-auto sm:flex-1">
+            <WorkspaceFilter
+              workspaces={wsFilterList}
+              selectedIds={selectedWorkspaceIds}
+              onChange={setSelectedWorkspaceIds}
+              isLoading={wsListLoading}
+              variant="rail"
+              showClearButton={false}
+            />
+            <SourceLabelFilter variant="rail" />
+            {selectedWorkspaceIds.length > 0 && (
+              <button
+                type="button"
+                onClick={() => setSelectedWorkspaceIds([])}
+                aria-label="Clear workspace filter"
+                title="Show all workspaces"
+                className="flex h-[28px] w-[28px] shrink-0 items-center justify-center rounded-full bg-white/[.14] text-[#E9EFED] opacity-80 transition-colors hover:bg-white/[.22] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#FF3621]/35"
+              >
+                <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18 18 6M6 6l12 12" />
                 </svg>
-                <span className="text-sm opacity-75">Databricks Account</span>
-              </div>
-              <div className="flex items-center gap-3">
-                <img
-                  src={detectedCloudFromUrl === "AZURE" ? azureLogo : detectedCloudFromUrl === "GCP" ? gcpLogo : awsLogo}
-                  alt={detectedCloudFromUrl}
-                  className="h-5 w-5 object-contain"
-                />
-                {accountInfo ? (
-                  <>
-                    {accountInfo.account_name && (
-                      <div className="flex flex-col leading-none">
-                        <span className="text-[9px] font-medium uppercase tracking-wide opacity-50">Account</span>
-                        <span className="mt-0.5 max-w-[120px] truncate rounded px-2 py-0.5 text-[10px] font-medium text-white/90" style={{ backgroundColor: 'rgba(255,255,255,0.15)' }}>
-                          {accountInfo.account_name}
-                        </span>
-                      </div>
-                    )}
-                    {wsListLoading ? (
-                      <div className="flex flex-col leading-none">
-                        <span className="text-[9px] font-medium uppercase tracking-wide opacity-50">Workspace</span>
-                        <div className="mt-0.5 h-5 w-24 animate-pulse rounded" style={{ backgroundColor: "rgba(255,255,255,0.15)" }} />
-                      </div>
-                    ) : wsFilterList.length > 0 ? (
-                      <div className="flex flex-col leading-none">
-                        <span className="text-[9px] font-medium uppercase tracking-wide opacity-50">
-                          {(selectedWorkspaceIds.length === 0 ? wsFilterList.length : selectedWorkspaceIds.length) > 1 ? "Workspaces" : "Workspace"}
-                        </span>
-                        <div className="flex items-center gap-1 mt-0.5">
-                          {selectedWorkspaceIds.length === 0 ? (
-                            // All workspaces selected — show names if pool ≤ 2, else "All"
-                            wsFilterList.length <= 2
-                              ? wsFilterList.map((w) => {
-                                  const lbl = w.workspace_name || w.workspace_id;
-                                  return (
-                                    <span
-                                      key={w.workspace_id}
-                                      title={lbl}
-                                      className="max-w-[150px] truncate rounded px-2 py-0.5 text-[10px] font-medium text-white/90"
-                                      style={{ backgroundColor: "rgba(255,255,255,0.15)" }}
-                                    >
-                                      {lbl}
-                                    </span>
-                                  );
-                                })
-                              : (
-                                <span
-                                  className="rounded px-2 py-0.5 text-[10px] font-medium text-white/90"
-                                  style={{ backgroundColor: "rgba(255,255,255,0.15)" }}
-                                >
-                                  All
-                                </span>
-                              )
-                          ) : selectedWorkspaceIds.length <= 2
-                            ? selectedWorkspaceIds.map((id) => {
-                                const ws = wsFilterList.find((w) => w.workspace_id === id);
-                                const lbl = ws?.workspace_name || id;
-                                return (
-                                  <span
-                                    key={id}
-                                    title={lbl}
-                                    className="max-w-[150px] truncate rounded px-2 py-0.5 text-[10px] font-medium text-white/90"
-                                    style={{ backgroundColor: "rgba(255,255,255,0.15)" }}
-                                  >
-                                    {lbl}
-                                  </span>
-                                );
-                              })
-                            : (
-                              <span
-                                className="rounded px-2 py-0.5 text-[10px] font-medium text-white/90"
-                                style={{ backgroundColor: "rgba(255,255,255,0.15)" }}
-                              >
-                                {selectedWorkspaceIds.length} workspaces
-                              </span>
-                            )
-                          }
-                        </div>
-                      </div>
-                    ) : null}
-                  </>
+              </button>
+            )}
+          </div>
+
+          <div className="min-w-[2px] flex-1 sm:hidden" />
+
+          {user && (
+            <>
+              <CopyableRailBadge
+                value={accountInfo?.account_id || accountInfo?.account_name || "Databricks account"}
+                text={accountInfo?.account_name || "Databricks account"}
+                label="account ID"
+                entity="Account"
+                icon={<DuBoisAccountIcon />}
+                tooltipAlign="start"
+              />
+              {authStatus && authStatus.identity !== "user_oauth" && (
+                (authStatus.sp_user_name || authStatus.sp_client_id) && (
+                  <CopyableRailBadge
+                    value={authStatus.sp_client_id || authStatus.sp_user_name || ""}
+                    text={authStatus.sp_display_name || authStatus.sp_user_name || authStatus.sp_client_id || ""}
+                    label="service principal ID"
+                    entity="Service principal"
+                    icon={<Bot className="h-2.5 w-2.5 opacity-70" aria-label="Service principal" />}
+                  />
+                )
+              )}
+              {warehouseStatus && (
+                warehouseStatus.warehouse_id ? (
+                  <CopyableRailBadge
+                    value={warehouseStatus.warehouse_id}
+                    text={warehouseStatus.warehouse_name?.trim()
+                      || (warehouseStatus.status === "warm" ? "Active" : warehouseStatus.status === "warming_up" ? "Starting" : "Offline")}
+                    label="SQL warehouse ID"
+                    entity="SQL warehouse"
+                    icon={<DatabricksSqlProductIcon />}
+                  />
                 ) : (
-                  <span className="text-sm opacity-75">Loading account info...</span>
-                )}
-              </div>
-            </div>
-            {user && (
-              <div className="flex items-center gap-2">
-                {authStatus && authStatus.identity !== "user_oauth" && (
-                  <>
-                    {authStatus.sp_display_name && (
-                      <span className="inline-flex items-center gap-1 rounded-full bg-green-500/20 px-2 py-0.5 text-[10px] font-semibold text-green-200" title={authStatus.sp_display_name}>
-                        <span className="h-1.5 w-1.5 rounded-full bg-green-400" />
-                        <span className="font-mono">{authStatus.sp_display_name.slice(0, 8)}</span>
-                        <span className="opacity-60">ID</span>
-                      </span>
-                    )}
-                    {(authStatus.sp_user_name || authStatus.sp_client_id) && (
-                      <span className="inline-flex items-center gap-1 rounded-full bg-green-500/20 px-2 py-0.5 text-[10px] font-semibold text-green-200" title={authStatus.sp_user_name || authStatus.sp_client_id}>
-                        <span className="h-1.5 w-1.5 rounded-full bg-green-400" />
-                        <span className="font-mono">{(authStatus.sp_user_name || authStatus.sp_client_id || "").slice(0, 8)}</span>
-                        <span className="opacity-60">SP</span>
-                      </span>
-                    )}
-                  </>
-                )}
-                {warehouseStatus && (
-                  <span
-                    className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-semibold ${
-                      warehouseStatus.status === "warm"
-                        ? "bg-green-500/20 text-green-200"
-                        : warehouseStatus.status === "warming_up"
-                        ? "bg-amber-500/20 text-amber-200"
-                        : "bg-red-500/20 text-red-200"
-                    }`}
-                    title={`SQL Warehouse: ${warehouseStatus.state ?? warehouseStatus.status}`}
-                  >
-                    <span
-                      className={`h-1.5 w-1.5 rounded-full ${
-                        warehouseStatus.status === "warm"
-                          ? "bg-green-400"
-                          : warehouseStatus.status === "warming_up"
-                          ? "bg-amber-400 animate-pulse"
-                          : "bg-red-400"
-                      }`}
-                    />
-                    {warehouseStatus.status === "warm" ? "Active" : warehouseStatus.status === "warming_up" ? "Starting" : "Offline"}
-                    <span className="opacity-60">SQL</span>
-                  </span>
-                )}
-                <span className="text-sm opacity-90">
-                  {user.email}
-                </span>
-                {user.role && (
-                  <span className={`rounded px-2 py-0.5 text-xs font-medium ${user.role === "admin" ? "bg-white/20 text-white" : "bg-white/10 text-white/70"}`}>
-                    {user.role === "admin" ? "Admin" : "Consumer"}
-                  </span>
-                )}
+                  <RailBadgeTooltip text={`SQL warehouse status: ${warehouseStatus.state ?? warehouseStatus.status}.`}>
+                    <span className={RAIL_STATUS_BADGE_CLASS}>
+                      {warehouseStatus.status === "warm" ? "Active" : warehouseStatus.status === "warming_up" ? "Starting" : "Offline"}
+                    </span>
+                  </RailBadgeTooltip>
+                )
+              )}
+              <UserMenu
+                name={user.name}
+                email={user.email}
+                isAdmin={user.role === "admin"}
+                workspaceHost={accountInfo?.host}
+              />
+              <div className="flex shrink-0 items-center gap-[4px]">
                 {tabVisibility.conversational && (
                   <button
+                    type="button"
                     onClick={() => setShowConversational(true)}
-                    className="inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-medium text-white opacity-75 transition-opacity hover:opacity-100 hover:bg-white/10 border border-white/20"
+                    aria-label="Ask Genie"
+                    className="rail-control-border inline-flex h-[28px] w-[28px] shrink-0 items-center justify-center rounded-[7px] border bg-white/[.07] px-0 text-[11.5px] font-semibold text-[#E9EFED] transition-colors hover:bg-[#243F49] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#FF3621]/35 focus-visible:ring-offset-1 focus-visible:ring-offset-[#1B3139] min-[1100px]:w-auto min-[1100px]:gap-1.5 min-[1100px]:px-[9px]"
                     title="Ask Genie"
                   >
                     <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
                     </svg>
-                    Ask Genie
+                    <span className="hidden min-[1100px]:inline">Ask Genie</span>
                   </button>
                 )}
                 <button
+                  type="button"
                   onClick={() => setShowExportDialog(true)}
-                  className="inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-medium text-white opacity-75 transition-opacity hover:opacity-100 hover:bg-white/10 border border-white/20"
+                  aria-label="Export"
+                  className="rail-control-border inline-flex h-[28px] w-[28px] shrink-0 items-center justify-center rounded-[7px] border bg-[#1B5F96] px-0 text-[11.5px] font-semibold text-white transition-colors hover:bg-[#2272B4] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#4D98D0]/50 focus-visible:ring-offset-1 focus-visible:ring-offset-[#1B3139] min-[1100px]:w-auto min-[1100px]:gap-1.5 min-[1100px]:px-[9px]"
                   title="Export"
                 >
                   <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
                   </svg>
-                  Export
+                  <span className="hidden min-[1100px]:inline">Export</span>
                 </button>
                 <button
+                  type="button"
                   onClick={() => setShowSettings(true)}
-                  className="rounded-md p-1.5 text-white opacity-75 transition-opacity hover:opacity-100 hover:bg-white/10"
+                  className="flex h-[32px] w-[32px] shrink-0 items-center justify-center rounded-[6px] text-white opacity-80 transition-colors hover:bg-white/[.10] hover:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#FF3621]/35 focus-visible:ring-offset-1 focus-visible:ring-offset-[#1B3139]"
                   title="App Settings"
+                  aria-label="App Settings"
                 >
-                  <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.066 2.573c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.573 1.066c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.066-2.573c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-                  </svg>
+                  <Settings size={17} strokeWidth={1.8} aria-hidden="true" />
                 </button>
               </div>
-            )}
-          </div>
+            </>
+          )}
         </div>
       </div>
 
@@ -989,26 +1063,16 @@ function Dashboard() {
 
       <header className="bg-white">
         <div className="mx-auto max-w-7xl px-4 pt-8 pb-4 sm:px-6 lg:px-8">
-          <div className="grid grid-cols-3 items-center gap-4">
-            <div>
-              <div className="flex items-center gap-2">
-                <button type="button" onClick={() => setActiveTab("dbu")} title="Back to $DBU Spend" className="cursor-pointer hover:opacity-80 transition-opacity">
-                  <CostObsLockup />
-                </button>
-                <VersionPill />
-              </div>
+          <div className="flex flex-wrap items-center gap-4">
+            <div className="flex min-w-0 items-center gap-2">
+              <button type="button" onClick={() => setActiveTab("dbu")} title="Back to $DBU Spend" className="cursor-pointer transition-opacity hover:opacity-80">
+                <CostObsLockup />
+              </button>
+              <VersionPill />
             </div>
-            <div className="flex justify-center items-center gap-3">
+            <div className="w-full sm:ml-auto sm:w-auto">
               <DateRangePicker value={dateRange} onChange={setDateRange} />
-              <WorkspaceFilter
-                workspaces={wsFilterList}
-                selectedIds={selectedWorkspaceIds}
-                onChange={setSelectedWorkspaceIds}
-                isLoading={wsListLoading}
-              />
-              <SourceLabelFilter />
             </div>
-            <div />
           </div>
           {/* Tab Navigation */}
           <div className="mt-4 overflow-x-auto overflow-y-hidden" style={{ borderBottom: "1px solid var(--hairline)" }}>
@@ -1206,16 +1270,13 @@ function Dashboard() {
                 </svg>
               }
               title="$DBU Spend"
-              subtitle={
-                <>
-                  Databricks Unit consumption and cost breakdown
-                  {_wsIds && _wsIds.length > 0 && (
-                    <Chip kind="workspace">
-                      {_wsIds.length === 1 ? (workspaceNameMap[_wsIds[0]] || _wsIds[0]) : `${_wsIds.length} workspaces`}
-                    </Chip>
-                  )}
-                </>
-              }
+              subtitle="Databricks Unit consumption and cost breakdown"
+              dateRange={dateRange}
+              workspaceScope={_wsIds && _wsIds.length > 0
+                ? _wsIds.length === 1
+                  ? workspaceNameMap[_wsIds[0]] || _wsIds[0]
+                  : `${_wsIds.length} workspaces`
+                : undefined}
             />
 
 

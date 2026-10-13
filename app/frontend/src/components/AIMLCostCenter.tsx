@@ -1,30 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import { createPortal } from "react-dom";
 import { useQueryClient } from "@tanstack/react-query";
 import { VirtualizedList } from "./VirtualizedList";
-
-function InfoTooltip({ text }: { text: string }) {
-  const [pos, setPos] = useState<{ x: number; y: number } | null>(null);
-  return (
-    <span
-      className="ml-1.5 inline-flex cursor-help"
-      onMouseEnter={e => setPos({ x: e.clientX, y: e.clientY })}
-      onMouseMove={e => setPos({ x: e.clientX, y: e.clientY })}
-      onMouseLeave={() => setPos(null)}
-    >
-      <span className="flex h-4 w-4 items-center justify-center rounded-full bg-gray-200 text-[10px] font-semibold text-gray-500">i</span>
-      {pos && createPortal(
-        <div
-          className="pointer-events-none fixed z-[9999] w-64 rounded-lg bg-gray-900 px-3 py-2 text-xs font-normal leading-relaxed text-white shadow-lg"
-          style={{ top: pos.y - 12, transform: "translateY(-100%)", left: Math.min(pos.x + 14, window.innerWidth - 272) }}
-        >
-          {text}
-        </div>,
-        document.body
-      )}
-    </span>
-  );
-}
 import {
   AreaChart,
   Area,
@@ -39,9 +15,10 @@ import {
 } from "recharts";
 import type { AIMLDashboardBundle } from "@/types/billing";
 import { KPITrendModal } from "./KPITrendModal";
+import { KPICard } from "@/components/ui/KPICard";
 import { formatIdentity, useSpNameMap } from "@/utils/identity";
 import { C } from "@/theme";
-import { PageHero, Chip, TabInfoBanner } from "@/components/brand";
+import { PageHero, TabInfoBanner } from "@/components/brand";
 
 interface AIMLCostCenterProps {
   data: AIMLDashboardBundle | undefined;
@@ -421,16 +398,13 @@ export function AIMLCostCenter({ data, isLoading, startDate, endDate, host, work
           </svg>
         }
         title="AI/ML"
-        subtitle={
-          <>
-            AI and machine learning cost attribution and trends
-            {workspaceIds && workspaceIds.length > 0 && (
-              <Chip kind="workspace">
-                {workspaceIds.length === 1 ? (workspaceNameMap?.[workspaceIds[0]] || workspaceIds[0]) : `${workspaceIds.length} workspaces`}
-              </Chip>
-            )}
-          </>
-        }
+        subtitle="AI and machine learning cost attribution and trends"
+        dateRange={{ startDate, endDate }}
+        workspaceScope={workspaceIds && workspaceIds.length > 0
+          ? workspaceIds.length === 1
+            ? (workspaceNameMap?.[workspaceIds[0]] || workspaceIds[0])
+            : `${workspaceIds.length} workspaces`
+          : undefined}
       />
       )}
 
@@ -450,85 +424,51 @@ export function AIMLCostCenter({ data, isLoading, startDate, endDate, host, work
 
       {/* Summary Cards */}
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        <div
-          className="rounded-lg bg-white p-6 border shadow-sm cursor-pointer hover:shadow-md hover:scale-[1.01] transition-all"
-          style={{ borderColor: '#E5E5E5' }}
-          onClick={() => startDate && endDate && setSelectedKPI({kpi: "aiml_spend", label: "Daily AI/ML Spend"})}
-        >
-          <div className="flex items-center">
-            <div className="flex h-12 w-12 items-center justify-center rounded-lg bg-orange-100">
-              <svg className="h-6 w-6 text-[#FF3621]" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-              </svg>
-            </div>
-            <div className="ml-4">
-              <p className="text-sm font-medium text-gray-500">Total AI/ML Spend</p>
-              <p className="text-2xl font-semibold text-gray-900">{formatCurrency(summary.total_spend)}</p>
-              <p className="mt-1 text-xs text-gray-500">over {summary.days_in_range} days</p>
-              <p className="mt-0.5 text-xs font-medium" style={{ color: '#FF3621' }}>Click to see trend →</p>
-            </div>
-          </div>
-        </div>
-
-        <div
-          className="rounded-lg bg-white p-6 border shadow-sm cursor-pointer hover:shadow-md hover:scale-[1.01] transition-all"
-          style={{ borderColor: '#E5E5E5' }}
-          onClick={() => startDate && endDate && setSelectedKPI({kpi: "aiml_dbus", label: "Daily AI/ML DBUs"})}
-        >
-          <div className="flex items-center">
-            <div className="flex h-12 w-12 items-center justify-center rounded-lg bg-orange-100">
-              <svg className="h-6 w-6 text-[#FF3621]" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 7h6m0 10v-3m-3 3h.01M9 17h.01M9 14h.01M12 14h.01M15 11h.01M12 11h.01M9 11h.01M7 21h10a2 2 0 002-2V5a2 2 0 00-2-2H7a2 2 0 00-2 2v14a2 2 0 002 2z" />
-              </svg>
-            </div>
-            <div className="ml-4">
-              <p className="text-sm font-medium text-gray-500">Total DBUs</p>
-              <p className="text-2xl font-semibold text-gray-900">{formatNumber(summary.total_dbus)}</p>
-              <p className="mt-1 text-xs text-gray-500">over {summary.days_in_range} days</p>
-              <p className="mt-0.5 text-xs font-medium" style={{ color: '#FF3621' }}>Click to see trend →</p>
-            </div>
-          </div>
-        </div>
-
-        <div
-          className="rounded-lg bg-white p-6 border shadow-sm cursor-pointer hover:shadow-md hover:scale-[1.01] transition-all"
-          style={{ borderColor: '#E5E5E5' }}
-          onClick={() => startDate && endDate && setSelectedKPI({kpi: "aiml_endpoints", label: "Daily Active Endpoints"})}
-        >
-          <div className="flex items-center">
-            <div className="flex h-12 w-12 items-center justify-center rounded-lg bg-orange-100">
-              <svg className="h-6 w-6 text-[#FF3621]" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 12h14M5 12a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v4a2 2 0 01-2 2M5 12a2 2 0 00-2 2v4a2 2 0 002 2h14a2 2 0 002-2v-4a2 2 0 00-2-2m-2-4h.01M17 16h.01" />
-              </svg>
-            </div>
-            <div className="ml-4">
-              <p className="flex items-center text-sm font-medium text-gray-500">Active Endpoints<InfoTooltip text="Average number of distinct model serving endpoints with billable usage per day in the selected period." /></p>
-              <p className="text-2xl font-semibold text-gray-900">{formatNumber(summary.endpoint_count || 0)}</p>
-              <p className="mt-1 text-xs text-gray-500">across {summary.workspace_count || 0} workspaces</p>
-              <p className="mt-0.5 text-xs font-medium" style={{ color: '#FF3621' }}>Click to see trend →</p>
-            </div>
-          </div>
-        </div>
-
-        <div
-          className="rounded-lg bg-white p-6 border shadow-sm cursor-pointer hover:shadow-md hover:scale-[1.01] transition-all"
-          style={{ borderColor: '#E5E5E5' }}
-          onClick={() => startDate && endDate && setSelectedKPI({kpi: "aiml_avg_endpoint_cost", label: "Average Daily Endpoint Cost"})}
-        >
-          <div className="flex items-center">
-            <div className="flex h-12 w-12 items-center justify-center rounded-lg bg-orange-100">
-              <svg className="h-6 w-6 text-[#FF3621]" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6" />
-              </svg>
-            </div>
-            <div className="ml-4">
-              <p className="text-sm font-medium text-gray-500">Average Daily Endpoint Cost</p>
-              <p className="text-2xl font-semibold text-gray-900">{formatCurrency(summary.avg_cost_per_endpoint || 0)}</p>
-              <p className="mt-1 text-xs text-gray-500">daily per-endpoint</p>
-              <p className="mt-0.5 text-xs font-medium" style={{ color: '#FF3621' }}>Click to see trend →</p>
-            </div>
-          </div>
-        </div>
+        <KPICard
+          title="Total AI/ML Spend"
+          value={formatCurrency(summary.total_spend)}
+          subtitle={`over ${summary.days_in_range} days`}
+          onActivate={startDate && endDate ? () => setSelectedKPI({kpi: "aiml_spend", label: "Daily AI/ML Spend"}) : undefined}
+          icon={
+            <svg className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+            </svg>
+          }
+        />
+        <KPICard
+          title="Total DBUs"
+          value={formatNumber(summary.total_dbus)}
+          subtitle={`over ${summary.days_in_range} days`}
+          onActivate={startDate && endDate ? () => setSelectedKPI({kpi: "aiml_dbus", label: "Daily AI/ML DBUs"}) : undefined}
+          icon={
+            <svg className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 7h6m0 10v-3m-3 3h.01M9 17h.01M9 14h.01M12 14h.01M15 11h.01M12 11h.01M9 11h.01M7 21h10a2 2 0 002-2V5a2 2 0 00-2-2H7a2 2 0 00-2 2v14a2 2 0 002 2z" />
+            </svg>
+          }
+        />
+        <KPICard
+          title="Active Endpoints"
+          value={formatNumber(summary.endpoint_count || 0)}
+          subtitle={`across ${summary.workspace_count || 0} workspaces`}
+          infoText="Average number of distinct model serving endpoints with billable usage per day in the selected period."
+          onActivate={startDate && endDate ? () => setSelectedKPI({kpi: "aiml_endpoints", label: "Daily Active Endpoints"}) : undefined}
+          icon={
+            <svg className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 12h14M5 12a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v4a2 2 0 01-2 2M5 12a2 2 0 00-2 2v4a2 2 0 002 2h14a2 2 0 002-2v-4a2 2 0 00-2-2m-2-4h.01M17 16h.01" />
+            </svg>
+          }
+        />
+        <KPICard
+          title="Average Daily Endpoint Cost"
+          value={formatCurrency(summary.avg_cost_per_endpoint || 0)}
+          subtitle="daily per-endpoint"
+          onActivate={startDate && endDate ? () => setSelectedKPI({kpi: "aiml_avg_endpoint_cost", label: "Average Daily Endpoint Cost"}) : undefined}
+          icon={
+            <svg className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6" />
+            </svg>
+          }
+        />
       </div>
 
       {selectedKPI && startDate && endDate && (

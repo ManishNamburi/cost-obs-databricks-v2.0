@@ -1,33 +1,9 @@
 import { useState, useEffect } from "react";
-import { createPortal } from "react-dom";
 import { useQueryClient } from "@tanstack/react-query";
 import type { BillingSummary } from "@/types/billing";
 import { formatCurrency, formatNumber } from "@/utils/formatters";
 import { KPITrendModal } from "./KPITrendModal";
-import { C, FONT_MONO } from "@/theme";
-
-function InfoTooltip({ text }: { text: string }) {
-  const [pos, setPos] = useState<{ x: number; y: number } | null>(null);
-  return (
-    <span
-      className="ml-1.5 inline-flex cursor-help"
-      onMouseEnter={e => setPos({ x: e.clientX, y: e.clientY })}
-      onMouseMove={e => setPos({ x: e.clientX, y: e.clientY })}
-      onMouseLeave={() => setPos(null)}
-    >
-      <span className="flex h-4 w-4 items-center justify-center rounded-full bg-gray-200 text-[10px] font-semibold text-gray-500">i</span>
-      {pos && createPortal(
-        <div
-          className="pointer-events-none fixed z-[9999] w-64 rounded-lg bg-gray-900 px-3 py-2 text-xs font-normal leading-relaxed text-white shadow-lg"
-          style={{ top: pos.y - 12, transform: "translateY(-100%)", left: Math.min(pos.x + 14, window.innerWidth - 272) }}
-        >
-          {text}
-        </div>,
-        document.body
-      )}
-    </span>
-  );
-}
+import { KPICard } from "@/components/ui/KPICard";
 
 interface SummaryCardsProps {
   data: BillingSummary | undefined;
@@ -35,57 +11,6 @@ interface SummaryCardsProps {
   startDate?: string;
   endDate?: string;
   workspaceIds?: string[];
-}
-
-interface CardProps {
-  title: string;
-  value: string;
-  subtitle?: string;
-  infoTooltip?: string;
-  icon: React.ReactNode;
-  isLoading: boolean;
-  onClick?: () => void;
-}
-
-function isMutedValue(value: string) {
-  const n = value.replace(/[$,]/g, "").trim();
-  return n === "0" || n === "0.00" || n === "—" || n === "N/A" || n === "n/a";
-}
-
-function Card({ title, value, subtitle, infoTooltip, icon, isLoading, onClick }: CardProps) {
-  const muted = !isLoading && isMutedValue(value);
-  return (
-    <div
-      className={`co-card p-6 transition-shadow ${onClick ? "cursor-pointer" : ""}`}
-      onClick={onClick}
-    >
-      <div className="flex items-center">
-        <div
-          className="flex h-[42px] w-[42px] shrink-0 items-center justify-center"
-          style={{ background: C.coralTint, borderRadius: 8, color: C.lava }}
-        >
-          {icon}
-        </div>
-        <div className="ml-4 flex-1 min-w-0">
-          <p className="flex items-center text-[13px] font-medium" style={{ color: C.slate }}>{title}{infoTooltip && <InfoTooltip text={infoTooltip} />}</p>
-          {isLoading ? (
-            <div className="mt-1 h-7 w-20 animate-pulse rounded" style={{ background: C.hairline }} />
-          ) : (
-            <p
-              className="mt-1 text-[28px] font-medium tracking-tight"
-              style={{ color: muted ? C.muted : C.ink, fontFamily: FONT_MONO, letterSpacing: "-0.02em" }}
-            >
-              {value}
-            </p>
-          )}
-          {subtitle && <p className="mt-0.5 text-xs" style={{ color: C.muted }}>{subtitle}</p>}
-          {onClick && (
-            <p className="mt-1 text-[12.5px] font-semibold" style={{ color: C.lava }}>See trend →</p>
-          )}
-        </div>
-      </div>
-    </div>
-  );
 }
 
 type KPIType = "total_spend" | "total_dbus" | "avg_daily_spend" | "workspace_count";
@@ -100,6 +25,7 @@ export function SummaryCards({ data, isLoading, startDate, endDate, workspaceIds
   } | null>(null);
 
   const wsKey = workspaceIds?.join(",") ?? "";
+  const canOpenTrend = Boolean(startDate && endDate);
 
   // Pre-warm trend data in the background once dates are available
   useEffect(() => {
@@ -128,49 +54,49 @@ export function SummaryCards({ data, isLoading, startDate, endDate, workspaceIds
   return (
     <>
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        <Card
+        <KPICard
           title="Total Spend"
           value={formatCurrency(data?.total_spend ?? 0)}
           subtitle={data?.days_in_range != null ? `over ${data.days_in_range} days` : undefined}
           isLoading={isLoading}
-          onClick={() => handleCardClick("total_spend", "Total Spend")}
+          onActivate={canOpenTrend ? () => handleCardClick("total_spend", "Total Spend") : undefined}
           icon={
             <svg className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
             </svg>
           }
         />
-        <Card
+        <KPICard
           title="Total DBUs"
           value={formatNumber(data?.total_dbus ?? 0)}
           subtitle={data?.days_in_range != null ? `over ${data.days_in_range} days` : undefined}
           isLoading={isLoading}
-          onClick={() => handleCardClick("total_dbus", "Total DBUs")}
+          onActivate={canOpenTrend ? () => handleCardClick("total_dbus", "Total DBUs") : undefined}
           icon={
             <svg className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 7h6m0 10v-3m-3 3h.01M9 17h.01M9 14h.01M12 14h.01M15 11h.01M12 11h.01M9 11h.01M7 21h10a2 2 0 002-2V5a2 2 0 00-2-2H7a2 2 0 00-2 2v14a2 2 0 002 2z" />
             </svg>
           }
         />
-        <Card
+        <KPICard
           title="Average Daily Spend"
           value={formatCurrency(data?.avg_daily_spend ?? 0)}
           subtitle={data?.workspace_count != null ? `across ${data.workspace_count} workspaces` : "daily average"}
           isLoading={isLoading}
-          onClick={() => handleCardClick("avg_daily_spend", "Average Daily Spend")}
+          onActivate={canOpenTrend ? () => handleCardClick("avg_daily_spend", "Average Daily Spend") : undefined}
           icon={
             <svg className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6" />
             </svg>
           }
         />
-        <Card
+        <KPICard
           title="Workspaces"
           value={String(data?.workspace_count ?? 0)}
           subtitle="active workspaces"
-          infoTooltip="Average number of distinct workspaces with billable usage per day in the selected period. Matches the daily trend average."
+          infoText="Average number of distinct workspaces with billable usage per day in the selected period. Matches the daily trend average."
           isLoading={isLoading}
-          onClick={() => handleCardClick("workspace_count", "Daily Active Workspaces")}
+          onActivate={canOpenTrend ? () => handleCardClick("workspace_count", "Daily Active Workspaces") : undefined}
           icon={
             <svg className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" />

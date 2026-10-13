@@ -355,6 +355,12 @@ export function AIGatewayView({
               }
               title="AI Gateway"
               subtitle="AI/ML product cost + governed model traffic"
+              dateRange={{ startDate, endDate }}
+              workspaceScope={workspaceIds && workspaceIds.length > 0
+                ? workspaceIds.length === 1
+                  ? (workspaceNameMap?.[workspaceIds[0]] || workspaceIds[0])
+                  : `${workspaceIds.length} workspaces`
+                : undefined}
             />
           </div>
           <div className="flex rounded-lg border border-gray-200 overflow-hidden text-xs font-medium">

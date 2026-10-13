@@ -2,6 +2,7 @@ import { useState, useEffect, useMemo, useRef } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { setActiveSourceLabels } from "@/hooks/useBillingData";
 import { C } from "@/theme";
+import { Spinner } from "./Spinner";
 
 interface MvSource {
   label: string;
@@ -9,11 +10,15 @@ interface MvSource {
   schema: string;
 }
 
+interface SourceLabelFilterProps {
+  variant?: "header" | "rail";
+}
+
 // Top-nav multi-select for filtering dashboard data by MV source label. Only
 // rendered when additional MV sources are configured (otherwise there's a single
 // local label and nothing to filter). Default is all sources (combined); the
 // selection is pushed to the data layer and queries are invalidated to refetch.
-export function SourceLabelFilter() {
+export function SourceLabelFilter({ variant = "header" }: SourceLabelFilterProps) {
   const queryClient = useQueryClient();
   const { data } = useQuery<{ sources: MvSource[]; local_label: string }>({
     queryKey: ["mv-sources"],
@@ -49,7 +54,7 @@ export function SourceLabelFilter() {
     const effective = next.size === 0 || next.size === allLabels.length ? [] : Array.from(next);
     // Skip the refetch when the effective selection hasn't changed (e.g. closing
     // the dropdown without edits).
-    const key = [...effective].sort().join("");
+    const key = [...effective].sort().join("\u0001");
     if (key === lastAppliedRef.current) return;
     lastAppliedRef.current = key;
     setActiveSourceLabels(effective);
@@ -88,26 +93,42 @@ export function SourceLabelFilter() {
     return `${selected.size} sources`;
   };
 
+  const rail = variant === "rail";
+
   return (
-    <div className="relative">
+    <div className={rail ? "relative min-w-0 shrink" : "relative"}>
       {open && <div className="fixed inset-0 z-10" onClick={() => { setOpen(false); apply(selected); }} />}
       <button
         onClick={() => setOpen((o) => !o)}
-        className="co-filter flex items-center gap-2 whitespace-nowrap px-3"
+        aria-label={applying ? "Updating sources" : label()}
+        className={rail
+          ? "rail-source-filter rail-control-border flex h-[28px] w-[116px] items-center gap-[6px] whitespace-nowrap rounded-[7px] border bg-white/[.07] px-[8px] text-[11.5px] font-medium text-[#E9EFED] transition-colors hover:bg-white/[.12] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#FF3621]/35 focus-visible:ring-offset-1 focus-visible:ring-offset-[#1B3139] min-[1280px]:w-[190px] min-[1280px]:gap-[8px] min-[1280px]:px-[10px]"
+          : "co-filter flex items-center gap-2 whitespace-nowrap px-3"
+        }
         title="Filter by data source"
       >
         {applying ? (
-          <svg className="h-4 w-4 shrink-0 animate-spin text-lava" viewBox="0 0 24 24" fill="none">
-            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
-          </svg>
+          <Spinner size="sm" />
         ) : (
-          <svg className="h-4 w-4 shrink-0 text-gray-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+          <svg className={rail ? "h-[14px] w-[14px] shrink-0 opacity-70" : "h-4 w-4 shrink-0 text-gray-500"} fill="none" viewBox="0 0 24 24" stroke="currentColor">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 7h16M6 12h12M9 17h6" />
           </svg>
         )}
-        <span className="max-w-[140px] truncate">{applying ? "Updating…" : label()}</span>
-        <svg className={`ml-0.5 h-4 w-4 shrink-0 text-gray-500 transition-transform ${open ? "rotate-180" : ""}`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
+        <span className={rail ? "max-w-[68px] truncate min-[1280px]:max-w-[140px]" : "max-w-[140px] truncate"}>
+          {applying ? "Updating…" : (
+            rail ? (
+              <>
+                <span className="min-[1180px]:hidden">
+                  {allSelected
+                    ? `${allLabels.length} ${allLabels.length === 1 ? "source" : "sources"}`
+                    : selected.size === 1 ? "1 source" : `${selected.size} sources`}
+                </span>
+                <span className="hidden min-[1180px]:inline">{label()}</span>
+              </>
+            ) : label()
+          )}
+        </span>
+        <svg className={`${rail ? "h-[12px] w-[12px] opacity-70" : "h-4 w-4 text-gray-500"} ml-auto shrink-0 transition-transform ${open ? "rotate-180" : ""}`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
         </svg>
       </button>
@@ -141,12 +162,7 @@ export function SourceLabelFilter() {
               className="flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-medium text-white transition-colors disabled:cursor-not-allowed"
               style={{ backgroundColor: applying ? C.busy : C.lava }}
             >
-              {applying && (
-                <svg className="h-3 w-3 animate-spin" viewBox="0 0 24 24" fill="none">
-                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
-                </svg>
-              )}
+              {applying && <Spinner size="xs" />}
               {applying ? "Applying…" : "Apply"}
             </button>
           </div>

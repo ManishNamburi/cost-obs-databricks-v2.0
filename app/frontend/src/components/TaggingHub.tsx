@@ -17,9 +17,10 @@ import {
 } from "recharts";
 import type { TaggingDashboardBundle } from "@/types/billing";
 import { KPITrendModal } from "./KPITrendModal";
+import { KPICard } from "@/components/ui/KPICard";
 import { VirtualizedList } from "./VirtualizedList";
 import { C } from "@/theme";
-import { PageHero, Chip, TabInfoBanner } from "@/components/brand";
+import { PageHero, TabInfoBanner } from "@/components/brand";
 
 interface TagObject {
   object_id?: string | null;
@@ -56,29 +57,6 @@ const formatCurrency = (value: number) =>
     minimumFractionDigits: 0,
     maximumFractionDigits: 0,
   }).format(value);
-
-function InfoTooltip({ text }: { text: string }) {
-  const [pos, setPos] = useState<{ x: number; y: number } | null>(null);
-  return (
-    <span
-      className="ml-1.5 inline-flex cursor-help"
-      onMouseEnter={e => setPos({ x: e.clientX, y: e.clientY })}
-      onMouseMove={e => setPos({ x: e.clientX, y: e.clientY })}
-      onMouseLeave={() => setPos(null)}
-    >
-      <span className="flex h-4 w-4 items-center justify-center rounded-full bg-gray-200 text-[10px] font-semibold text-gray-500">i</span>
-      {pos && createPortal(
-        <div
-          className="pointer-events-none fixed z-[9999] w-72 rounded-lg bg-gray-900 px-3 py-2 text-xs font-normal leading-relaxed text-white shadow-lg"
-          style={{ top: pos.y - 12, transform: "translateY(-100%)", left: Math.min(pos.x + 14, window.innerWidth - 296) }}
-        >
-          {text}
-        </div>,
-        document.body
-      )}
-    </span>
-  );
-}
 
 const formatNumber = (value: number) =>
   new Intl.NumberFormat("en-US", {
@@ -390,16 +368,13 @@ export function TaggingHub({ data, isLoading, host, startDate, endDate, workspac
           </svg>
         }
         title="Tagging"
-        subtitle={
-          <>
-            Cost attribution through resource tagging coverage
-            {workspaceIds && workspaceIds.length > 0 && (
-              <Chip kind="workspace">
-                {workspaceIds.length === 1 ? (workspaceNameMap?.[workspaceIds[0]] || workspaceIds[0]) : `${workspaceIds.length} workspaces`}
-              </Chip>
-            )}
-          </>
-        }
+        subtitle="Cost attribution through resource tagging coverage"
+        dateRange={{ startDate, endDate }}
+        workspaceScope={workspaceIds && workspaceIds.length > 0
+          ? workspaceIds.length === 1
+            ? (workspaceNameMap?.[workspaceIds[0]] || workspaceIds[0])
+            : `${workspaceIds.length} workspaces`
+          : undefined}
       />
 
       <TabInfoBanner
@@ -416,90 +391,51 @@ export function TaggingHub({ data, isLoading, host, startDate, endDate, workspac
 
       {/* Summary Cards */}
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        <div
-          className="rounded-lg bg-white p-6 border shadow-sm cursor-pointer hover:shadow-md hover:scale-[1.01] transition-all"
-          style={{ borderColor: C.hairline }}
-          onClick={() => setSelectedKPI({ kpi: "tagged_spend", label: "Daily Tagged Spend" })}
-        >
-          <div className="flex items-center">
-            <div className="flex h-12 w-12 items-center justify-center rounded-lg bg-orange-100">
-              <svg className="h-6 w-6 text-lava" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
-              </svg>
-            </div>
-            <div className="ml-4">
-              <p className="text-sm font-medium text-gray-500">Tagged Spend</p>
-              <p className="text-2xl font-semibold text-gray-900">{formatCurrency(summary.tagged_spend)}</p>
-              <p className="text-sm text-gray-500">{(summary.tagged_percentage ?? 0).toFixed(1)}% of {daysDiff}-day spend</p>
-              <p className="mt-1 text-xs font-medium" style={{ color: C.lava }}>See trend →</p>
-            </div>
-          </div>
-        </div>
-
-        <div
-          className="rounded-lg bg-white p-6 border shadow-sm cursor-pointer hover:shadow-md hover:scale-[1.01] transition-all"
-          style={{ borderColor: C.hairline }}
-          onClick={() => setSelectedKPI({ kpi: "untagged_spend", label: "Daily Untagged Spend" })}
-        >
-          <div className="flex items-center">
-            <div className="flex h-12 w-12 items-center justify-center rounded-lg bg-orange-100">
-              <svg className="h-6 w-6 text-lava" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
-              </svg>
-            </div>
-            <div className="ml-4">
-              <p className="text-sm font-medium text-gray-500">Untagged Spend</p>
-              <p className="text-2xl font-semibold text-gray-900">{formatCurrency(summary.untagged_spend)}</p>
-              <p className="text-sm text-gray-500">{(summary.untagged_percentage ?? 0).toFixed(1)}% of {daysDiff}-day spend</p>
-              <p className="mt-1 text-xs font-medium" style={{ color: C.lava }}>See trend →</p>
-            </div>
-          </div>
-        </div>
-
-        <div
-          className="rounded-lg bg-white p-6 border shadow-sm cursor-pointer hover:shadow-md hover:scale-[1.01] transition-all"
-          style={{ borderColor: C.hairline }}
-          onClick={() => setSelectedKPI({ kpi: "cost_per_tag", label: "Daily Cost Per-Tag" })}
-        >
-          <div className="flex items-center">
-            <div className="flex h-12 w-12 items-center justify-center rounded-lg bg-orange-100">
-              <svg className="h-6 w-6 text-lava" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 7h.01M7 3h5c.512 0 1.024.195 1.414.586l7 7a2 2 0 010 2.828l-7 7a2 2 0 01-2.828 0l-7-7A1.994 1.994 0 013 12V7a4 4 0 014-4z" />
-              </svg>
-            </div>
-            <div className="ml-4">
-              <p className="text-sm font-medium text-gray-500">Cost Per-Tag</p>
-              <p className="text-2xl font-semibold text-gray-900">
-                {data?.avg_cost_per_tag != null ? formatCurrency(data.avg_cost_per_tag) : "—"}
-              </p>
-              <p className="text-sm text-gray-500">avg. over {daysDiff} days</p>
-              <p className="mt-1 text-xs font-medium" style={{ color: C.lava }}>See trend →</p>
-            </div>
-          </div>
-        </div>
-
-        <div
-          className="rounded-lg bg-white p-6 border shadow-sm cursor-pointer hover:shadow-md hover:scale-[1.01] transition-all"
-          style={{ borderColor: C.hairline }}
-          onClick={() => setSelectedKPI({ kpi: "total_tags", label: "Daily Total Tags" })}
-        >
-          <div className="flex items-center">
-            <div className="flex h-12 w-12 items-center justify-center rounded-lg bg-orange-100">
-              <svg className="h-6 w-6 text-lava" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 7h.01M7 3h5c.512 0 1.024.195 1.414.586l7 7a2 2 0 010 2.828l-7 7a2 2 0 01-2.828 0l-7-7A1.994 1.994 0 013 12V7a4 4 0 014-4z" />
-              </svg>
-            </div>
-            <div className="ml-4">
-              <p className="flex items-center text-sm font-medium text-gray-500">
-                Total Tags
-                <InfoTooltip text="Distinct tag key-value pairs applied across all resources over the full date range. The trend drilldown shows per-day counts — a tag on a long-running resource is counted each day it appears, so daily totals are lower than this cumulative figure." />
-              </p>
-              <p className="text-2xl font-semibold text-gray-900">{data?.total_tag_count?.toLocaleString() ?? "—"}</p>
-              <p className="text-sm text-gray-500">unique key:value pairs</p>
-              <p className="mt-1 text-xs font-medium" style={{ color: C.lava }}>See trend →</p>
-            </div>
-          </div>
-        </div>
+        <KPICard
+          title="Tagged Spend"
+          value={formatCurrency(summary.tagged_spend)}
+          subtitle={`${(summary.tagged_percentage ?? 0).toFixed(1)}% of ${daysDiff}-day spend`}
+          onActivate={() => setSelectedKPI({ kpi: "tagged_spend", label: "Daily Tagged Spend" })}
+          icon={
+            <svg className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+            </svg>
+          }
+        />
+        <KPICard
+          title="Untagged Spend"
+          value={formatCurrency(summary.untagged_spend)}
+          subtitle={`${(summary.untagged_percentage ?? 0).toFixed(1)}% of ${daysDiff}-day spend`}
+          onActivate={() => setSelectedKPI({ kpi: "untagged_spend", label: "Daily Untagged Spend" })}
+          icon={
+            <svg className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+            </svg>
+          }
+        />
+        <KPICard
+          title="Cost Per-Tag"
+          value={data?.avg_cost_per_tag != null ? formatCurrency(data.avg_cost_per_tag) : "—"}
+          subtitle={`avg. over ${daysDiff} days`}
+          onActivate={() => setSelectedKPI({ kpi: "cost_per_tag", label: "Daily Cost Per-Tag" })}
+          icon={
+            <svg className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 7h.01M7 3h5c.512 0 1.024.195 1.414.586l7 7a2 2 0 010 2.828l-7 7a2 2 0 01-2.828 0l-7-7A1.994 1.994 0 013 12V7a4 4 0 014-4z" />
+            </svg>
+          }
+        />
+        <KPICard
+          title="Total Tags"
+          value={data?.total_tag_count?.toLocaleString() ?? "—"}
+          subtitle="unique key:value pairs"
+          infoText="Distinct tag key-value pairs applied across all resources over the full date range. The trend drilldown shows per-day counts — a tag on a long-running resource is counted each day it appears, so daily totals are lower than this cumulative figure."
+          onActivate={() => setSelectedKPI({ kpi: "total_tags", label: "Daily Total Tags" })}
+          icon={
+            <svg className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 7h.01M7 3h5c.512 0 1.024.195 1.414.586l7 7a2 2 0 010 2.828l-7 7a2 2 0 01-2.828 0l-7-7A1.994 1.994 0 013 12V7a4 4 0 014-4z" />
+            </svg>
+          }
+        />
       </div>
 
       {/* KPI Trend Modal */}

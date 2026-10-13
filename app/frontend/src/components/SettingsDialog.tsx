@@ -11,6 +11,7 @@ import {
   GeneralSection, DashboardTabsSection, AlertsSection, DataTablesSection,
   AccessSection, ResourcesSection, ExperimentalSection,
 } from "./settings/sections";
+import "./settings/settings.css";
 import { APP_VERSION } from "@/theme";
 
 export interface TabVisibility {
@@ -168,6 +169,7 @@ function SettingsShell({ onClose, onTabVisibilityChange, onSettingsChange, tabVi
   const [localVisibility, setLocalVisibility] = useState<TabVisibility>(tabVisibility);
   const [localSettings, setLocalSettings] = useState<AppSettings>(appSettings);
   const [dirty, setDirty] = useState(false);
+  const [saving, setSaving] = useState(false);
 
   const { data: permissions } = useQuery<{ admins: string[]; current_user?: string | null }>({
     queryKey: ["user-permissions"],
@@ -276,6 +278,7 @@ function SettingsShell({ onClose, onTabVisibilityChange, onSettingsChange, tabVi
   };
 
   const handleSave = () => {
+    if (!dirty || saving) return;
     // Landing-tab fallback: if the chosen tab is now hidden, use the first visible.
     let settings = localSettings;
     const landingHidden = !localVisibility[localSettings.defaultLandingTab as keyof TabVisibility];
@@ -288,6 +291,7 @@ function SettingsShell({ onClose, onTabVisibilityChange, onSettingsChange, tabVi
     onSettingsChange(settings);
     onTabVisibilityChange(localVisibility);
     setLocalSettings(settings);
+    setSaving(true);
     // One Save = one PUT to the unified aggregator, which dispatches each sub-object
     // to its domain store (app_settings / alert-thresholds / webhook). Price basis and
     // refresh schedule save immediately via their own controls, so they're omitted here.
@@ -312,9 +316,11 @@ function SettingsShell({ onClose, onTabVisibilityChange, onSettingsChange, tabVi
     fetch("/api/settings", {
       method: "PUT", headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body), signal: AbortSignal.timeout(10000),
-    }).then(() => rqClient.invalidateQueries({ queryKey: ["unified-settings"] })).catch(() => {});
-    setDirty(false);
-    toast(landingHidden ? "Settings saved — landing tab reset to first visible" : "Settings saved");
+    }).then(() => rqClient.invalidateQueries({ queryKey: ["unified-settings"] })).catch(() => {}).finally(() => {
+      setSaving(false);
+      setDirty(false);
+      toast(landingHidden ? "Settings saved — landing tab reset to first visible" : "Settings saved");
+    });
   };
 
   const handleReset = () => {
@@ -387,7 +393,7 @@ function SettingsShell({ onClose, onTabVisibilityChange, onSettingsChange, tabVi
             <div style={{ fontSize: 16, fontWeight: 600, color: T.text }}>Settings</div>
             <div style={{ fontSize: 12, color: T.textSecondary, fontFamily: undefined }}>{appName} · Databricks App</div>
           </div>
-          <button onClick={requestClose} style={{ padding: 4, borderRadius: 6, color: T.textSecondary, background: "none", border: "none", cursor: "pointer" }} aria-label="Close">
+          <button onClick={requestClose} className="settings-icon-button" aria-label="Close">
             <svg style={{ width: 20, height: 20 }} fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
           </button>
         </div>
@@ -442,14 +448,20 @@ function SettingsShell({ onClose, onTabVisibilityChange, onSettingsChange, tabVi
         {/* Footer */}
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "12px 20px", borderTop: `1px solid ${T.borderGroup}` }}>
           <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-            <button onClick={handleReset} style={{ fontSize: 13, color: T.textSecondary, background: "none", border: "none", cursor: "pointer" }}>Reset to defaults</button>
-            {dirty && <span style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 12, color: T.warningFg }}><span style={{ width: 6, height: 6, borderRadius: 999, backgroundColor: "#E0A82E" }} />Unsaved changes</span>}
+            <button onClick={handleReset} disabled={saving} className="settings-reset-button">Reset to defaults</button>
+            {saving ? (
+              <span role="status" aria-live="polite" style={{ display: "inline-flex", alignItems: "center", gap: 7, fontSize: 12, color: T.primary }}>
+                <span aria-hidden="true" className="settings-save-spinner" style={{ width: 11, height: 11, borderRadius: 999, border: `2px solid ${T.borderControl}`, borderTopColor: T.primary }} />
+                Saving…
+              </span>
+            ) : dirty ? (
+              <span style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 12, color: T.warningFg }}><span style={{ width: 6, height: 6, borderRadius: 999, backgroundColor: "#E0A82E" }} />Unsaved changes</span>
+            ) : null}
           </div>
           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-            <button onClick={requestClose} style={{ height: 32, borderRadius: 4, padding: "0 14px", fontSize: 13, fontWeight: 500, color: T.text, backgroundColor: T.surface, border: `1px solid ${T.borderControl}`, cursor: "pointer" }}>Cancel</button>
-            <button onClick={handleSave} disabled={!dirty}
-              style={{ height: 32, borderRadius: 4, padding: "0 14px", fontSize: 13, fontWeight: 500, color: "#FFFFFF", backgroundColor: dirty ? T.primaryFill : "#A9C6DC", cursor: dirty ? "pointer" : "not-allowed", border: "none" }}>
-              Save changes
+            <button onClick={requestClose} className="settings-secondary-action">Cancel</button>
+            <button onClick={handleSave} disabled={!dirty || saving} className="settings-primary-action">
+              {saving ? "Saving…" : "Save changes"}
             </button>
           </div>
         </div>

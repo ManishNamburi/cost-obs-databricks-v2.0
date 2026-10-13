@@ -84,12 +84,13 @@ export function Row({ label, helper, control, first }: { label: ReactNode; helpe
 }
 
 // ── Toggle (28×16 track, blue on / grey off) ────────────────────────────────
-export function Toggle({ checked, onChange, disabled }: { checked: boolean; onChange: (v: boolean) => void; disabled?: boolean }) {
+export function Toggle({ checked, onChange, disabled, label }: { checked: boolean; onChange: (v: boolean) => void; disabled?: boolean; label?: string }) {
   return (
     <button
       type="button"
       role="switch"
       aria-checked={checked}
+      aria-label={label}
       disabled={disabled}
       onClick={() => !disabled && onChange(!checked)}
       style={{
@@ -111,27 +112,50 @@ export function Toggle({ checked, onChange, disabled }: { checked: boolean; onCh
 }
 
 // ── Select ──────────────────────────────────────────────────────────────────
-export function Select<V extends string | number>({ value, onChange, options, disabled }: {
-  value: V; onChange: (v: V) => void; disabled?: boolean;
+export function Select<V extends string | number>({ value, onChange, options, disabled, ariaLabel, width }: {
+  value: V; onChange: (v: V) => void; disabled?: boolean; ariaLabel?: string; width?: number | string;
   options: { value: V; label: string }[];
 }) {
+  const [focused, setFocused] = useState(false);
   return (
-    <select
-      value={value}
-      disabled={disabled}
-      onChange={(e) => {
-        const raw = e.target.value;
-        const match = options.find((o) => String(o.value) === raw);
-        onChange((match ? match.value : raw) as V);
-      }}
+    <span
       style={{
-        height: 32, borderRadius: 4, border: `1px solid ${T.borderControl}`, padding: "0 10px",
-        fontSize: 13, color: T.text, backgroundColor: disabled ? T.codeBg : T.surface,
-        cursor: disabled ? "not-allowed" : "pointer", minWidth: 160,
+        position: "relative", display: "inline-flex", alignItems: "center", height: 32,
+        width: width ?? 160, borderRadius: 4, border: `1px solid ${focused ? T.primary : T.borderControl}`,
+        backgroundColor: disabled ? T.codeBg : T.surface,
+        boxShadow: focused ? "0 0 0 2px var(--dob-focus-ring, rgba(34, 114, 180, 0.2))" : "none",
+        transition: "border-color 120ms, box-shadow 120ms",
       }}
     >
-      {options.map((o) => <option key={String(o.value)} value={o.value}>{o.label}</option>)}
-    </select>
+      <select
+        value={value}
+        disabled={disabled}
+        aria-label={ariaLabel}
+        onFocus={() => setFocused(true)}
+        onBlur={() => setFocused(false)}
+        onChange={(e) => {
+          const raw = e.target.value;
+          const match = options.find((o) => String(o.value) === raw);
+          onChange((match ? match.value : raw) as V);
+        }}
+        style={{
+          appearance: "none", WebkitAppearance: "none", width: "100%", height: "100%",
+          border: "none", outline: "none", borderRadius: 4, padding: "0 32px 0 10px",
+          fontSize: 13, color: T.text, backgroundColor: "transparent",
+          cursor: disabled ? "not-allowed" : "pointer",
+        }}
+      >
+        {options.map((o) => <option key={String(o.value)} value={o.value}>{o.label}</option>)}
+      </select>
+      <svg
+        aria-hidden="true"
+        viewBox="0 0 16 16"
+        fill="none"
+        style={{ position: "absolute", right: 10, width: 14, height: 14, pointerEvents: "none", color: disabled ? T.textFaint : T.textSecondary }}
+      >
+        <path d="m4 6 4 4 4-4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+      </svg>
+    </span>
   );
 }
 

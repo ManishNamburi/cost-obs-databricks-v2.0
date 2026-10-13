@@ -1,13 +1,13 @@
 import { useState, useEffect, memo } from "react";
-import { createPortal } from "react-dom";
 import { useQueryClient } from "@tanstack/react-query";
 import type { PlatformKPIsResponse, SpendAnomaliesResponse } from "@/types/billing";
 import { SpendAnomalies } from "@/components/SpendAnomalies";
 import { KPITrendModal } from "@/components/KPITrendModal";
+import { KPICard as UiKPICard } from "@/components/ui/KPICard";
 import { formatNumber, formatBytesNoDecimal, formatRowCount, formatDurationSeconds } from "@/utils/formatters";
 import { useFeatureAvailability } from "@/hooks/useFeatureAvailability";
 import { C } from "@/theme";
-import { PageHero, Chip, TabInfoBanner } from "@/components/brand";
+import { PageHero, TabInfoBanner } from "@/components/brand";
 
 interface PlatformKPIsViewProps {
   data: PlatformKPIsResponse | undefined;
@@ -21,98 +21,31 @@ interface PlatformKPIsViewProps {
   workspaceNameMap?: Record<string, string>;
 }
 
-function InfoTooltip({ text }: { text: string }) {
-  const [pos, setPos] = useState<{ x: number; y: number } | null>(null);
-  return (
-    <span
-      className="ml-1.5 inline-flex cursor-help"
-      onMouseEnter={e => setPos({ x: e.clientX, y: e.clientY })}
-      onMouseMove={e => setPos({ x: e.clientX, y: e.clientY })}
-      onMouseLeave={() => setPos(null)}
-    >
-      <span className="flex h-4 w-4 items-center justify-center rounded-full bg-gray-200 text-[10px] font-semibold text-gray-500">i</span>
-      {pos && createPortal(
-        <div
-          className="pointer-events-none fixed z-[9999] w-64 rounded-lg bg-gray-900 px-3 py-2 text-xs font-normal leading-relaxed text-white shadow-lg"
-          style={{ top: pos.y - 12, transform: "translateY(-100%)", left: Math.min(pos.x + 14, window.innerWidth - 272) }}
-        >
-          {text}
-        </div>,
-        document.body
-      )}
-    </span>
-  );
-}
-
 interface KPICardProps {
   title: string;
   value: string;
   subtitle?: string;
   infoTooltip?: string;
   icon: React.ReactNode;
-  color: string;
+  color?: string;
   onClick?: () => void;
   isLoading?: boolean;
   /** When set, renders an unavailable state with this reason instead of the value. */
   unavailableReason?: string;
 }
 
-// Memoize KPICard to prevent unnecessary re-renders when parent state changes
-const KPICard = memo(function KPICard({ title, value, subtitle, infoTooltip, icon, color, onClick, isLoading, unavailableReason }: KPICardProps) {
-  if (unavailableReason) {
-    return (
-      <div
-        className="rounded-lg bg-white p-6 border"
-        style={{ borderColor: C.hairline }}
-        title={unavailableReason}
-      >
-        <div className="flex items-center">
-          <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-lg bg-gray-100">
-            <div className="opacity-30">{icon}</div>
-          </div>
-          <div className="ml-4 flex-1 min-w-0">
-            <p className="text-sm font-medium text-gray-500">{title}</p>
-            <p className="mt-1 text-2xl font-semibold text-gray-300">—</p>
-            <p className="mt-0.5 text-xs text-gray-500">Unavailable — {unavailableReason}</p>
-          </div>
-        </div>
-      </div>
-    );
-  }
-
+const KPICard = memo(function KPICard({ title, value, subtitle, infoTooltip, icon, onClick, isLoading, unavailableReason }: KPICardProps) {
   return (
-    <div
-      className={`rounded-lg bg-white p-6 border transition-all ${
-        onClick ? "shadow-sm cursor-pointer hover:shadow-md hover:scale-[1.01]" : ""
-      }`}
-      style={{ borderColor: C.hairline }}
-      onClick={onClick}
-    >
-      <div className="flex items-center">
-        <div className={`flex h-12 w-12 shrink-0 items-center justify-center rounded-lg ${color}`}>
-          {icon}
-        </div>
-        <div className="ml-4 flex-1 min-w-0">
-          <p className="text-sm font-medium text-gray-500 flex items-center">
-            {title}
-            {infoTooltip && <InfoTooltip text={infoTooltip} />}
-          </p>
-          {isLoading ? (
-            <div className="mt-2 h-6 w-6">
-              <div className="h-6 w-6 animate-spin rounded-full border-2 border-gray-200" style={{ borderTopColor: C.lava }} />
-            </div>
-          ) : (
-            <p className="mt-1 text-2xl font-semibold text-gray-900">{value}</p>
-          )}
-          {!isLoading && subtitle && (
-            <p className="mt-0.5 text-sm text-gray-500">{subtitle}</p>
-          )}
-          {onClick && (
-            <p className="mt-1 text-xs font-medium" style={{ color: C.lava }}>See trend →</p>
-          )}
-        </div>
-      </div>
-    </div>
+    <UiKPICard
+      title={title}
+      value={value}
+      subtitle={subtitle}
+      infoText={infoTooltip}
+      icon={icon}
+      onActivate={onClick}
+      isLoading={isLoading}
+      unavailableReason={unavailableReason}
+    />
   );
 });
 
@@ -238,16 +171,13 @@ export function PlatformKPIsView({ data, isLoading, isFetching, spendAnomalies, 
           </svg>
         }
         title="Platform KPIs & Trends"
-        subtitle={
-          <>
-            Platform health, usage metrics, and adoption tracking
-            {workspaceIds && workspaceIds.length > 0 && (
-              <Chip kind="workspace">
-                {workspaceIds.length === 1 ? (workspaceNameMap?.[workspaceIds[0]] || workspaceIds[0]) : `${workspaceIds.length} workspaces`}
-              </Chip>
-            )}
-          </>
-        }
+        subtitle="Platform health, usage metrics, and adoption tracking"
+        dateRange={{ startDate, endDate }}
+        workspaceScope={workspaceIds && workspaceIds.length > 0
+          ? workspaceIds.length === 1
+            ? (workspaceNameMap?.[workspaceIds[0]] || workspaceIds[0])
+            : `${workspaceIds.length} workspaces`
+          : undefined}
       />
 
       {data.data_stale && (

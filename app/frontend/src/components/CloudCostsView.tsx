@@ -1,10 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { createPortal } from "react-dom";
 import { useQueryClient } from "@tanstack/react-query";
 import awsLogo from "@/assets/aws.png";
 import azureLogo from "@/assets/azure.png";
 import gcpLogo from "@/assets/gcp.svg";
 import { KPITrendModal } from "./KPITrendModal";
+import { KPICard } from "@/components/ui/KPICard";
 import {
   BarChart,
   Bar,
@@ -36,7 +36,7 @@ import { AWSActualView } from "./AWSActualView";
 import { CloudIntegrationWizard } from "./CloudIntegrationWizard";
 import type { CloudIntegration } from "./CloudIntegrationWizard";
 import { C } from "@/theme";
-import { PageHero, Chip, TabInfoBanner } from "@/components/brand";
+import { PageHero, TabInfoBanner } from "@/components/brand";
 
 type CostMode = "estimated" | "actual";
 
@@ -98,34 +98,6 @@ const INSTANCE_COLORS: Record<string, string> = {
 
 function getInstanceColor(name: string, index: number): string {
   return INSTANCE_COLORS[name] || FAMILY_PALETTE[index % FAMILY_PALETTE.length];
-}
-
-function InfoTooltip({ text }: { text: string }) {
-  const [pos, setPos] = useState<{ x: number; y: number } | null>(null);
-  return (
-    <span
-      className="ml-1 inline-flex cursor-help"
-      onMouseEnter={e => setPos({ x: e.clientX, y: e.clientY })}
-      onMouseMove={e => setPos({ x: e.clientX, y: e.clientY })}
-      onMouseLeave={() => setPos(null)}
-      onClick={e => e.stopPropagation()}
-    >
-      <span className="flex h-4 w-4 items-center justify-center rounded-full bg-gray-200 text-[10px] font-semibold normal-case text-gray-500">i</span>
-      {pos && createPortal(
-        <div
-          className="pointer-events-none fixed z-[9999] w-64 rounded-lg bg-gray-900 px-3 py-2 text-xs font-normal normal-case leading-relaxed text-white shadow-lg"
-          style={{
-            top: pos.y - 12,
-            transform: 'translateY(-100%)',
-            left: Math.min(pos.x + 14, window.innerWidth - 272),
-          }}
-        >
-          {text}
-        </div>,
-        document.body
-      )}
-    </span>
-  );
 }
 
 function formatDate(dateStr: string): string {
@@ -784,18 +756,13 @@ export function CloudCostsView({
           </svg>
         }
         title="Cloud Costs"
-        subtitle={
-          <>
-            Estimated cloud infrastructure costs and cluster analytics
-            {workspaceIds && workspaceIds.length > 0 ? (
-              <Chip kind="workspace">
-                {workspaceIds.length === 1 ? (workspaceNameMap?.[workspaceIds[0]] || workspaceIds[0]) : `${workspaceIds.length} workspaces`}
-              </Chip>
-            ) : (
-              <Chip>Account-wide</Chip>
-            )}
-          </>
-        }
+        subtitle="Estimated cloud infrastructure costs and cluster analytics"
+        dateRange={{ startDate, endDate }}
+        workspaceScope={workspaceIds && workspaceIds.length > 0
+          ? workspaceIds.length === 1
+            ? (workspaceNameMap?.[workspaceIds[0]] || workspaceIds[0])
+            : `${workspaceIds.length} workspaces`
+          : "Account-wide"}
       />
 
       {EstimationInfoBox}
@@ -803,89 +770,61 @@ export function CloudCostsView({
       {CurSetupBanner}
 
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        <div
-          className="relative rounded-lg bg-white p-6 border shadow-sm cursor-pointer hover:shadow-md hover:scale-[1.01] transition-all"
-          style={{ borderColor: C.hairline }}
-          onClick={() => startDate && endDate && setSelectedKPI({ kpi: "infra_cost", label: `Daily ${cloudDisplayName} Cluster Spend` })}
-        >
-          <span className="absolute top-2 left-2 inline-flex items-center rounded px-1.5 py-0.5 text-[10px] font-semibold tracking-wide" style={{ backgroundColor: C.amber, color: C.white }}>est.</span>
-          <div className="flex items-center">
-            <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-lg bg-orange-100">
-              <svg className="h-6 w-6 text-lava" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+        <div className="relative">
+          <span className="absolute top-2 left-2 z-10 inline-flex items-center rounded px-1.5 py-0.5 text-[10px] font-semibold tracking-wide" style={{ backgroundColor: C.amber, color: C.white }}>est.</span>
+          <KPICard
+            title="Total Cloud Costs"
+            value={formatCurrency(cloudSummary.totalCost)}
+            subtitle={startDate && endDate ? (() => {
+              const days = Math.round((new Date(endDate).getTime() - new Date(startDate).getTime()) / 86400000) + 1;
+              const dailyAvg = cloudSummary.totalCost > 0 ? cloudSummary.totalCost / days : 0;
+              return `${formatCurrency(dailyAvg)}/day avg · ${days} days`;
+            })() : undefined}
+            onActivate={startDate && endDate ? () => setSelectedKPI({ kpi: "infra_cost", label: `Daily ${cloudDisplayName} Cluster Spend` }) : undefined}
+            icon={
+              <svg className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
               </svg>
-            </div>
-            <div className="ml-4">
-              <p className="text-sm font-medium text-gray-500">Total Cloud Costs</p>
-              <p className="text-2xl font-semibold text-gray-900">{formatCurrency(cloudSummary.totalCost)}</p>
-              {startDate && endDate && (() => {
-                const days = Math.round((new Date(endDate).getTime() - new Date(startDate).getTime()) / 86400000) + 1;
-                const dailyAvg = cloudSummary.totalCost > 0 ? cloudSummary.totalCost / days : 0;
-                return <p className="mt-1 text-xs text-gray-500">{formatCurrency(dailyAvg)}/day avg · {days} days</p>;
-              })()}
-              {startDate && endDate && <p className="mt-0.5 text-xs font-medium" style={{ color: C.lava }}>See trend →</p>}
-            </div>
-          </div>
+            }
+          />
         </div>
-        <div
-          className="rounded-lg bg-white p-6 border shadow-sm cursor-pointer hover:shadow-md hover:scale-[1.01] transition-all"
-          style={{ borderColor: C.hairline }}
-          onClick={() => startDate && endDate && setSelectedKPI({ kpi: "infra_dbu_hours", label: "Daily Cluster DBUs" })}
-        >
-          <div className="flex items-center">
-            <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-lg bg-orange-100">
-              <svg className="h-6 w-6 text-lava" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
-              </svg>
-            </div>
-            <div className="ml-4">
-              <p className="text-sm font-medium text-gray-500">Total Cluster DBUs</p>
-              <p className="text-2xl font-semibold text-gray-900">{formatNumber(cloudSummary.totalDBUHours)}</p>
-              <p className="mt-1 text-xs text-gray-500">across {data.clusters.length} clusters</p>
-              {startDate && endDate && <p className="mt-0.5 text-xs font-medium" style={{ color: C.lava }}>See trend →</p>}
-            </div>
-          </div>
-        </div>
-        <div
-          className="rounded-lg bg-white p-6 border shadow-sm cursor-pointer hover:shadow-md hover:scale-[1.01] transition-all"
-          style={{ borderColor: C.hairline }}
-          onClick={() => startDate && endDate && setSelectedKPI({ kpi: "infra_clusters", label: `Daily Active ${cloudDisplayName} Clusters` })}
-        >
-          <div className="flex items-center">
-            <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-lg bg-orange-100">
-              <svg className="h-6 w-6 text-lava" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 12h14M5 12a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v4a2 2 0 01-2 2M5 12a2 2 0 00-2 2v4a2 2 0 00-2-2m-2-4h.01M17 16h.01" />
-              </svg>
-            </div>
-            <div className="ml-4">
-              <p className="text-sm font-medium text-gray-500">Active Clusters<InfoTooltip text="Average number of distinct clusters with billing activity per day in the selected period. Includes all cluster types (job clusters, interactive clusters)." /></p>
-              <p className="text-2xl font-semibold text-gray-900">{formatNumber(cloudSummary.avgActiveClustersPerDay)}</p>
-              <p className="mt-1 text-xs text-gray-500">daily average</p>
-              {startDate && endDate && <p className="mt-0.5 text-xs font-medium" style={{ color: C.lava }}>See trend →</p>}
-            </div>
-          </div>
-        </div>
-        <div
-          className={`relative rounded-lg bg-white p-6 border shadow-sm transition-all ${startDate && endDate ? "cursor-pointer hover:shadow-md hover:scale-[1.01]" : ""}`}
-          style={{ borderColor: C.hairline }}
-          onClick={() => startDate && endDate && setSelectedKPI({ kpi: "avg_cost_per_cluster", label: `Daily ${cloudDisplayName} Cost Per-Cluster` })}
-        >
-          <span className="absolute top-2 left-2 inline-flex items-center rounded px-1.5 py-0.5 text-[10px] font-semibold tracking-wide" style={{ backgroundColor: C.amber, color: C.white }}>est.</span>
-          <div className="flex items-center">
-            <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-lg bg-orange-100">
-              <svg className="h-6 w-6 text-lava" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+        <KPICard
+          title="Total Cluster DBUs"
+          value={formatNumber(cloudSummary.totalDBUHours)}
+          subtitle={`across ${data.clusters.length} clusters`}
+          onActivate={startDate && endDate ? () => setSelectedKPI({ kpi: "infra_dbu_hours", label: "Daily Cluster DBUs" }) : undefined}
+          icon={
+            <svg className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+            </svg>
+          }
+        />
+        <KPICard
+          title="Active Clusters"
+          value={formatNumber(cloudSummary.avgActiveClustersPerDay)}
+          subtitle="daily average"
+          infoText="Average number of distinct clusters with billing activity per day in the selected period. Includes all cluster types (job clusters, interactive clusters)."
+          onActivate={startDate && endDate ? () => setSelectedKPI({ kpi: "infra_clusters", label: `Daily Active ${cloudDisplayName} Clusters` }) : undefined}
+          icon={
+            <svg className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 12h14M5 12a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v4a2 2 0 01-2 2M5 12a2 2 0 00-2 2v4a2 2 0 00-2-2m-2-4h.01M17 16h.01" />
+            </svg>
+          }
+        />
+        <div className="relative">
+          <span className="absolute top-2 left-2 z-10 inline-flex items-center rounded px-1.5 py-0.5 text-[10px] font-semibold tracking-wide" style={{ backgroundColor: C.amber, color: C.white }}>est.</span>
+          <KPICard
+            title="Cost Per-Cluster"
+            value={formatCurrency(cloudSummary.avgCostPerCluster)}
+            subtitle={startDate && endDate ? `average over ${Math.round((new Date(endDate).getTime() - new Date(startDate).getTime()) / 86400000) + 1} days` : undefined}
+            infoText="Total estimated cloud infrastructure cost divided by the number of distinct clusters with billing activity in the period."
+            onActivate={startDate && endDate ? () => setSelectedKPI({ kpi: "avg_cost_per_cluster", label: `Daily ${cloudDisplayName} Cost Per-Cluster` }) : undefined}
+            icon={
+              <svg className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
               </svg>
-            </div>
-            <div className="ml-4">
-              <p className="text-sm font-medium text-gray-500">Cost Per-Cluster<InfoTooltip text="Total estimated cloud infrastructure cost divided by the number of distinct clusters with billing activity in the period." /></p>
-              <p className="text-2xl font-semibold text-gray-900">{formatCurrency(cloudSummary.avgCostPerCluster)}</p>
-              {startDate && endDate && <p className="mt-1 text-xs text-gray-500">average over {Math.round((new Date(endDate).getTime() - new Date(startDate).getTime()) / 86400000) + 1} days</p>}
-              {startDate && endDate && (
-                <p className="mt-0.5 text-xs font-medium" style={{ color: C.lava }}>See trend →</p>
-              )}
-            </div>
-          </div>
+            }
+          />
         </div>
       </div>
 

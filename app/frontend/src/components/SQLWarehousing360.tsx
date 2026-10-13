@@ -21,7 +21,7 @@ import type { GranularBreakdownResponse, DBSQLDashboardBundle, QueryCostByWareho
 import { KPITrendModal } from "./KPITrendModal";
 import { VirtualizedList } from "./VirtualizedList";
 import { C } from "@/theme";
-import { PageHero, Chip, TabInfoBanner } from "@/components/brand";
+import { PageHero, TabInfoBanner } from "@/components/brand";
 
 interface SQLWarehousing360Props {
   sqlBreakdownData: GranularBreakdownResponse | undefined;
@@ -487,16 +487,13 @@ export function SQLWarehousing360({ sqlBreakdownData: _sqlBreakdownData, queryDa
               </svg>
             }
             title="SQL"
-            subtitle={
-              <>
-                SQL-level cost attribution and warehouse analytics
-                {workspaceIds && workspaceIds.length > 0 && (
-                  <Chip kind="workspace">
-                    {workspaceIds.length === 1 ? (workspaceNameMap?.[workspaceIds[0]] || workspaceIds[0]) : `${workspaceIds.length} workspaces`}
-                  </Chip>
-                )}
-              </>
-            }
+            subtitle="SQL-level cost attribution and warehouse analytics"
+            dateRange={{ startDate, endDate }}
+            workspaceScope={workspaceIds && workspaceIds.length > 0
+              ? workspaceIds.length === 1
+                ? (workspaceNameMap?.[workspaceIds[0]] || workspaceIds[0])
+                : `${workspaceIds.length} workspaces`
+              : undefined}
           />
 
           <TabInfoBanner
