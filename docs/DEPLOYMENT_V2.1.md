@@ -43,6 +43,7 @@ in a `targets/<your-target>.yml`, or on the `bundle deploy` command line.
 | `schema` | UC schema for MVs | `cost_obs` |
 | `warehouse_id` | Serverless / Pro warehouse ID | `dd43ee29fedd958d` |
 | `lakebase_project_name` | Lakebase Autoscaling project name — new in 2.x | `cost-obs-db` |
+| `lakebase_read_mode` | Dashboard serving mode; defaults to Lakebase-first with warehouse-gold fallback | `on` |
 | `genie_space_id` | (Optional) existing Genie space ID | `01f0fcc775c…` |
 | `ai_gateway_usage_table` | (Optional) admin-managed derived table over `system.ai_gateway.usage` | `acme_catalog.cost_obs.ai_gateway_usage_shared` |
 | `databricks_account_id` | Account UUID — required for account-level APIs | `f8d9…` |
@@ -86,6 +87,20 @@ databricks bundle run cost_obs_setup -t <target>
 - `setup_usage_policy` provisions the serverless usage policy for
   attribution.
 - `verify` runs the smoke checks and writes the final `setup_state` row.
+
+### How dashboard tables reach Lakebase
+
+The one-time setup job initializes the Lakebase project, OAuth role, grants,
+schema, and setup markers. Its `migrate_delta` task is only for legacy 1.x
+application-state tables (`budget_alerts`, `tagging_rules`, and
+`cost_snapshots`); it does not copy the dashboard's `daily_*` gold tables.
+
+Dashboard gold is built by the app's normal materialized-view refresh in the
+SQL warehouse. At the end of the same serialized refresh, the app range-replaces
+those aggregates into Lakebase. New deployments therefore need one successful
+table build/refresh after setup; subsequent scheduled or manual refreshes keep
+Lakebase current automatically. Lakebase-first serving is enabled by default,
+with warehouse gold used if a Postgres copy is missing or empty.
 
 > **Why the Genie space isn't a DAB app-resource binding.** `genie_space_id`
 > is empty by default (the space is usually created after the first deploy),

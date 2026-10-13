@@ -621,6 +621,97 @@ WHERE usage_date BETWEEN :start_date AND :end_date
   {ws_filter}
 """
 
+DBSQL_GOLD_SQL = {
+    "summary": """
+SELECT
+  SUM(query_count) AS total_queries,
+  COUNT(DISTINCT executed_by) AS unique_users,
+  COUNT(DISTINCT warehouse_id) AS unique_warehouses,
+  SUM(total_spend) AS total_spend,
+  SUM(total_dbus) AS total_dbus,
+  CASE WHEN SUM(query_count) > 0 THEN SUM(total_spend) / SUM(query_count) ELSE 0 END AS avg_cost_per_query,
+  AVG(avg_duration_seconds) AS avg_duration_seconds
+FROM `{catalog}`.`{schema}`.`daily_dbsql_source`
+WHERE usage_date BETWEEN :start_date AND :end_date
+  {ws_filter}
+""",
+    "by_source": """
+SELECT
+  query_source_type,
+  SUM(query_count) AS query_count,
+  SUM(total_spend) AS total_spend,
+  SUM(total_dbus) AS total_dbus,
+  CASE WHEN SUM(query_count) > 0 THEN SUM(total_spend) / SUM(query_count) ELSE 0 END AS avg_cost_per_query
+FROM `{catalog}`.`{schema}`.`daily_dbsql_source`
+WHERE usage_date BETWEEN :start_date AND :end_date
+  {ws_filter}
+GROUP BY query_source_type
+ORDER BY total_spend DESC
+""",
+    "by_user": """
+SELECT
+  executed_by,
+  query_source_type,
+  SUM(query_count) AS query_count,
+  SUM(total_spend) AS total_spend,
+  SUM(total_dbus) AS total_dbus
+FROM `{catalog}`.`{schema}`.`daily_dbsql_source`
+WHERE usage_date BETWEEN :start_date AND :end_date
+  {ws_filter}
+GROUP BY executed_by, query_source_type
+ORDER BY total_spend DESC
+LIMIT 100
+""",
+    "by_warehouse": """
+SELECT
+  warehouse_id,
+  SUM(query_count) AS query_count,
+  COUNT(DISTINCT executed_by) AS unique_users,
+  SUM(total_spend) AS total_spend,
+  SUM(total_dbus) AS total_dbus
+FROM `{catalog}`.`{schema}`.`daily_dbsql_source`
+WHERE usage_date BETWEEN :start_date AND :end_date
+  {ws_filter}
+GROUP BY warehouse_id
+ORDER BY total_spend DESC
+LIMIT 50
+""",
+    "timeseries": """
+SELECT
+  usage_date AS date,
+  query_source_type,
+  SUM(query_count) AS query_count,
+  SUM(total_spend) AS daily_spend,
+  SUM(total_dbus) AS daily_dbus
+FROM `{catalog}`.`{schema}`.`daily_dbsql_source`
+WHERE usage_date BETWEEN :start_date AND :end_date
+  {ws_filter}
+GROUP BY usage_date, query_source_type
+ORDER BY date
+""",
+    "top_queries": """
+SELECT
+  statement_id,
+  query_source_type,
+  executed_by,
+  warehouse_id,
+  workspace_id,
+  statement_preview,
+  duration_seconds,
+  cost,
+  dbus,
+  query_profile_url,
+  source_url,
+  start_time,
+  end_time
+FROM `{catalog}`.`{schema}`.`daily_dbsql_top`
+WHERE usage_date BETWEEN :start_date AND :end_date
+  {ws_filter}
+ORDER BY cost DESC
+LIMIT :limit
+""",
+}
+
 _AIML_SKU_WHERE = """
   AND (
     billing_origin_product IN ('MODEL_SERVING', 'VECTOR_SEARCH', 'FINE_TUNING')

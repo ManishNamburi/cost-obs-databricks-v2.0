@@ -20,13 +20,13 @@ from backend.lakebase_read import (
 )
 
 
-def test_mode_defaults_off(monkeypatch=None):
+def test_mode_defaults_on(monkeypatch=None):
     os.environ.pop("COST_OBS_LAKEBASE_READ", None)
-    assert lakebase_read_mode() == "off"
+    assert lakebase_read_mode() == "on"
 
 
 def test_mode_reads_env():
-    for val, exp in [("shadow", "shadow"), ("on", "on"), ("OFF", "off"), ("bogus", "off"), ("", "off")]:
+    for val, exp in [("shadow", "shadow"), ("on", "on"), ("OFF", "off"), ("bogus", "on"), ("", "on")]:
         os.environ["COST_OBS_LAKEBASE_READ"] = val
         assert lakebase_read_mode() == exp
     os.environ.pop("COST_OBS_LAKEBASE_READ", None)
@@ -165,6 +165,24 @@ def test_dual_read_on_both_fail_returns_empty(monkeypatch):
     assert out == []
 
 
+def test_dual_read_on_empty_postgres_uses_warehouse_gold(monkeypatch):
+    from backend.lakebase_read import dual_read
+
+    monkeypatch.setenv("COST_OBS_LAKEBASE_READ", "on")
+    monkeypatch.setattr("backend.db.lakebase_available", lambda: True)
+    monkeypatch.setattr("backend.db.source_labels_active", lambda: False)
+    monkeypatch.setattr("backend.db.lakebase_query", lambda *_a, **_k: [])
+    gold = [{"product": "SQL", "total_spend": 8}]
+    out = dual_read(
+        "sku_breakdown",
+        "SELECT 1",
+        {"start_date": "2026-01-01", "end_date": "2026-01-31"},
+        "",
+        fetch_delta=lambda: gold,
+    )
+    assert out == gold
+
+
 def test_dual_read_on_empty_delta_queries_lakebase(monkeypatch):
     from backend.lakebase_read import dual_read
 
@@ -204,13 +222,14 @@ def test_aiml_gold_sql_covers_dashboard_queries():
 def test_new_gold_pg_templates_are_postgres():
     from backend.lakebase_read import (
         PG_AIML_CATEGORIES, PG_AIML_ENDPOINTS, PG_AIML_PROVIDERS, PG_AIML_TIMESERIES,
-        PG_CLOUD_SUMMARY, PG_COST_BY_TAG, PG_DBSQL_BY_USER, PG_DBSQL_BY_WAREHOUSE,
+        PG_CLOUD_BY_CHARGE_TYPE, PG_CLOUD_SUMMARY, PG_CLOUD_TIMESERIES, PG_COST_BY_TAG, PG_DBSQL_BY_USER, PG_DBSQL_BY_WAREHOUSE,
         PG_DBSQL_TIMESERIES, PG_DBSQL_TOP, PG_TAG_COVERAGE_TIMESERIES,
     )
     for sql in (
         PG_AIML_PROVIDERS, PG_AIML_CATEGORIES, PG_AIML_TIMESERIES, PG_AIML_ENDPOINTS,
         PG_DBSQL_BY_USER, PG_DBSQL_BY_WAREHOUSE, PG_DBSQL_TIMESERIES, PG_DBSQL_TOP,
         PG_TAG_COVERAGE_TIMESERIES, PG_COST_BY_TAG, PG_CLOUD_SUMMARY,
+        PG_CLOUD_BY_CHARGE_TYPE, PG_CLOUD_TIMESERIES,
     ):
         formatted = sql.format(ws_filter="") if "{ws_filter}" in sql else sql
         assert "`" not in formatted

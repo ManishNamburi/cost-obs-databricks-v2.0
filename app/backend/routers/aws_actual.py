@@ -319,7 +319,14 @@ async def get_aws_costs_by_charge_type(
         }
 
     query = AWS_COSTS_BY_CHARGE_TYPE.format(catalog=catalog, schema=schema)
-    results = await asyncio.to_thread(execute_query, query, {"start_date": start_date, "end_date": end_date})
+    qparams = {"start_date": start_date, "end_date": end_date}
+
+    def _cloud_charge():
+        from backend.lakebase_read import PG_CLOUD_BY_CHARGE_TYPE, dual_read, warehouse_view_fallback
+        live = (lambda: execute_query(query, qparams)) if warehouse_view_fallback() else None
+        return dual_read("cloud_by_charge_type", PG_CLOUD_BY_CHARGE_TYPE, qparams, "", fetch_delta=live)
+
+    results = await asyncio.to_thread(_cloud_charge)
 
     charge_types = []
     total = 0
@@ -370,7 +377,14 @@ async def get_aws_costs_timeseries(
         }
 
     query = AWS_COSTS_TIMESERIES.format(catalog=catalog, schema=schema)
-    results = await asyncio.to_thread(execute_query, query, {"start_date": start_date, "end_date": end_date})
+    qparams = {"start_date": start_date, "end_date": end_date}
+
+    def _cloud_ts():
+        from backend.lakebase_read import PG_CLOUD_TIMESERIES, dual_read, warehouse_view_fallback
+        live = (lambda: execute_query(query, qparams)) if warehouse_view_fallback() else None
+        return dual_read("cloud_timeseries", PG_CLOUD_TIMESERIES, qparams, "", fetch_delta=live)
+
+    results = await asyncio.to_thread(_cloud_ts)
 
     # Pivot data by date
     data_by_date: dict[str, dict[str, float]] = {}

@@ -7,9 +7,9 @@ parity verdict — WITHOUT changing what the app serves — so the §13 burn-in 
 during real usage before any cutover.
 
 Modes (env `COST_OBS_LAKEBASE_READ`):
-  - off    (default) — serve Delta only. Zero behavior change, zero extra load.
+  - off               — serve Delta only.
   - shadow           — serve Delta; fire-and-forget the Lakebase read + parity log.
-  - on               — serve Lakebase (post-cutover), falling back to Delta on any error.
+  - on      (default) — serve Lakebase, falling back to warehouse gold on a miss.
 
 Dialect notes (Databricks SQL → Postgres) for these specific aggregate queries:
   - backtick `{catalog}`.`{schema}`.`t` → unqualified `t` (the pool sets search_path).
@@ -40,9 +40,9 @@ _shadow_pool = ThreadPoolExecutor(max_workers=2, thread_name_prefix="lb-shadow")
 
 
 def lakebase_read_mode() -> str:
-    """'off' | 'shadow' | 'on' — default 'off'."""
-    m = os.getenv("COST_OBS_LAKEBASE_READ", "off").strip().lower()
-    return m if m in ("off", "shadow", "on") else "off"
+    """'off' | 'shadow' | 'on' — default 'on'."""
+    m = os.getenv("COST_OBS_LAKEBASE_READ", "on").strip().lower()
+    return m if m in ("off", "shadow", "on") else "on"
 
 
 def warehouse_view_fallback() -> bool:
@@ -772,6 +772,30 @@ ORDER BY total_cost DESC
 LIMIT 100
 """
 
+PG_CLOUD_BY_CHARGE_TYPE = """
+SELECT
+  charge_type,
+  SUM(unblended_cost) AS unblended_cost,
+  SUM(net_unblended_cost) AS net_unblended_cost,
+  SUM(amortized_cost) AS amortized_cost,
+  SUM(net_amortized_cost) AS net_amortized_cost
+FROM daily_cloud_actuals
+WHERE usage_date >= %(start_date)s AND usage_date < %(end_date)s
+GROUP BY charge_type
+ORDER BY net_unblended_cost DESC
+"""
+
+PG_CLOUD_TIMESERIES = """
+SELECT
+  usage_date AS date,
+  charge_type,
+  SUM(net_unblended_cost) AS daily_cost
+FROM daily_cloud_actuals
+WHERE usage_date >= %(start_date)s AND usage_date < %(end_date)s
+GROUP BY usage_date, charge_type
+ORDER BY date
+"""
+
 PG_APPS_AVG_COST_PER_APP = """
 SELECT COALESCE(AVG(daily_cost_per_app), 0) AS avg_cost_per_app
 FROM (
@@ -867,10 +891,11 @@ def dual_read(
     extra_format: dict[str, str] | None = None,
     fetch_delta=None,
 ) -> list[dict]:
-    """Serve Lakebase in 'on' mode without touching the warehouse unless Postgres fails.
+    """Serve Lakebase in 'on' mode without touching the warehouse unless Postgres misses.
 
     Pass either a precomputed `delta_result` or a `fetch_delta` callable. In 'on'
-    mode the callable is not invoked unless Lakebase errors or source labels are on.
+    mode the callable is invoked only when Lakebase errors, returns no rows, or
+    source labels are on.
     """
     mode = lakebase_read_mode()
     if mode == "off":
@@ -893,10 +918,17 @@ def dual_read(
         if mode == "on":
             from backend.db import lakebase_query
             try:
-                return lakebase_query(pg_sql, pg_params)
+                pg_rows = lakebase_query(pg_sql, pg_params)
             except Exception as e:
                 logger.warning("lakebase_read[%s]: 'on' read failed, falling back to Delta: %s", name, e)
                 return _resolve_delta(delta_result, fetch_delta)
+            if pg_rows:
+                return pg_rows
+            gold = _resolve_delta(delta_result, fetch_delta)
+            if gold:
+                logger.info("lakebase_read[%s]: Postgres empty, serving warehouse gold", name)
+                return gold
+            return pg_rows
 
         delta = _resolve_delta(delta_result, fetch_delta)
         _shadow_pool.submit(_run_shadow, name, pg_sql, pg_params, keys, delta)

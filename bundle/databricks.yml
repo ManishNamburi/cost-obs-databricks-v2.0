@@ -32,10 +32,10 @@ variables:
     default: cost-obs-endpoint
   lakebase_read_mode:
     description: >
-      COST_OBS_LAKEBASE_READ for the app. "off" (default) serves warehouse
-      aggregates only. "shadow" still serves warehouse rows but compares
-      Lakebase in the background. "on" serves Lakebase with warehouse fallback.
-    default: off
+      COST_OBS_LAKEBASE_READ for the app. "on" (default) serves Lakebase with
+      warehouse-gold fallback. "shadow" serves warehouse rows while comparing
+      Lakebase in the background. "off" serves warehouse aggregates only.
+    default: on
   genie_space_id:
     description: Genie space ID (optional — leave empty to skip Genie seeding)
     default: ""

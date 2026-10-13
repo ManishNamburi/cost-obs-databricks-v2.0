@@ -3103,16 +3103,20 @@ async def get_kpi_trend(
             if pg:
                 results = dual_read(f"kpi_trend_{kpi}", pg, params, ws_clause, results or [], ["date"])
         if not results and mv_fallback_query:
-            logger.info(f"KPI trend MV returned empty for {kpi}, falling back to live query")
-            results = await asyncio.to_thread(execute_query, _inject_ws_filter(mv_fallback_query, ws_clause), params)
+            from backend.lakebase_read import warehouse_view_fallback
+            if warehouse_view_fallback():
+                logger.info(f"KPI trend MV returned empty for {kpi}, falling back to live query")
+                results = await asyncio.to_thread(execute_query, _inject_ws_filter(mv_fallback_query, ws_clause), params)
     except Exception as e:
         logger.error(f"KPI trend query failed for {kpi}: {e}")
         if mv_fallback_query:
-            try:
-                results = await asyncio.to_thread(execute_query, _inject_ws_filter(mv_fallback_query, ws_clause), params)
-            except Exception as fallback_e:
-                logger.warning(f"KPI trend fallback query also failed for {kpi}: {fallback_e}")
-                results = []
+            from backend.lakebase_read import warehouse_view_fallback
+            if warehouse_view_fallback():
+                try:
+                    results = await asyncio.to_thread(execute_query, _inject_ws_filter(mv_fallback_query, ws_clause), params)
+                except Exception as fallback_e:
+                    logger.warning(f"KPI trend fallback query also failed for {kpi}: {fallback_e}")
+                    results = []
         if not results:
             return {
                 "kpi": kpi,

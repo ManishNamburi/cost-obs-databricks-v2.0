@@ -233,9 +233,20 @@ def create_dbsql_router(table_name: str) -> APIRouter:
             "top_queries": PG_DBSQL_TOP,
         }.get(query_key)
         if pg:
-            fetch = _delta if warehouse_view_fallback() else None
+            def _gold():
+                from backend.db import apply_mv_overrides, get_catalog_schema
+                from backend.materialized_views_extra import DBSQL_GOLD_SQL
+                gold = DBSQL_GOLD_SQL.get(query_key)
+                if gold:
+                    cat, sch = get_catalog_schema()
+                    sql = gold.format(catalog=cat, schema=sch, ws_filter=ws_clause)
+                    return execute_query(apply_mv_overrides(sql, cat, sch), params)
+                if warehouse_view_fallback():
+                    return _delta()
+                return []
+
             return dual_read(
-                f"dbsql_{query_key}", pg, params, ws_clause, fetch_delta=fetch,
+                f"dbsql_{query_key}", pg, params, ws_clause, fetch_delta=_gold,
             )
         if not warehouse_view_fallback():
             return []
@@ -482,17 +493,43 @@ def create_dbsql_router(table_name: str) -> APIRouter:
 
     async def check_mv_status() -> dict[str, Any]:
         catalog, schema = get_catalog_schema()
+        from backend.lakebase_read import warehouse_view_fallback
 
+        available = False
+        data_range = {}
         try:
-            query = sql["check_mv"].format(catalog=catalog, schema=schema)
-            results = await asyncio.to_thread(execute_query, query)
-            available = len(results) > 0
+            if not warehouse_view_fallback():
+                from backend.db import lakebase_query
+                rows = await asyncio.to_thread(
+                    lakebase_query, "SELECT 1 FROM daily_dbsql_source LIMIT 1", {}
+                )
+                available = True
+                if rows is not None:
+                    try:
+                        rng = await asyncio.to_thread(
+                            lakebase_query,
+                            "SELECT MIN(usage_date) AS earliest_date, MAX(usage_date) AS latest_date, "
+                            "COUNT(*) AS total_rows FROM daily_dbsql_source",
+                            {},
+                        )
+                        if rng:
+                            row = rng[0]
+                            data_range = {
+                                "earliest_date": str(row["earliest_date"]) if row.get("earliest_date") else None,
+                                "latest_date": str(row["latest_date"]) if row.get("latest_date") else None,
+                                "total_rows": int(row.get("total_rows") or 0),
+                            }
+                    except Exception as e:
+                        logger.warning("Could not get Lakebase data range for daily_dbsql_source: %s", e)
+            else:
+                query = sql["check_mv"].format(catalog=catalog, schema=schema)
+                results = await asyncio.to_thread(execute_query, query)
+                available = len(results) > 0
         except Exception as e:
             logger.warning(f"DBSQL cost MV ({table_name}) not available: {e}")
             available = False
 
-        data_range = {}
-        if available:
+        if available and not data_range:
             try:
                 range_query = sql["data_range"].format(catalog=catalog, schema=schema)
                 range_results = await asyncio.to_thread(execute_query, range_query)
