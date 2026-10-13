@@ -149,9 +149,17 @@ async def get_cur_status() -> dict[str, Any]:
         available = _cur_status_cache["available"]
     else:
         try:
-            query = CHECK_CUR_TABLES.format(catalog=catalog, schema=schema, table="actuals_gold")
-            results = await asyncio.to_thread(execute_query, query)
-            available = len(results) > 0
+            from backend.lakebase_read import warehouse_view_fallback
+            if not warehouse_view_fallback():
+                from backend.db import lakebase_query
+                rows = await asyncio.to_thread(
+                    lakebase_query, "SELECT 1 FROM daily_cloud_actuals LIMIT 1", {}
+                )
+                available = bool(rows)
+            else:
+                query = CHECK_CUR_TABLES.format(catalog=catalog, schema=schema, table="actuals_gold")
+                results = await asyncio.to_thread(execute_query, query)
+                available = len(results) > 0
         except Exception as e:
             logger.warning(f"CUR tables not available: {e}")
             available = False
@@ -191,7 +199,14 @@ async def get_aws_actual_summary(
         }
 
     query = AWS_ACTUAL_SUMMARY.format(catalog=catalog, schema=schema)
-    results = await asyncio.to_thread(execute_query, query, {"start_date": start_date, "end_date": end_date})
+    qparams = {"start_date": start_date, "end_date": end_date}
+
+    def _cloud_summary():
+        from backend.lakebase_read import PG_CLOUD_SUMMARY, dual_read, warehouse_view_fallback
+        live = (lambda: execute_query(query, qparams)) if warehouse_view_fallback() else None
+        return dual_read("cloud_summary", PG_CLOUD_SUMMARY, qparams, "", fetch_delta=live)
+
+    results = await asyncio.to_thread(_cloud_summary)
 
     if not results:
         return {
@@ -245,7 +260,14 @@ async def get_aws_costs_by_cluster(
         }
 
     query = AWS_COSTS_BY_CLUSTER.format(catalog=catalog, schema=schema)
-    results = await asyncio.to_thread(execute_query, query, {"start_date": start_date, "end_date": end_date})
+    qparams = {"start_date": start_date, "end_date": end_date}
+
+    def _cloud_clusters():
+        from backend.lakebase_read import PG_CLOUD_BY_CLUSTER, dual_read, warehouse_view_fallback
+        live = (lambda: execute_query(query, qparams)) if warehouse_view_fallback() else None
+        return dual_read("cloud_by_cluster", PG_CLOUD_BY_CLUSTER, qparams, "", fetch_delta=live)
+
+    results = await asyncio.to_thread(_cloud_clusters)
 
     clusters = []
     total_cost = 0

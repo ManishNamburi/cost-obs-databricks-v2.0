@@ -306,13 +306,34 @@ async def get_genie_dashboard_bundle(
     ts_sql = _GENIE_TIMESERIES_SQL.format(ws_clause=ws_clause_u)
 
     def _q_ws() -> list[dict[str, Any]]:
-        return execute_query(by_ws_sql, params)
+        from backend.lakebase_read import PG_GENIE_BY_WORKSPACE, dual_read
+        ws_pg = wf.build_ws_filter_clause(col="workspace_id", id_list=id_list)
+        from backend.lakebase_read import warehouse_view_fallback
+        live = (lambda: execute_query(by_ws_sql, params)) if warehouse_view_fallback() else None
+        return dual_read(
+            "genie_by_workspace", PG_GENIE_BY_WORKSPACE, params, ws_pg,
+            fetch_delta=live,
+        )
 
     def _q_total() -> list[dict[str, Any]]:
-        return execute_query(dbx_total_sql, params)
+        from backend.lakebase_read import PG_ACCOUNT_TOTAL, dual_read
+        ws_pg = wf.build_ws_filter_clause(col="workspace_id", id_list=id_list)
+        from backend.lakebase_read import warehouse_view_fallback
+        live = (lambda: execute_query(dbx_total_sql, params)) if warehouse_view_fallback() else None
+        return dual_read(
+            "genie_account_total", PG_ACCOUNT_TOTAL, params, ws_pg,
+            fetch_delta=live,
+        )
 
     def _q_ts() -> list[dict[str, Any]]:
-        return execute_query(ts_sql, params)
+        from backend.lakebase_read import PG_GENIE_TIMESERIES, dual_read
+        ws_pg = wf.build_ws_filter_clause(col="workspace_id", id_list=id_list)
+        from backend.lakebase_read import warehouse_view_fallback
+        live = (lambda: execute_query(ts_sql, params)) if warehouse_view_fallback() else None
+        return dual_read(
+            "genie_timeseries", PG_GENIE_TIMESERIES, params, ws_pg,
+            fetch_delta=live,
+        )
 
     results = execute_queries_parallel([
         ("by_workspace", _q_ws),
@@ -329,7 +350,8 @@ async def get_genie_dashboard_bundle(
     # Resolve workspace names (best-effort; system.access.workspaces_latest may
     # not be granted in every deployment).
     ws_name_map: dict[str, str] = {}
-    if ws_rows:
+    from backend.lakebase_read import warehouse_view_fallback
+    if ws_rows and warehouse_view_fallback():
         try:
             name_rows = execute_query(
                 "SELECT workspace_id, workspace_name FROM system.access.workspaces_latest",

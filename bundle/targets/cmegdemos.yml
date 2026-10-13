@@ -14,11 +14,18 @@ targets:
       warehouse_id: 9cd919d96b11bf1c
       lakebase_project_name: cost-obs-db-v21
       lakebase_endpoint_name: projects/cost-obs-db-v21/branches/production/endpoints/primary
+      lakebase_read_mode: on
     resources:
       postgres_projects:
         cost_obs_db:
           project_id: ${var.lakebase_project_name}
           pg_version: 16
+          # Production branches stay awake unless this is set. 0.5–4 CU, sleep
+          # after 5 minutes idle (wakes on the next connection).
+          default_endpoint_settings:
+            autoscaling_limit_min_cu: 0.5
+            autoscaling_limit_max_cu: 4
+            suspend_timeout_duration: 300s
       # NOTE: managed postgres_synced_tables were evaluated here but require a UC
       # catalog registered over the Lakebase DB (CREATE CATALOG on the metastore
       # = metastore admin), which neither this workspace's deployer nor a typical

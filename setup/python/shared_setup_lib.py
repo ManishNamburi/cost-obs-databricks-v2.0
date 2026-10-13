@@ -246,12 +246,12 @@ def validate() -> None:
     print("[validate] All prerequisites satisfied.")
 
 
-def _get_app_sp_uuid() -> str:
-    """Return the SCIM numeric ID of the app service principal.
+def _get_app_sp_identities() -> tuple[str, str]:
+    """Return (oauth_role, scim_id) for the app service principal.
 
-    Lakebase OAuth roles are mapped by SCIM ID, not by the display name or client_id UUID.
-    Falls back to looking up by APP_NAME → w.apps.get() when DATABRICKS_CLIENT_ID is absent
-    (as happens when running as a setup job task rather than inside the App runtime).
+    Lakebase OAuth `current_user` is the app SP *client UUID*, not the SCIM
+    numeric id. Grants must target that UUID or the app connects but has
+    USAGE/CREATE = false on the working schema.
     """
     w = _get_workspace_client()
     client_id = os.environ.get("DATABRICKS_CLIENT_ID", "").strip()
@@ -268,8 +268,13 @@ def _get_app_sp_uuid() -> str:
     sps = list(w.service_principals.list(filter=f"applicationId eq {client_id}"))
     if not sps:
         raise RuntimeError(f"Service principal with client_id={client_id} not found in workspace")
-    sp_id = str(sps[0].id)
-    return sp_id
+    return client_id, str(sps[0].id)
+
+
+def _get_app_sp_uuid() -> str:
+    """OAuth role name the app actually logs in as (SP client UUID)."""
+    client_id, _scim_id = _get_app_sp_identities()
+    return client_id
 
 
 def _run_migration_file(conn: psycopg.Connection, path: str) -> None:
@@ -281,11 +286,47 @@ def _run_migration_file(conn: psycopg.Connection, path: str) -> None:
     print(f"[bootstrap_lakebase] Ran migration: {path}")
 
 
+def _ensure_endpoint_scale_to_zero() -> None:
+    """Apply 0.5–4 CU + 5-minute suspend on the existing primary endpoint.
+
+    DAB `default_endpoint_settings` only affect newly created endpoints.
+    Production branches stay awake unless we patch the live endpoint too.
+    """
+    endpoint = os.environ.get("ENDPOINT_NAME", "")
+    if not endpoint:
+        print("[bootstrap_lakebase] ENDPOINT_NAME unset — skipping scale-to-zero")
+        return
+    w = _get_workspace_client()
+    try:
+        w.api_client.do(
+            "PATCH",
+            f"/api/2.0/postgres/{endpoint}",
+            query={
+                "update_mask": (
+                    "spec.autoscaling_limit_min_cu,"
+                    "spec.autoscaling_limit_max_cu,"
+                    "spec.suspend_timeout_duration"
+                )
+            },
+            body={
+                "spec": {
+                    "autoscaling_limit_min_cu": 0.5,
+                    "autoscaling_limit_max_cu": 4.0,
+                    "suspend_timeout_duration": "300s",
+                }
+            },
+        )
+        print("[bootstrap_lakebase] Endpoint scale-to-zero set (0.5–4 CU, 300s suspend)")
+    except Exception as e:
+        print(f"[bootstrap_lakebase] WARNING: could not set scale-to-zero: {e}")
+
+
 def bootstrap_lakebase() -> None:
     """Create schema, OAuth role, grants, ALTER DEFAULT PRIVILEGES, and all tables."""
     import os as _os
     schema = os.environ["COST_OBS_SCHEMA"]
     catalog = os.environ["COST_OBS_CATALOG"]
+    _ensure_endpoint_scale_to_zero()
 
     with pg_conn() as conn:
         # 1. Create working schema FIRST — the connection string sets search_path
@@ -294,34 +335,39 @@ def bootstrap_lakebase() -> None:
             cur.execute(f"CREATE SCHEMA IF NOT EXISTS {schema}")
         print(f"[bootstrap_lakebase] Schema '{schema}' ready.")
 
+        # Role + grants always re-run. A completed setup_state marker used to
+        # skip them, which left the app SP without CREATE on schemas that the
+        # deployer (not the app) created — sync then failed at runtime.
+        oauth_role, scim_id = _get_app_sp_identities()
+        # OAuth login is the client UUID. Also grant the SCIM id in case a
+        # workspace maps that way; duplicates are harmless.
+        grant_roles = list(dict.fromkeys([oauth_role, scim_id]))
+        for sp_uuid in grant_roles:
+            with conn.cursor() as cur:
+                cur.execute("SAVEPOINT create_role")
+                try:
+                    cur.execute(f'CREATE ROLE "{sp_uuid}" LOGIN')
+                    print(f"[bootstrap_lakebase] Created OAuth role {sp_uuid}")
+                except Exception as e:
+                    if "already exists" in str(e).lower():
+                        cur.execute("ROLLBACK TO SAVEPOINT create_role")
+                        print(f"[bootstrap_lakebase] OAuth role {sp_uuid} already exists")
+                    else:
+                        raise
+            with conn.cursor() as cur:
+                cur.execute(f'GRANT USAGE, CREATE ON SCHEMA {schema} TO "{sp_uuid}"')
+                cur.execute(
+                    f'GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA {schema} TO "{sp_uuid}"'
+                )
+                cur.execute(
+                    f'GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA {schema} TO "{sp_uuid}"'
+                )
+            print(f"[bootstrap_lakebase] Grants applied for {sp_uuid} on schema {schema}")
+        sp_uuid = oauth_role
+
         if _is_step_done(conn, "bootstrap_lakebase"):
-            print("[bootstrap_lakebase] Already complete — skipping.")
+            print("[bootstrap_lakebase] Already complete — grants refreshed, skipping remaining steps.")
             return
-
-        # 2. Create OAuth role mapped to the app SP's UUID
-        sp_uuid = _get_app_sp_uuid()
-        with conn.cursor() as cur:
-            # CREATE ROLE IF NOT EXISTS is not available in all PG versions — catch duplicate
-            try:
-                cur.execute(f'CREATE ROLE "{sp_uuid}" LOGIN')
-                print(f"[bootstrap_lakebase] Created OAuth role for SP UUID {sp_uuid}")
-            except Exception as e:
-                if "already exists" in str(e).lower():
-                    conn.rollback()
-                    print(f"[bootstrap_lakebase] OAuth role for SP {sp_uuid} already exists")
-                else:
-                    raise
-
-        # 3. Grant schema access + existing tables
-        with conn.cursor() as cur:
-            cur.execute(f'GRANT USAGE ON SCHEMA {schema} TO "{sp_uuid}"')
-            cur.execute(
-                f'GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA {schema} TO "{sp_uuid}"'
-            )
-            cur.execute(
-                f'GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA {schema} TO "{sp_uuid}"'
-            )
-        print(f"[bootstrap_lakebase] Grants applied for {sp_uuid} on schema {schema}")
 
         # 4. ALTER DEFAULT PRIVILEGES — future tables inherit access automatically
         current_role_row = None

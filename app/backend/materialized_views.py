@@ -1032,6 +1032,9 @@ _TABLE_REFRESH_CONFIG: dict[str, dict] = {
     },
 }
 
+from backend.materialized_views_extra import EXTRA_TABLE_REFRESH, EXTRA_CREATE, EXTRA_MERGE
+_TABLE_REFRESH_CONFIG.update(EXTRA_TABLE_REFRESH)
+
 _OPTIMIZE_EVERY_N_REFRESHES = 12
 
 # Step 6: MERGE templates for incremental refresh
@@ -1705,6 +1708,7 @@ def _create_materialized_views_impl(catalog: str | None = None, schema: str | No
         ("daily_tag_summary", CREATE_DAILY_TAG_SUMMARY),
         ("daily_apps_summary", CREATE_DAILY_APPS_SUMMARY),
     ]
+    extra_tables = list(EXTRA_CREATE.items())
 
     # Create all tables in parallel — none depend on each other
     from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -1752,6 +1756,7 @@ def _create_materialized_views_impl(catalog: str | None = None, schema: str | No
                     "dbsql_cost_per_query": MERGE_DBSQL_COST_PER_QUERY,
                     "daily_tag_summary": MERGE_DAILY_TAG_SUMMARY,
                     "daily_apps_summary": MERGE_DAILY_APPS_SUMMARY,
+                    **EXTRA_MERGE,
                 }
                 merge_sql = merge_sql_map.get(table_name)
 
@@ -1809,6 +1814,16 @@ def _create_materialized_views_impl(catalog: str | None = None, schema: str | No
             results[table_name] = status
             mv_timings[table_name] = round(elapsed, 2)
 
+    # Second wave: sku / jobs / interactive / tag-coverage / SQL-360 rollups.
+    # daily_dbsql_source reads dbsql_cost_per_query, so it cannot run in wave 1.
+    if extra_tables:
+        with ThreadPoolExecutor(max_workers=len(extra_tables)) as executor:
+            futures = {executor.submit(_create_table, name, sql): name for name, sql in extra_tables}
+            for future in as_completed(futures):
+                table_name, status, elapsed = future.result()
+                results[table_name] = status
+                mv_timings[table_name] = round(elapsed, 2)
+
     results["__mv_timings__"] = mv_timings  # type: ignore[assignment]
 
     return results
@@ -1848,6 +1863,7 @@ _MV_TABLES = [
     "dbsql_cost_per_query",
     "daily_tag_summary",
     "daily_apps_summary",
+    *EXTRA_CREATE.keys(),
 ]
 
 

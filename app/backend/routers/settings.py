@@ -2440,7 +2440,14 @@ def _ensure_app_settings_table() -> None:
 
 
 def get_app_settings() -> dict:
-    """App-wide prefs — Delta first (survives redeploys), file fallback, then defaults."""
+    """App-wide prefs — Lakebase first, warehouse table then file as fallback."""
+    try:
+        from backend.db import lb_get_config
+        cfg = lb_get_config("app_settings")
+        if isinstance(cfg, dict) and cfg:
+            return {**_APP_SETTINGS_DEFAULTS, **{k: v for k, v in cfg.items() if k in _APP_SETTINGS_ALLOWED}}
+    except Exception as e:
+        logger.debug("Lakebase app_settings read failed, will try UC: %s", e)
     try:
         from backend.db import execute_query
         table = _config_table("app_settings")
@@ -2463,10 +2470,15 @@ def get_app_settings() -> dict:
 
 
 def save_app_settings(partial: dict) -> dict:
-    """Merge a partial into app_settings and persist (Delta + file). Returns the merged object."""
+    """Merge a partial into app_settings. Lakebase primary; Delta + file fallback."""
     current = get_app_settings()
     clean = {k: v for k, v in (partial or {}).items() if k in _APP_SETTINGS_ALLOWED}
     merged = {**current, **clean}
+    try:
+        from backend.db import lb_set_config
+        lb_set_config("app_settings", merged)
+    except Exception as e:
+        logger.warning("Could not persist app_settings to Lakebase: %s", e)
     try:
         from backend.db import execute_write
         _ensure_app_settings_table()
@@ -2477,7 +2489,7 @@ def save_app_settings(partial: dict) -> dict:
             {"s": json.dumps(merged)},
         )
     except Exception as e:
-        logger.warning("Could not persist app_settings to Delta: %s", e)
+        logger.debug("UC dual-write of app_settings skipped/failed (non-fatal): %s", e)
     try:
         os.makedirs(SETTINGS_DIR, exist_ok=True)
         with open(APP_SETTINGS_FILE, "w") as f:

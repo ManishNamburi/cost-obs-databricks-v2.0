@@ -26,6 +26,8 @@ resources:
           # (breaks the setup wizard + all warehouse-based GRANT/CREATE ops).
           - name: DATABRICKS_WAREHOUSE_ID
             value_from: sql-warehouse
+          - name: COST_OBS_LAKEBASE_READ
+            value: ${var.lakebase_read_mode}
           # Optional env vars — GENIE_SPACE_ID, AI_GATEWAY_USAGE_TABLE,
           # DATABRICKS_ACCOUNT_ID, COST_OBS_WORKSPACES — are intentionally NOT
           # declared here. When their bundle variable is empty (the default),

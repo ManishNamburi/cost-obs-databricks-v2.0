@@ -206,7 +206,7 @@ def create_dbsql_router(table_name: str) -> APIRouter:
     sql = _build_queries(table_name)
 
     def _exec(query_key: str, params: dict, catalog: str, schema: str, ws_clause: str = "") -> list[dict]:
-        """Execute a dbsql query against Delta."""
+        """Serve SQL 360 rollups from Lakebase when on; warehouse gold as fallback."""
         template = sql[query_key]
         query = template.format(catalog=catalog, schema=schema)
         if ws_clause:
@@ -215,7 +215,31 @@ def create_dbsql_router(table_name: str) -> APIRouter:
                 f"AND DATE(start_time) <= :end_date\n              {ws_clause}",
                 1,
             )
-        return execute_query(query, params)
+
+        def _delta():
+            return execute_query(query, params)
+
+        from backend.lakebase_read import (
+            PG_DBSQL_BY_SOURCE, PG_DBSQL_BY_USER, PG_DBSQL_BY_WAREHOUSE,
+            PG_DBSQL_SUMMARY, PG_DBSQL_TIMESERIES, PG_DBSQL_TOP, dual_read,
+            warehouse_view_fallback,
+        )
+        pg = {
+            "summary": PG_DBSQL_SUMMARY,
+            "by_source": PG_DBSQL_BY_SOURCE,
+            "by_user": PG_DBSQL_BY_USER,
+            "by_warehouse": PG_DBSQL_BY_WAREHOUSE,
+            "timeseries": PG_DBSQL_TIMESERIES,
+            "top_queries": PG_DBSQL_TOP,
+        }.get(query_key)
+        if pg:
+            fetch = _delta if warehouse_view_fallback() else None
+            return dual_read(
+                f"dbsql_{query_key}", pg, params, ws_clause, fetch_delta=fetch,
+            )
+        if not warehouse_view_fallback():
+            return []
+        return _delta()
 
     def _compute_dbsql_bundle(start_date: str, end_date: str, id_list: list | None, workspace_ids_str: str | None, dkey: str) -> None:
         """Background worker: run all DBSQL queries in parallel, build response, write to Delta cache."""
@@ -225,12 +249,17 @@ def create_dbsql_router(table_name: str) -> APIRouter:
             ws_clause = wf.build_ws_filter_clause(col="workspace_id", id_list=id_list)
             params = {"start_date": start_date, "end_date": end_date}
 
+            from backend.lakebase_read import warehouse_view_fallback
+            live_ok = warehouse_view_fallback()
             queries = [
                 ("summary",      lambda: _exec("summary",      params, catalog, schema, ws_clause)),
                 ("by_source",    lambda: _exec("by_source",    params, catalog, schema, ws_clause)),
                 ("by_user",      lambda: _exec("by_user",      params, catalog, schema, ws_clause)),
                 ("by_warehouse", lambda: _exec("by_warehouse", params, catalog, schema, ws_clause)),
                 ("timeseries",   lambda: _exec("timeseries",   params, catalog, schema, ws_clause)),
+            ]
+            if live_ok:
+                queries.extend([
                 ("wh_meta",      lambda: execute_query("""
                     SELECT w.warehouse_id, MAX(w.warehouse_name) as warehouse_name,
                            MAX(w.warehouse_type) as warehouse_type, MAX(w.warehouse_size) as warehouse_size,
@@ -271,7 +300,7 @@ def create_dbsql_router(table_name: str) -> APIRouter:
                     FROM system.compute.warehouses
                     WHERE workspace_id IS NOT NULL
                 """)),
-            ]
+                ])
 
             results = execute_queries_parallel(queries, 120.0)
 

@@ -30,6 +30,12 @@ variables:
   lakebase_endpoint_name:
     description: Lakebase endpoint name
     default: cost-obs-endpoint
+  lakebase_read_mode:
+    description: >
+      COST_OBS_LAKEBASE_READ for the app. "off" (default) serves warehouse
+      aggregates only. "shadow" still serves warehouse rows but compares
+      Lakebase in the background. "on" serves Lakebase with warehouse fallback.
+    default: off
   genie_space_id:
     description: Genie space ID (optional — leave empty to skip Genie seeding)
     default: ""

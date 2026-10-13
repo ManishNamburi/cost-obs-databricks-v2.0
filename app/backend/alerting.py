@@ -37,10 +37,20 @@ def evaluate_alerts() -> dict:
     try:
         # Alerts are on the account's OWN spend — base tables, not the unified views,
         # so a Delta-shared source can't distort a budget/spike alert.
-        rows = execute_query(
+        delta_sql = (
             f"SELECT usage_date, SUM(total_spend) AS s FROM `{catalog}`.`{schema}`.`daily_usage_summary` "
-            f"GROUP BY usage_date ORDER BY usage_date DESC LIMIT 2",
-            no_cache=True,
+            f"GROUP BY usage_date ORDER BY usage_date DESC LIMIT 2"
+        )
+        rows = execute_query(delta_sql, no_cache=True)
+        from backend.lakebase_read import dual_read
+        rows = dual_read(
+            "alerts_daily",
+            "SELECT usage_date, SUM(total_spend) AS s FROM daily_usage_summary "
+            "GROUP BY usage_date ORDER BY usage_date DESC LIMIT 2",
+            {},
+            "",
+            rows,
+            ["usage_date"],
         )
         if rows:
             latest_date = str(rows[0].get("usage_date"))
@@ -61,12 +71,23 @@ def evaluate_alerts() -> dict:
 
     if ws_budget and latest_date:
         try:
-            ws_rows = execute_query(
+            ws_sql = (
                 f"SELECT workspace_id, SUM(total_spend) AS s "
                 f"FROM `{catalog}`.`{schema}`.`daily_workspace_breakdown` "
                 f"WHERE usage_date = :d GROUP BY workspace_id HAVING SUM(total_spend) > :b "
-                f"ORDER BY s DESC LIMIT 10",
-                {"d": latest_date, "b": ws_budget}, no_cache=True,
+                f"ORDER BY s DESC LIMIT 10"
+            )
+            ws_rows = execute_query(ws_sql, {"d": latest_date, "b": ws_budget}, no_cache=True)
+            from backend.lakebase_read import dual_read
+            ws_rows = dual_read(
+                "alerts_workspace",
+                "SELECT workspace_id, SUM(total_spend) AS s FROM daily_workspace_breakdown "
+                "WHERE usage_date = %(d)s GROUP BY workspace_id "
+                "HAVING SUM(total_spend) > %(b)s ORDER BY s DESC LIMIT 10",
+                {"d": latest_date, "b": ws_budget},
+                "",
+                ws_rows or [],
+                ["workspace_id"],
             )
             for r in (ws_rows or []):
                 breaches.append({"type": "workspace_budget", "date": latest_date,

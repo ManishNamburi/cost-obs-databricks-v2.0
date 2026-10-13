@@ -15,6 +15,49 @@ from backend import workspace_filter as wf
 from backend import cache_ttls
 
 
+def _aiml_rows_empty(rows: list[dict[str, Any]]) -> bool:
+    if not rows:
+        return True
+    if len(rows) != 1:
+        return False
+    row = rows[0]
+    spend = row.get("total_spend")
+    if spend is None:
+        spend = row.get("total_usd")
+    try:
+        return float(spend or 0) == 0.0
+    except (TypeError, ValueError):
+        return True
+
+
+def _gold_then_live(name: str, pg_tmpl: str, params: dict, live_sql: str, ws_clause: str = "") -> list[dict[str, Any]]:
+    """Postgres first; warehouse *gold* (daily_sku / daily_aiml_endpoints) on miss.
+
+    `live_sql` is only used when Lakebase serving is off — those queries scan
+    system.billing.usage and must not run for ordinary dashboard views.
+    """
+    from backend.db import apply_mv_overrides, get_catalog_schema
+    from backend.lakebase_read import dual_read, warehouse_view_fallback
+    from backend.materialized_views_extra import AIML_GOLD_SQL
+
+    def _fetch():
+        gold = AIML_GOLD_SQL.get(name)
+        if gold:
+            cat, sch = get_catalog_schema()
+            sql = gold.format(catalog=cat, schema=sch, ws_filter=ws_clause)
+            return execute_query(apply_mv_overrides(sql, cat, sch), params)
+        if warehouse_view_fallback():
+            return execute_query(live_sql, params)
+        return []
+
+    rows = dual_read(name, pg_tmpl, params, ws_clause, fetch_delta=_fetch)
+    if _aiml_rows_empty(rows):
+        gold_rows = _fetch()
+        if gold_rows and not _aiml_rows_empty(gold_rows):
+            return gold_rows
+    return rows
+
+
 def query_with_fallback(enriched_sql: str, fallback_sql: str, query_params: dict, label: str = "query") -> list[dict[str, Any]]:
     """Try enriched query first, fall back to simpler query if it fails."""
     try:
@@ -755,7 +798,11 @@ async def get_aiml_summary(
         "end_date": end_date or get_default_end_date(),
     }
 
-    results = await asyncio.to_thread(execute_query, AIML_SUMMARY, params)
+    def _aiml_summary():
+        from backend.lakebase_read import PG_AIML_TOTALS
+        return _gold_then_live("aiml_summary", PG_AIML_TOTALS, params, AIML_SUMMARY)
+
+    results = await asyncio.to_thread(_aiml_summary)
 
     if not results:
         return {
@@ -799,7 +846,8 @@ async def get_fmapi_providers(
         "end_date": end_date or get_default_end_date(),
     }
 
-    results = await asyncio.to_thread(execute_query, FMAPI_PROVIDER_COSTS, params)
+    from backend.lakebase_read import PG_AIML_PROVIDERS
+    results = await asyncio.to_thread(_gold_then_live, "aiml_providers", PG_AIML_PROVIDERS, params, FMAPI_PROVIDER_COSTS)
 
     providers = []
     total_spend = 0
@@ -842,7 +890,10 @@ async def get_serverless_endpoints(
         "end_date": end_date or get_default_end_date(),
     }
 
-    results = await asyncio.to_thread(execute_query, SERVERLESS_INFERENCE_BY_ENDPOINT, params)
+    from backend.lakebase_read import PG_AIML_ENDPOINTS
+    results = await asyncio.to_thread(
+        _gold_then_live, "aiml_endpoints", PG_AIML_ENDPOINTS, params, SERVERLESS_INFERENCE_BY_ENDPOINT
+    )
 
     endpoints = []
     total_spend = 0
@@ -888,7 +939,8 @@ async def get_aiml_by_category(
         "end_date": end_date or get_default_end_date(),
     }
 
-    results = await asyncio.to_thread(execute_query, AIML_BY_CATEGORY, params)
+    from backend.lakebase_read import PG_AIML_CATEGORIES
+    results = await asyncio.to_thread(_gold_then_live, "aiml_categories", PG_AIML_CATEGORIES, params, AIML_BY_CATEGORY)
 
     categories = []
     total_spend = 0
@@ -930,7 +982,8 @@ async def get_aiml_timeseries(
         "end_date": end_date or get_default_end_date(),
     }
 
-    results = await asyncio.to_thread(execute_query, AIML_TIMESERIES, params)
+    from backend.lakebase_read import PG_AIML_TIMESERIES
+    results = await asyncio.to_thread(_gold_then_live, "aiml_timeseries", PG_AIML_TIMESERIES, params, AIML_TIMESERIES)
 
     # Transform to chart-friendly format
     date_data: dict[str, dict[str, float]] = {}
@@ -968,7 +1021,8 @@ async def get_aiml_sku_catalog(
         "end_date": end_date or get_default_end_date(),
     }
 
-    results = await asyncio.to_thread(execute_query, AIML_SKU_CATALOG, params)
+    from backend.lakebase_read import PG_AIML_SKU_CATALOG
+    results = await asyncio.to_thread(_gold_then_live, "aiml_sku_catalog", PG_AIML_SKU_CATALOG, params, AIML_SKU_CATALOG)
 
     skus = []
     total_spend = 0
@@ -1002,16 +1056,24 @@ def _compute_aiml_bundle(params: dict, id_list: list | None, ws_clause: str, dke
         def _ws(sql: str) -> str:
             return wf.inject_ws_filter(sql, ws_clause)
 
+        from backend.lakebase_read import (
+            PG_AIML_CATEGORIES, PG_AIML_ENDPOINTS, PG_AIML_PROVIDERS,
+            PG_AIML_TIMESERIES, PG_AIML_TOTALS, warehouse_view_fallback,
+        )
+        live_ok = warehouse_view_fallback()
         queries = [
-            ("summary", lambda: execute_query(_ws(AIML_SUMMARY), params)),
-            ("providers", lambda: execute_query(_ws(FMAPI_PROVIDER_COSTS), params)),
-            ("endpoints", lambda: execute_query(_ws(SERVERLESS_INFERENCE_BY_ENDPOINT), params)),
-            ("categories", lambda: execute_query(_ws(AIML_BY_CATEGORY), params)),
-            ("timeseries", lambda: execute_query(_ws(AIML_TIMESERIES), params)),
+            ("summary", lambda: _gold_then_live("aiml_summary", PG_AIML_TOTALS, params, _ws(AIML_SUMMARY), ws_clause)),
+            ("providers", lambda: _gold_then_live("aiml_providers", PG_AIML_PROVIDERS, params, _ws(FMAPI_PROVIDER_COSTS), ws_clause)),
+            ("endpoints", lambda: _gold_then_live("aiml_endpoints", PG_AIML_ENDPOINTS, params, _ws(SERVERLESS_INFERENCE_BY_ENDPOINT), ws_clause)),
+            ("categories", lambda: _gold_then_live("aiml_categories", PG_AIML_CATEGORIES, params, _ws(AIML_BY_CATEGORY), ws_clause)),
+            ("timeseries", lambda: _gold_then_live("aiml_timeseries", PG_AIML_TIMESERIES, params, _ws(AIML_TIMESERIES), ws_clause)),
+        ]
+        if live_ok:
+            queries.extend([
             ("models", lambda: query_with_fallback(_ws(AIML_TOP_MODELS_ENRICHED), _ws(AIML_TOP_MODELS_AND_FEATURE_STORES), params, label="models")),
             ("ml_clusters", lambda: query_with_fallback(_ws(AIML_ML_RUNTIME_CLUSTERS_ENRICHED), _ws(AIML_ML_RUNTIME_CLUSTERS_FALLBACK), params, label="ml_clusters")),
             ("agent_bricks", lambda: query_with_fallback(_ws(AIML_AGENT_BRICKS_ENRICHED), _ws(AIML_AGENT_BRICKS_FALLBACK), params, label="agent_bricks")),
-        ]
+            ])
 
         results = execute_queries_parallel(queries, timeout=90.0)
 

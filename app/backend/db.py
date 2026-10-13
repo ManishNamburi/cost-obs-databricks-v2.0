@@ -258,13 +258,24 @@ def read_dbfs_build_state() -> dict | None:
     return _read_dbfs_settings().get("build_state") or None
 
 
+def _accepted_catalog_schema(catalog: str, schema: str) -> tuple[str, str] | None:
+    cat, sch = (catalog or "").strip(), (schema or "").strip()
+    if not cat or not sch:
+        return None
+    if (cat.lower(), sch.lower()) in _FORBIDDEN_STORAGE_LOCATIONS:
+        return None
+    return cat, sch
+
+
 def get_catalog_schema() -> tuple[str, str]:
     """Return the catalog and schema for cost observability tables.
 
     Priority:
-      1. COST_OBS_CATALOG/COST_OBS_SCHEMA env vars (set in Databricks Apps UI — always win)
-      2. .settings/catalog_override.json (local file written by wizard, wiped on git redeploy)
-      3. DBFS /databricks/cost-obs-app/catalog_override.json (survives git redeploys)
+      1. COST_OBS_CATALOG/COST_OBS_SCHEMA env vars (Apps UI — always win; needed
+         before Lakebase is reachable on a brand-new deploy)
+      2. Lakebase app_config (durable, v2 primary)
+      3. .settings/catalog_override.json (pod cache, wiped on git redeploy)
+      4. DBFS (legacy)
 
     Returns ("", "") when no location is configured (setup wizard not yet run).
     Never returns a forbidden location — logs CRITICAL and returns ("", "") instead.
@@ -274,7 +285,8 @@ def get_catalog_schema() -> tuple[str, str]:
     catalog = os.getenv("COST_OBS_CATALOG", "").strip()
     schema = os.getenv("COST_OBS_SCHEMA", "").strip()
     if catalog and schema:
-        if (catalog.lower(), schema.lower()) in _FORBIDDEN_STORAGE_LOCATIONS:
+        accepted = _accepted_catalog_schema(catalog, schema)
+        if not accepted:
             logger.critical(
                 "COST_OBS_CATALOG=%s and COST_OBS_SCHEMA=%s resolve to a forbidden default location. "
                 "Update the app environment variables to a dedicated catalog and schema. "
@@ -282,38 +294,57 @@ def get_catalog_schema() -> tuple[str, str]:
                 catalog, schema,
             )
             return "", ""
-        return catalog, schema
+        return accepted
 
-    # 2. Local override file (written by wizard during setup)
+    # 2. Lakebase — durable after first wizard save. Does not need UC catalog
+    # to connect (PGHOST / ENDPOINT_NAME), so this is safe on the hot path.
+    try:
+        cfg = lb_get_config("catalog_schema")
+        if isinstance(cfg, dict):
+            accepted = _accepted_catalog_schema(str(cfg.get("catalog") or ""), str(cfg.get("schema") or ""))
+            if accepted:
+                return accepted
+            if cfg.get("catalog") or cfg.get("schema"):
+                logger.warning(
+                    "Lakebase catalog_schema contains forbidden location %s.%s — ignoring.",
+                    cfg.get("catalog"), cfg.get("schema"),
+                )
+    except Exception:
+        pass
+
+    # 3. Local override file (written by wizard during setup)
     try:
         if os.path.exists(_CATALOG_OVERRIDE_FILE):
             with open(_CATALOG_OVERRIDE_FILE) as f:
                 data = json.load(f)
-            cat = data.get("catalog", "").strip()
-            sch = data.get("schema", "").strip()
-            if cat and sch:
-                if (cat.lower(), sch.lower()) in _FORBIDDEN_STORAGE_LOCATIONS:
-                    logger.warning(
-                        "catalog_override.json contains forbidden location %s.%s — ignoring.",
-                        cat, sch,
-                    )
-                else:
-                    return cat, sch
+            accepted = _accepted_catalog_schema(str(data.get("catalog") or ""), str(data.get("schema") or ""))
+            if accepted:
+                return accepted
+            if data.get("catalog") or data.get("schema"):
+                logger.warning(
+                    "catalog_override.json contains forbidden location %s.%s — ignoring.",
+                    data.get("catalog"), data.get("schema"),
+                )
     except Exception:
         pass
 
-    # 3. DBFS fallback — survives git redeploys that wipe .settings/
+    # 4. DBFS fallback — survives git redeploys that wipe .settings/
     return _read_dbfs_catalog_override()
 
 
 def save_catalog_schema(catalog: str, schema: str) -> None:
     """Persist a catalog/schema override (written from the Setup Wizard).
 
-    Writes to both the local .settings/ file (fast) and DBFS (survives redeploys).
+    Lakebase is primary. Local file + DBFS stay as fallbacks so a warehouse-only
+    rollback and a mid-request worker still see the value.
     """
     catalog = catalog.strip()
     schema = schema.strip()
     validate_app_storage_target(catalog, schema)
+    try:
+        lb_set_config("catalog_schema", {"catalog": catalog, "schema": schema})
+    except Exception as e:
+        logger.debug("Could not save catalog/schema to Lakebase (non-fatal): %s", e)
     os.makedirs(os.path.dirname(_CATALOG_OVERRIDE_FILE), exist_ok=True)
     with open(_CATALOG_OVERRIDE_FILE, "w") as f:
         json.dump({"catalog": catalog, "schema": schema}, f)
@@ -372,29 +403,59 @@ _MV_UNIFIED_TABLES_FILE = os.path.join(
     os.path.dirname(__file__), "..", ".settings", "mv_unified_views.json"
 )
 
+# In-process caches so dashboard rewrites don't open a PG connection per query.
+# None = not loaded this process. A loaded empty list is a real "no sources" value.
+_mv_sources_mem: list[dict] | None = None
+_unified_views_mem: list[str] | None = None
+
+
+def _reset_mv_source_cache() -> None:
+    """Test helper — drop the in-process MV-source / unified-view caches."""
+    global _mv_sources_mem, _unified_views_mem
+    _mv_sources_mem = None
+    _unified_views_mem = None
+
 
 def get_unified_view_tables() -> list[str]:
     """MV table names that currently have a built `<name>__unified` view.
 
-    Read order: local .settings file (fast), then the durable Delta table (survives
-    redeploys AND is consistent across the app's multiple uvicorn workers — the file
-    is per-container and wiped on redeploy, so on its own it silently drops back to
-    base-table reads, which is why an added shared source stopped affecting the UI).
+    Read order: in-process cache, Lakebase (v2 primary), local .settings file,
+    then the durable Delta table (warehouse fallback / pre-migration).
     """
+    global _unified_views_mem
+    if _unified_views_mem is not None:
+        return _unified_views_mem
+    try:
+        cfg = lb_get_config("unified_view_tables")
+        if isinstance(cfg, list):
+            _unified_views_mem = [t for t in cfg if isinstance(t, str)]
+            return _unified_views_mem
+    except Exception:
+        pass
     try:
         with open(_MV_UNIFIED_TABLES_FILE) as f:
             data = json.load(f)
         if isinstance(data, list):
-            return [t for t in data if isinstance(t, str)]
+            _unified_views_mem = [t for t in data if isinstance(t, str)]
+            return _unified_views_mem
     except (FileNotFoundError, json.JSONDecodeError, OSError):
         pass
-    return read_delta_unified_view_tables()
+    _unified_views_mem = read_delta_unified_view_tables()
+    return _unified_views_mem
 
 
 def save_unified_view_tables(tables: list[str]) -> None:
-    """Record which MV tables have a built unified view — local file (fast) + durable
-    Delta table (cross-worker + survives redeploys)."""
+    """Record which MV tables have a built unified view.
+
+    Lakebase is primary. Local file + Delta stay as fallbacks.
+    """
+    global _unified_views_mem
     clean = [t for t in tables if isinstance(t, str)]
+    _unified_views_mem = clean
+    try:
+        lb_set_config("unified_view_tables", clean)
+    except Exception as e:
+        logger.debug("Could not persist unified-view table list to Lakebase: %s", e)
     try:
         os.makedirs(os.path.dirname(_MV_UNIFIED_TABLES_FILE), exist_ok=True)
         with open(_MV_UNIFIED_TABLES_FILE, "w") as f:
@@ -462,35 +523,9 @@ def _valid_mv_source(s: object) -> bool:
     )
 
 
-def get_mv_sources() -> list[dict]:
-    """Additional MV source locations to union into MV reads.
-
-    Each entry: {"label": str, "catalog": str, "schema": str, "tables"?: list[str]}.
-    Read order: local .settings file (fast, present during a worker's lifetime), then
-    a durable Delta table (survives git redeploys and works where DBFS is disabled —
-    e.g. GCP), then DBFS (legacy). Never raises — returns [] on any error.
-    """
-    try:
-        with open(_MV_SOURCES_FILE) as f:
-            data = json.load(f)
-        # A present file is authoritative for this worker — even when it's an empty
-        # list (the user removed every source), so we don't resurrect stale entries.
-        if isinstance(data, list):
-            return [s for s in data if _valid_mv_source(s)]
-    except (FileNotFoundError, json.JSONDecodeError, OSError):
-        pass
-    # File missing (fresh redeploy wiped .settings) — restore from the durable stores.
-    delta = read_delta_mv_sources()
-    if delta:
-        return [s for s in delta if _valid_mv_source(s)]
-    dbfs = read_dbfs_mv_sources()
-    return [s for s in dbfs if _valid_mv_source(s)] if dbfs else []
-
-
-def save_mv_sources(sources: list[dict]) -> None:
-    """Persist additional MV sources: local .settings file (fast) + durable Delta
-    table (survives redeploys) + DBFS (legacy best-effort). Preserves the optional
-    per-source `tables` selection from the Browse multiselect."""
+def _clean_mv_sources(sources: object) -> list[dict]:
+    if not isinstance(sources, list):
+        return []
     clean: list[dict] = []
     for s in sources:
         if not _valid_mv_source(s):
@@ -505,9 +540,63 @@ def save_mv_sources(sources: list[dict]) -> None:
         if s.get("added_at"):
             entry["added_at"] = str(s["added_at"])
         clean.append(entry)
-    os.makedirs(os.path.dirname(_MV_SOURCES_FILE), exist_ok=True)
-    with open(_MV_SOURCES_FILE, "w") as f:
-        json.dump(clean, f, indent=2)
+    return clean
+
+
+def get_mv_sources() -> list[dict]:
+    """Additional MV source locations to union into MV reads.
+
+    Each entry: {"label": str, "catalog": str, "schema": str, "tables"?: list[str]}.
+    Read order: in-process cache, Lakebase (v2 primary; empty list is authoritative
+    so a cleared picker does not resurrect warehouse rows), local .settings file,
+    Delta table, then DBFS (legacy). Never raises — returns [] on any error.
+    """
+    global _mv_sources_mem
+    if _mv_sources_mem is not None:
+        return _mv_sources_mem
+    try:
+        cfg = lb_get_config("mv_sources")
+        if isinstance(cfg, list):
+            _mv_sources_mem = _clean_mv_sources(cfg)
+            return _mv_sources_mem
+    except Exception:
+        pass
+    try:
+        with open(_MV_SOURCES_FILE) as f:
+            data = json.load(f)
+        # A present file is authoritative for this worker — even when it's an empty
+        # list (the user removed every source), so we don't resurrect stale entries.
+        if isinstance(data, list):
+            _mv_sources_mem = _clean_mv_sources(data)
+            return _mv_sources_mem
+    except (FileNotFoundError, json.JSONDecodeError, OSError):
+        pass
+    # File missing (fresh redeploy wiped .settings) — restore from warehouse fallbacks.
+    delta = read_delta_mv_sources()
+    if delta:
+        _mv_sources_mem = _clean_mv_sources(delta)
+        return _mv_sources_mem
+    dbfs = read_dbfs_mv_sources()
+    _mv_sources_mem = _clean_mv_sources(dbfs) if dbfs else []
+    return _mv_sources_mem
+
+
+def save_mv_sources(sources: list[dict]) -> None:
+    """Persist additional MV sources. Lakebase is primary; file + Delta + DBFS
+    stay as fallbacks. Preserves the optional per-source `tables` selection."""
+    global _mv_sources_mem
+    clean = _clean_mv_sources(sources)
+    _mv_sources_mem = clean
+    try:
+        lb_set_config("mv_sources", clean)
+    except Exception as e:
+        logger.debug("Could not persist mv_sources to Lakebase (non-fatal): %s", e)
+    try:
+        os.makedirs(os.path.dirname(_MV_SOURCES_FILE), exist_ok=True)
+        with open(_MV_SOURCES_FILE, "w") as f:
+            json.dump(clean, f, indent=2)
+    except OSError as e:
+        logger.debug("Could not persist mv_sources to file (non-fatal): %s", e)
     write_delta_mv_sources(clean)
     write_dbfs_mv_sources(clean)
     logger.info("MV sources saved: %s", [s["label"] for s in clean])
@@ -658,6 +747,11 @@ def reset_source_labels(token: object) -> None:
         pass
 
 
+def source_labels_active() -> bool:
+    """True when this request narrowed MV reads with ?source_labels=."""
+    return any(str(x).strip() for x in _source_labels.get())
+
+
 def source_label_filter_clause() -> str:
     """`` AND source_label IN ('a','b') `` for the current selection, else ''.
 
@@ -700,19 +794,21 @@ def apply_mv_overrides(sql: str, catalog: str, schema: str) -> str:
 
 def get_catalog_schema_info() -> dict:
     """Return catalog/schema info for the settings read-only display."""
-    try:
-        if os.path.exists(_CATALOG_OVERRIDE_FILE):
-            with open(_CATALOG_OVERRIDE_FILE) as f:
-                data = json.load(f)
-            cat = data.get("catalog", "").strip()
-            sch = data.get("schema", "").strip()
-            if cat and sch:
-                return {"catalog": cat, "schema": sch, "source": "override"}
-    except Exception:
-        pass
-    catalog = os.getenv("COST_OBS_CATALOG", "")
-    schema = os.getenv("COST_OBS_SCHEMA", "")
-    return {"catalog": catalog, "schema": schema, "source": "env"}
+    catalog, schema = get_catalog_schema()
+    if os.getenv("COST_OBS_CATALOG", "").strip() and os.getenv("COST_OBS_SCHEMA", "").strip():
+        source = "env"
+    else:
+        try:
+            cfg = lb_get_config("catalog_schema")
+            if isinstance(cfg, dict) and cfg.get("catalog") and cfg.get("schema"):
+                source = "lakebase"
+            elif os.path.exists(_CATALOG_OVERRIDE_FILE):
+                source = "override"
+            else:
+                source = "env"
+        except Exception:
+            source = "override" if os.path.exists(_CATALOG_OVERRIDE_FILE) else "env"
+    return {"catalog": catalog, "schema": schema, "source": source}
 
 
 # Dedicated warehouse configuration
@@ -1575,9 +1671,10 @@ def _lakebase_conninfo() -> str:
     user = os.environ.get("PGUSER", "")
     sslmode = os.environ.get("PGSSLMODE", "require")
     schema = os.environ.get("COST_OBS_SCHEMA", "cost_obs")
+    gold = os.environ.get("COST_OBS_PG_GOLD_SCHEMA", "cost_obs_gold")
     return (
         f"host={host} port={port} dbname={database} user={user} sslmode={sslmode} "
-        f"options='-c search_path={schema}'"
+        f"options='-c search_path={gold},{schema}'"
     )
 
 
@@ -1603,10 +1700,12 @@ def _get_lakebase_pool() -> "psycopg_pool.ConnectionPool | None":
         # DDL fails with "no schema has been selected"), so we set it here where it
         # always takes. Falls back to public so unqualified reads still resolve.
         _pg_schema = os.environ.get("COST_OBS_SCHEMA", "cost_obs")
+        _pg_gold = os.environ.get("COST_OBS_PG_GOLD_SCHEMA", "cost_obs_gold")
 
         def _configure_conn(conn) -> None:
             with conn.cursor() as cur:
-                cur.execute(f'SET search_path TO "{_pg_schema}", public')
+                cur.execute(f'CREATE SCHEMA IF NOT EXISTS "{_pg_gold}"')
+                cur.execute(f'SET search_path TO "{_pg_gold}", "{_pg_schema}", public')
             conn.commit()
 
         try:

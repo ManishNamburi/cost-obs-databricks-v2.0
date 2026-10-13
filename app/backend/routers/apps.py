@@ -800,7 +800,12 @@ def _compute_apps_bundle(params: dict, id_list: list | None, active_only: bool, 
                     cat, sch = get_catalog_schema()
                     mv_sql = mv_sql_tpl.format(catalog=cat, schema=sch, ws_filter=_mv_ws_clause + source_label_filter_clause(), **fmt_kwargs)
                     mv_sql = apply_mv_overrides(mv_sql, cat, sch)
-                    return execute_query(mv_sql, params)
+                    delta = execute_query(mv_sql, params)
+                    from backend.lakebase_read import dual_read_mv
+                    return dual_read_mv(
+                        mv_sql_tpl, params, _mv_ws_clause, delta,
+                        extra_format={"app_filter": fmt_kwargs.get("app_filter", "")},
+                    )
                 except Exception as e:
                     logger.warning("apps %s MV path failed (%s); falling back to raw scan", name, type(e).__name__)
             return raw_fallback()

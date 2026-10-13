@@ -51,7 +51,9 @@ _CHUNK_DAYS = 7
 _SYNC_EXCLUDE: frozenset[str] = frozenset({"dbsql_cost_per_query"})
 
 # Watermark table: one row per aggregate, exposing sync + freshness separately.
-_SYNC_STATE_TABLE = "agg_sync_state"
+# App-owned watermark table. `agg_sync_state` was created by an earlier identity
+# the Apps SP cannot ALTER/INSERT into ("must be owner of table").
+_SYNC_STATE_TABLE = "agg_sync_state_v2"
 _SYNC_STATE_DDL = f"""
 CREATE TABLE IF NOT EXISTS {_SYNC_STATE_TABLE} (
     table_name      text PRIMARY KEY,
@@ -498,10 +500,13 @@ def sync_all_aggregates(
     # env / COST_OBS_SCHEMA) so unqualified CREATE TABLE lands there.
     import os as _os
     from backend.db import get_pg_conn
-    pg_schema = _os.environ.get("COST_OBS_SCHEMA", schema)
+    # App-owned schema so we can CREATE/INSERT even when leftover daily_* tables
+    # in COST_OBS_SCHEMA belong to another Postgres role.
+    pg_schema = _os.environ.get("COST_OBS_PG_GOLD_SCHEMA", "cost_obs_gold")
     try:
         with get_pg_conn() as conn, conn.cursor() as cur:
             cur.execute(f'CREATE SCHEMA IF NOT EXISTS "{pg_schema}"')
+            cur.execute(f'SET search_path TO "{pg_schema}", public')
     except Exception as e:
         logger.warning("lakebase_sync: could not ensure schema %s (non-fatal): %s", pg_schema, e)
 
@@ -525,14 +530,17 @@ def sync_all_aggregates(
 
 def get_sync_status() -> list[dict[str, Any]]:
     """Return the per-table sync watermark rows, or [] if unavailable/empty."""
+    import os
+
     from backend.db import lakebase_available, lakebase_query
 
     if not lakebase_available():
         return []
     try:
+        gold = os.environ.get("COST_OBS_PG_GOLD_SCHEMA", "cost_obs_gold")
         return lakebase_query(
-            f"SELECT table_name, last_synced_at, mode, window_start, rows_synced, "
-            f"max_source_date, duration_ms FROM {_SYNC_STATE_TABLE} ORDER BY table_name"
+            f'SELECT table_name, last_synced_at, mode, window_start, rows_synced, '
+            f'max_source_date, duration_ms FROM "{gold}".{_SYNC_STATE_TABLE} ORDER BY table_name'
         )
     except Exception as e:
         logger.debug("get_sync_status failed (non-fatal): %s", e)

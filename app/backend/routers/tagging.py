@@ -12,7 +12,8 @@ from backend.db import execute_query, execute_queries_parallel, bundle_cache_key
 from backend import workspace_filter as wf
 from backend import cache_ttls
 from backend.materialized_views import MV_TAG_STATS, MV_TAGGING_SUMMARY
-from backend.routers.billing import _check_mv_available
+from backend.materialized_views_extra import MV_TAGGING_COVERAGE
+from backend.routers.billing import _check_mv_available, _exec_mv
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -627,7 +628,10 @@ async def get_tagging_summary(
         "end_date": end_date or get_default_end_date(),
     }
 
-    results = await asyncio.to_thread(execute_query, TAGGING_SUMMARY, params)
+    results = await asyncio.to_thread(_exec_mv, MV_TAGGING_COVERAGE, params, "")
+    if not results:
+        from backend.routers.billing import _live_if_allowed
+        results = await asyncio.to_thread(_live_if_allowed, TAGGING_SUMMARY, params)
 
     if not results:
         return {
@@ -1083,7 +1087,16 @@ async def get_tag_coverage_timeseries(
         "end_date": end_date or get_default_end_date(),
     }
 
-    results = await asyncio.to_thread(execute_query, TAG_COVERAGE_TIMESERIES, params)
+    from backend.lakebase_read import PG_TAG_COVERAGE_TIMESERIES, dual_read, warehouse_view_fallback
+
+    def _tag_ts():
+        live = (lambda: execute_query(TAG_COVERAGE_TIMESERIES, params)) if warehouse_view_fallback() else None
+        return dual_read(
+            "tag_coverage_timeseries", PG_TAG_COVERAGE_TIMESERIES, params, "",
+            fetch_delta=live,
+        )
+
+    results = await asyncio.to_thread(_tag_ts)
 
     timeseries = []
     for row in results:
@@ -1146,6 +1159,13 @@ async def get_tagging_dashboard_bundle(
         """
         if _check_mv_available():
             try:
+                mv_ws_clause = wf.build_ws_filter_clause(col="workspace_id", id_list=id_list)
+                rows = _exec_mv(MV_TAGGING_COVERAGE, query_params, mv_ws_clause)
+                if rows:
+                    return rows
+                from backend.lakebase_read import warehouse_view_fallback
+                if not warehouse_view_fallback():
+                    return rows or []
                 catalog, schema = get_catalog_schema()
                 mv_ws_filter = wf.build_ws_filter_clause(col="workspace_id", id_list=id_list)
                 mv_ws_clause_billing = wf.build_ws_filter_clause(col="workspace_id", id_list=id_list)
@@ -1159,6 +1179,9 @@ async def get_tagging_dashboard_bundle(
                 return execute_query(mv_sql, query_params)
             except Exception as e:
                 logger.warning("tagging_summary MV path failed (%s); falling back to raw scan", type(e).__name__)
+        from backend.lakebase_read import warehouse_view_fallback
+        if not warehouse_view_fallback():
+            return []
         return execute_query(_ws(TAGGING_SUMMARY), query_params)
 
     def tag_stats_query(query_params: dict) -> list[dict[str, Any]]:
@@ -1171,13 +1194,13 @@ async def get_tagging_dashboard_bundle(
         """
         if _check_mv_available():
             try:
-                catalog, schema = get_catalog_schema()
                 mv_ws_clause = wf.build_ws_filter_clause(col="workspace_id", id_list=id_list)
-                mv_sql = MV_TAG_STATS.format(catalog=catalog, schema=schema, ws_filter=mv_ws_clause)
-                mv_sql = apply_mv_overrides(mv_sql, catalog, schema)
-                return execute_query(mv_sql, query_params)
+                return _exec_mv(MV_TAG_STATS, query_params, mv_ws_clause)
             except Exception as e:
                 logger.warning("tag_stats MV path failed (%s); falling back to raw scan", type(e).__name__)
+        from backend.lakebase_read import warehouse_view_fallback
+        if not warehouse_view_fallback():
+            return []
         return execute_query(_ws(TAG_STATS), query_params)
 
     def lakeflow_query(name: str, enriched_sql: str, fallback_sql: str, query_params: dict, flag: list) -> list[dict[str, Any]]:
@@ -1201,18 +1224,32 @@ async def get_tagging_dashboard_bundle(
         flag[0] = False
         return execute_query(fallback_sql, query_params)
 
+    from backend.lakebase_read import (
+        PG_COST_BY_TAG, PG_COST_BY_TAG_KEY, PG_TAG_COVERAGE_TIMESERIES,
+        dual_read, warehouse_view_fallback,
+    )
+    live_ok = warehouse_view_fallback()
+    mv_ws_clause = wf.build_ws_filter_clause(col="workspace_id", id_list=id_list)
+
+    def _tag_gold(name: str, pg: str, query_params: dict, live_sql: str, ws_pg: str) -> list[dict[str, Any]]:
+        live = (lambda: execute_query(live_sql, query_params)) if live_ok else None
+        return dual_read(name, pg, query_params, ws_pg, fetch_delta=live)
+
     queries = [
         ("summary", lambda: summary_query(params)),
-        ("clusters", lambda: query_with_fallback(_ws(UNTAGGED_CLUSTERS_ENRICHED), _ws(UNTAGGED_CLUSTERS), params)),
-        ("jobs", lambda: lakeflow_query("lakeflow_jobs", _ws(UNTAGGED_JOBS_ENRICHED), _ws(UNTAGGED_JOBS), params, jobs_ok)),
-        ("pipelines", lambda: lakeflow_query("lakeflow_pipelines", _ws(UNTAGGED_PIPELINES_ENRICHED), _ws(UNTAGGED_PIPELINES), params, pipelines_ok)),
-        ("warehouses", lambda: query_with_fallback(_ws(UNTAGGED_WAREHOUSES_ENRICHED), _ws(UNTAGGED_WAREHOUSES), params)),
-        ("endpoints", lambda: execute_query(_ws(UNTAGGED_ENDPOINTS), params)),
-        ("cost_by_tag", lambda: execute_query(_ws(COST_BY_TAG), params)),
         ("tag_stats", lambda: tag_stats_query(params)),
-        ("tag_keys", lambda: execute_query(_ws(COST_BY_TAG_KEY), params)),
-        ("timeseries", lambda: execute_query(_ws(TAG_COVERAGE_TIMESERIES), params)),
+        ("cost_by_tag", lambda: _tag_gold("cost_by_tag", PG_COST_BY_TAG, params, _ws(COST_BY_TAG), mv_ws_clause)),
+        ("tag_keys", lambda: _tag_gold("cost_by_tag_key", PG_COST_BY_TAG_KEY, params, _ws(COST_BY_TAG_KEY), mv_ws_clause)),
+        ("timeseries", lambda: _tag_gold("tag_coverage_timeseries", PG_TAG_COVERAGE_TIMESERIES, params, _ws(TAG_COVERAGE_TIMESERIES), mv_ws_clause)),
     ]
+    if live_ok:
+        queries.extend([
+            ("clusters", lambda: query_with_fallback(_ws(UNTAGGED_CLUSTERS_ENRICHED), _ws(UNTAGGED_CLUSTERS), params)),
+            ("jobs", lambda: lakeflow_query("lakeflow_jobs", _ws(UNTAGGED_JOBS_ENRICHED), _ws(UNTAGGED_JOBS), params, jobs_ok)),
+            ("pipelines", lambda: lakeflow_query("lakeflow_pipelines", _ws(UNTAGGED_PIPELINES_ENRICHED), _ws(UNTAGGED_PIPELINES), params, pipelines_ok)),
+            ("warehouses", lambda: query_with_fallback(_ws(UNTAGGED_WAREHOUSES_ENRICHED), _ws(UNTAGGED_WAREHOUSES), params)),
+            ("endpoints", lambda: execute_query(_ws(UNTAGGED_ENDPOINTS), params)),
+        ])
 
     try:
         results = await asyncio.to_thread(execute_queries_parallel, queries, timeout=90.0)

@@ -59,6 +59,11 @@ from backend.materialized_views import (
     MV_SQL_TOOL_ATTRIBUTION,
     check_materialized_views_exist,
 )
+from backend.materialized_views_extra import (
+    MV_INTERACTIVE_BREAKDOWN,
+    MV_PIPELINE_OBJECTS,
+    MV_SKU_BREAKDOWN,
+)
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -170,15 +175,26 @@ def _get_mv_query(mv_query: str, ws_filter: str = "") -> str:
 
 
 def _exec_mv(mv_template: str, params: dict, ws_filter: str = "") -> list[dict]:
-    """Execute a materialized view query against Delta.
+    """Serve a gold aggregate. Postgres first when COST_OBS_LAKEBASE_READ=on.
 
-    Phase B: routes through lakebase_read.dual_read_mv so the same headline reads can
-    shadow-compare against (or, post-cutover, serve from) Lakebase. No behavior change
-    unless COST_OBS_LAKEBASE_READ is set — defaults to serving Delta.
+    On Postgres failure, read the warehouse *gold copy* (daily_* tables), never
+    live system.* scans. Live system SQL stays behind `_live_if_allowed`.
     """
-    delta = execute_query(_get_mv_query(mv_template, ws_filter), params)
     from backend.lakebase_read import dual_read_mv
-    return dual_read_mv(mv_template, params, ws_filter, delta)
+    return dual_read_mv(
+        mv_template,
+        params,
+        ws_filter,
+        fetch_delta=lambda: execute_query(_get_mv_query(mv_template, ws_filter), params),
+    )
+
+
+def _live_if_allowed(sql: str, params: dict) -> list[dict]:
+    """Hit live warehouse SQL only when Lakebase serving is not on."""
+    from backend.lakebase_read import warehouse_view_fallback
+    if not warehouse_view_fallback():
+        return []
+    return execute_query(sql, params)
 
 
 def _mv_ws_clause(id_list: list[str] | None) -> str:
@@ -281,7 +297,9 @@ async def get_billing_summary(
     if use_mv:
         results = await asyncio.to_thread(_exec_mv, MV_BILLING_SUMMARY, params, _mv_ws_clause(id_list))
         if not results:
-            results = await asyncio.to_thread(execute_query, _inject_ws_filter(BILLING_SUMMARY, ws_clause), params)
+            results = await asyncio.to_thread(
+                _live_if_allowed, _inject_ws_filter(BILLING_SUMMARY, ws_clause), params
+            )
     else:
         results = await asyncio.to_thread(execute_query, _inject_ws_filter(BILLING_SUMMARY, ws_clause), params)
 
@@ -498,7 +516,9 @@ async def get_etl_breakdown(
         "end_date": end_date or get_default_end_date(),
     }
 
-    results = await asyncio.to_thread(execute_query, ETL_BREAKDOWN, params)
+    results = await asyncio.to_thread(_exec_mv, MV_ETL_BREAKDOWN, params, "")
+    if not results:
+        results = await asyncio.to_thread(_live_if_allowed, ETL_BREAKDOWN, params)
 
     products = []
     total_spend = 0
@@ -547,7 +567,11 @@ async def get_pipeline_objects(
     ws_clause = wf.build_ws_filter_clause(id_list=id_list)
 
     try:
-        raw = await asyncio.to_thread(execute_query, _inject_ws_filter(PIPELINE_OBJECTS, ws_clause), params)
+        raw = await asyncio.to_thread(_exec_mv, MV_PIPELINE_OBJECTS, params, _mv_ws_clause(id_list))
+        if not raw:
+            raw = await asyncio.to_thread(
+                _live_if_allowed, _inject_ws_filter(PIPELINE_OBJECTS, ws_clause), params
+            )
         raw_copy = [dict(r) for r in (raw or [])]
         try:
             results = await asyncio.wait_for(asyncio.to_thread(_enrich_pipeline_results, raw_copy), timeout=20.0)
@@ -620,7 +644,11 @@ async def get_interactive_breakdown(
     ws_clause = wf.build_ws_filter_clause(id_list=id_list)
 
     try:
-        results = await asyncio.to_thread(execute_query, _inject_ws_filter(INTERACTIVE_BREAKDOWN, ws_clause), params)
+        results = await asyncio.to_thread(_exec_mv, MV_INTERACTIVE_BREAKDOWN, params, _mv_ws_clause(id_list))
+        if not results:
+            results = await asyncio.to_thread(
+                _live_if_allowed, _inject_ws_filter(INTERACTIVE_BREAKDOWN, ws_clause), params
+            )
 
         items = []
         total_spend = 0
@@ -1489,21 +1517,21 @@ async def get_dashboard_bundle_fast(
 
         def _mv_summary():
             r = _exec_mv(MV_BILLING_SUMMARY, params, mv_ws)
-            # Fall back if empty or if MV returned zero spend (table exists but not yet populated)
-            if r and float((r[0] if r else {}).get("total_spend") or 0) > 0:
+            if r:
                 return r
-            return execute_query(_inject_ws_filter(BILLING_SUMMARY, ws_clause), params)
+            return _live_if_allowed(_inject_ws_filter(BILLING_SUMMARY, ws_clause), params)
 
         def _mv_timeseries():
             r = _exec_mv(MV_BILLING_TIMESERIES, params, mv_ws)
-            return r if r else execute_query(_inject_ws_filter(BILLING_TIMESERIES_FAST, ws_clause), params)
+            return r if r else _live_if_allowed(_inject_ws_filter(BILLING_TIMESERIES_FAST, ws_clause), params)
 
         def _mv_products():
             r = _exec_mv(MV_BILLING_BY_PRODUCT, params, mv_ws)
-            return r if r else execute_query(_inject_ws_filter(BILLING_BY_PRODUCT_FAST, ws_clause), params)
+            return r if r else _live_if_allowed(_inject_ws_filter(BILLING_BY_PRODUCT_FAST, ws_clause), params)
 
         def _mv_workspaces():
-            return execute_query(_inject_ws_filter(BILLING_BY_WORKSPACE, ws_clause), params)
+            r = _exec_mv(MV_BILLING_BY_WORKSPACE, params, mv_ws)
+            return r if r else _live_if_allowed(_inject_ws_filter(BILLING_BY_WORKSPACE, ws_clause), params)
 
         # Also fetch most-recent-day workspace count; MV summary gives period-total DISTINCT
         # which is always >= any single day and mismatches the daily trend chart.
@@ -1525,7 +1553,7 @@ async def get_dashboard_bundle_fast(
             ("workspaces", _mv_workspaces),
             ("timeseries", _mv_timeseries),
             ("etl_breakdown", lambda: _exec_mv(MV_ETL_BREAKDOWN, params, mv_ws)),
-            ("workspace_count", lambda: execute_query(_WORKSPACE_COUNT_QUERY_MV, params)),
+            ("workspace_count", lambda: _live_if_allowed(_WORKSPACE_COUNT_QUERY_MV, params)),
         ]
     else:
         # Fall back to fast queries without MVs; inject workspace filter when active.
@@ -1652,6 +1680,19 @@ def _format_timeseries_fast(results: list[dict[str, Any]] | None, params: dict[s
 def _format_summary(results: list[dict[str, Any]] | None, params: dict[str, str]) -> dict[str, Any]:
     """Format summary query results."""
     if not results:
+        from backend.lakebase_read import warehouse_view_fallback
+        if not warehouse_view_fallback():
+            return {
+                "total_dbus": 0,
+                "total_spend": 0,
+                "workspace_count": 0,
+                "days_in_range": 0,
+                "avg_daily_spend": 0,
+                "start_date": params["start_date"],
+                "end_date": params["end_date"],
+                "first_date": None,
+                "last_date": None,
+            }
         return {"error": "Summary data not available"}
 
     row = results[0] if results else {}
@@ -1969,7 +2010,11 @@ async def get_sku_breakdown(
     if (_dcached := delta_cache_get(_dkey)) is not None:
         return _dcached
     ws_clause = wf.build_ws_filter_clause(id_list=id_list)
-    results = await asyncio.to_thread(execute_query, _inject_ws_filter(SKU_BREAKDOWN, ws_clause), params)
+    results = await asyncio.to_thread(_exec_mv, MV_SKU_BREAKDOWN, params, _mv_ws_clause(id_list))
+    if not results:
+        results = await asyncio.to_thread(
+            _live_if_allowed, _inject_ws_filter(SKU_BREAKDOWN, ws_clause), params
+        )
 
     skus = []
     total_spend = 0.0
@@ -2322,10 +2367,8 @@ async def get_kpis_bundle(
         ("anomalies", lambda: execute_query(_inject_ws_filter(anomalies_sql, ws_clause), params)),
     ]
     if use_mv:
-        avg_daily_ws_sql = _get_mv_query(AVG_DAILY_WORKSPACES, mv_ws)
-        parallel_queries.append(("avg_daily_ws", lambda: execute_query(avg_daily_ws_sql, params)))
-        avg_daily_users_sql = _get_mv_query(AVG_DAILY_QUERY_USERS_MV, mv_ws)
-        parallel_queries.append(("avg_daily_query_users", lambda: execute_query(avg_daily_users_sql, params)))
+        parallel_queries.append(("avg_daily_ws", lambda: _exec_mv(AVG_DAILY_WORKSPACES, params, mv_ws)))
+        parallel_queries.append(("avg_daily_query_users", lambda: _exec_mv(AVG_DAILY_QUERY_USERS_MV, params, mv_ws)))
 
     # delta_query_stats is a Delta-direct fallback; skip it when MV is available to avoid redundant scan
     if use_mv:
@@ -3054,6 +3097,11 @@ async def get_kpi_trend(
 
     try:
         results = await asyncio.to_thread(execute_query, apply_mv_overrides(_inject_ws_filter(query, ws_clause), *get_catalog_schema()), params)
+        if use_mv:
+            from backend.lakebase_read import KPI_TREND_PG, dual_read
+            pg = KPI_TREND_PG.get(kpi)
+            if pg:
+                results = dual_read(f"kpi_trend_{kpi}", pg, params, ws_clause, results or [], ["date"])
         if not results and mv_fallback_query:
             logger.info(f"KPI trend MV returned empty for {kpi}, falling back to live query")
             results = await asyncio.to_thread(execute_query, _inject_ws_filter(mv_fallback_query, ws_clause), params)
