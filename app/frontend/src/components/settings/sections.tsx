@@ -42,7 +42,7 @@ export function GeneralSection({ localSettings, updateSetting, tabVisibility, ca
   const { data: authStatus } = useQuery<{ sp_user_name?: string; sp_client_id?: string; sp_display_name?: string } | null>({
     queryKey: ["settings-auth-status"], queryFn: () => fetch("/api/settings/auth-status").then(r => r.json()).catch(() => null), staleTime: 60000,
   });
-  const { data: appLinks } = useQuery<{ source_code_url: string; app_page_url: string } | null>({
+  const { data: appLinks } = useQuery<{ source_code_url: string; app_page_url: string; setup_job_url?: string } | null>({
     queryKey: ["settings-app-links"], queryFn: () => fetch("/api/settings/app-links").then(r => r.json()).catch(() => null), staleTime: 300000,
   });
   const { data: pricing } = useQuery<{ use_account_prices: boolean } | null>({
@@ -78,12 +78,13 @@ export function GeneralSection({ localSettings, updateSetting, tabVisibility, ca
               <LinkButton onClick={() => { navigator.clipboard?.writeText(sp); setSpCopied(true); toast("Copied"); setTimeout(() => setSpCopied(false), 1500); }}>{spCopied ? "Copied" : "Copy"}</LinkButton>
             </div>
           } />
-        {(appLinks?.source_code_url || appLinks?.app_page_url) && (
+        {(appLinks?.source_code_url || appLinks?.app_page_url || appLinks?.setup_job_url) && (
           <Row label="Links"
             control={
-              <div className="flex items-center gap-4">
+              <div className="flex items-center gap-4 flex-wrap">
                 {appLinks?.source_code_url && <LinkButton href={appLinks.source_code_url}><span className="inline-flex items-center gap-1">App source code {ext}</span></LinkButton>}
                 {appLinks?.app_page_url && <LinkButton href={appLinks.app_page_url}><span className="inline-flex items-center gap-1">App backend {ext}</span></LinkButton>}
+                {appLinks?.setup_job_url && <LinkButton href={appLinks.setup_job_url}><span className="inline-flex items-center gap-1">Setup job {ext}</span></LinkButton>}
               </div>
             } />
         )}
@@ -273,7 +274,7 @@ function ScheduleGroup() {
   const hours = Array.from({ length: 24 }, (_, h) => ({ value: h, label: `${String(h).padStart(2, "0")}:00 UTC` }));
   return (
     <Group label="Refresh schedule">
-      <Row first label="Scheduled refresh" helper="Full rebuilds take 3–8 minutes; incremental refreshes finish in under a minute."
+      <Row first label="Scheduled refresh" helper="Rebuilds warehouse gold, then copies into Lakebase. Full rebuilds take 3–8 minutes; incremental refreshes finish in under a minute."
         control={<Toggle checked={s.enabled} onChange={(v) => save({ ...s, enabled: v })} />} />
       {s.enabled && <Row label="Frequency" helper="How often to rebuild the managed tables."
         control={<Select value={s.frequency} onChange={(v) => save({ ...s, frequency: v as Schedule["frequency"] })}
@@ -292,6 +293,9 @@ export function DataTablesSection({ localSettings, updateSetting, caps }: Common
   const { data: appConfig } = useQuery<AppConfigInfo | undefined>({
     queryKey: ["app-config"], queryFn: () => fetch("/api/settings/config").then(r => r.json()).catch(() => undefined),
   });
+  const { data: appLinks } = useQuery<{ setup_job_url?: string } | null>({
+    queryKey: ["settings-app-links"], queryFn: () => fetch("/api/settings/app-links").then(r => r.json()).catch(() => null), staleTime: 300000,
+  });
   const loc = appConfig?.storage_location;
   return (
     <div>
@@ -301,6 +305,10 @@ export function DataTablesSection({ localSettings, updateSetting, caps }: Common
           control={<MonoChip>{loc?.catalog && loc?.schema ? `${loc.catalog}.${loc.schema}` : "—"}</MonoChip>} />
         <Row label="Workspace filter" helper="Set at deploy time via COST_OBS_WORKSPACES. Redeploy to change."
           control={<span style={{ fontSize: 12, color: T.textSecondary }}>All workspaces</span>} />
+        {appLinks?.setup_job_url && (
+          <Row label="Setup job" helper="One-time onboarding and Lakebase bootstrap. Nightly gold refreshes run in the app, not this job."
+            control={<LinkButton href={appLinks.setup_job_url}><span className="inline-flex items-center gap-1">Open setup job {ext}</span></LinkButton>} />
+        )}
         <Row label="Workspace display names"
           helper={caps && !caps.workspace_names_available
             ? "Grant missing — showing IDs. Names come from system.access.workspaces_latest once the SP can read it."

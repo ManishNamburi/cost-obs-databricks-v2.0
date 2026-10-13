@@ -1032,6 +1032,34 @@ async def get_catalog_settings():
     return get_catalog_schema_info()
 
 
+def build_workspace_job_url(host: str, job_id: str, workspace_id: str = "") -> str:
+    """Build a Databricks Jobs UI URL. Empty if host or job_id is missing."""
+    h = (host or "").rstrip("/")
+    jid = str(job_id or "").strip()
+    if not h or not jid:
+        return ""
+    if not h.startswith("http"):
+        h = "https://" + h
+    org = f"?o={workspace_id}" if workspace_id else ""
+    return f"{h}/jobs/{jid}{org}"
+
+
+def _resolve_setup_job_id(w) -> str:
+    """Prefer the DAB-injected job id; fall back to listing `cost-obs-setup` by name."""
+    env_id = (os.getenv("COST_OBS_SETUP_JOB_ID") or "").strip()
+    if env_id:
+        return env_id
+    name = (os.getenv("COST_OBS_SETUP_JOB_NAME") or "cost-obs-setup").strip()
+    try:
+        for job in w.jobs.list(name=name):
+            jid = str(getattr(job, "job_id", "") or "")
+            if jid:
+                return jid
+    except Exception as exc:
+        logger.info("app-links: could not list setup job %s: %s", name, exc)
+    return ""
+
+
 @router.get("/app-links")
 async def get_app_links() -> dict:
     """URLs for the Settings → Config card: the app's source code in the customer
@@ -1052,8 +1080,15 @@ async def get_app_links() -> dict:
     out: dict[str, Any] = {
         "host": host, "app_name": app_name,
         "app_url": "", "app_page_url": "", "source_code_url": "",
+        "setup_job_id": "", "setup_job_url": "",
     }
-    if not host or not app_name:
+    if not host:
+        return out
+    env_job = (os.getenv("COST_OBS_SETUP_JOB_ID") or "").strip()
+    if env_job:
+        out["setup_job_id"] = env_job
+        out["setup_job_url"] = build_workspace_job_url(host, env_job)
+    if not app_name:
         return out
 
     def _resolve() -> dict:
@@ -1074,7 +1109,8 @@ async def get_app_links() -> dict:
                     folder_id = str(oid)
             except Exception as exc:
                 logger.info("app-links: could not resolve folder id for %s: %s", src_path, exc)
-        return {"body": body, "folder_id": folder_id}
+        job_id = _resolve_setup_job_id(w)
+        return {"body": body, "folder_id": folder_id, "setup_job_id": job_id}
 
     try:
         resolved = await asyncio.to_thread(_resolve)
@@ -1101,6 +1137,9 @@ async def get_app_links() -> dict:
     # workspace resolved one; otherwise the app page (a Git deploy has no folder).
     fid = resolved.get("folder_id") or ""
     out["source_code_url"] = f"{host}/browse/folders/{fid}{org}" if fid else out["app_page_url"]
+    setup_job_id = str(resolved.get("setup_job_id") or "").strip()
+    out["setup_job_id"] = setup_job_id
+    out["setup_job_url"] = build_workspace_job_url(host, setup_job_id, wsid)
     return out
 
 
