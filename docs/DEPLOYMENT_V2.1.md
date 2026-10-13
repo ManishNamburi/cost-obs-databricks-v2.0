@@ -1,18 +1,27 @@
 # Cost Observability — v2.1 Deployment
 
 Two supported deployment paths, both driven end-to-end by the Databricks
-Asset Bundle (DAB) in `bundle/`. Pick the one that matches your starting
-state.
+Asset Bundle (DAB) in `bundle/`. Use a **separate target file per motion**
+and pin `deployment_mode` — do not mix catalog/schema/warehouse from one
+motion with names from the other.
 
-| Starting state | Path | Command |
+Copy an example, fill the `REPLACE_ME` values, save it as
+`bundle/targets/<your-target>.yml`:
+
+| Starting state | Example | `deployment_mode` |
 |---|---|---|
-| No prior cost-obs deployment in the target workspace | **Fresh install** | `bundle deploy` + `bundle run cost_obs_setup` |
-| Existing 1.x deployment (MVs already in place, app running) | **1.1 → 2.1 in-place upgrade** | same as above; setup job auto-detects |
+| No prior cost-obs deployment | `bundle/examples/target-fresh.yml` | `fresh` |
+| Existing 1.x app (keep its catalog, schema, warehouse) | `bundle/examples/target-upgrade-from-v1.yml` | `migrate` |
 
-The setup job's `01_validate_prereqs` task decides which path is in effect at
-runtime and prints the resolved mode. You can override the auto-detection
-with the `deployment_mode` bundle variable — see [Overriding
-detection](#overriding-detection).
+```bash
+cd bundle
+databricks bundle deploy -t <your-target>
+databricks bundle run cost_obs_setup -t <your-target>
+```
+
+The setup job still probes when `deployment_mode` is `auto`, but the example
+targets pin the motion so a leftover MV cannot flip a fresh install into an
+upgrade.
 
 ---
 
@@ -47,7 +56,7 @@ in a `targets/<your-target>.yml`, or on the `bundle deploy` command line.
 | `genie_space_id` | (Optional) existing Genie space ID | `01f0fcc775c…` |
 | `ai_gateway_usage_table` | (Optional) admin-managed derived table over `system.ai_gateway.usage` | `acme_catalog.cost_obs.ai_gateway_usage_shared` |
 | `databricks_account_id` | Account UUID — required for account-level APIs | `f8d9…` |
-| `deployment_mode` | `auto` (default) / `fresh` / `migrate` — see [below](#overriding-detection) | `auto` |
+| `deployment_mode` | `auto` (default) / `fresh` / `migrate` — pin this in the target file | `fresh` or `migrate` |
 
 The `lakebase_endpoint_name` variable must use the full path form
 `projects/<project>/branches/production/endpoints/primary` so the Apps
@@ -72,35 +81,33 @@ databricks bundle run cost_obs_setup -t <target>
    (The Genie space is **not** an app-resource binding — see the note
    below — but `GENIE_SPACE_ID` is injected as an app env var from the
    `genie_space_id` variable.)
-4. The `cost_obs_setup` job (six tasks: validate → bootstrap_lakebase →
-   migrate_delta → seed_genie → setup_usage_policy → verify).
+4. The `cost_obs_setup` job (validate → bootstrap_lakebase → migrate_delta +
+   build_gold → seed_genie → setup_usage_policy → verify).
 
 `bundle run cost_obs_setup` then runs the setup job. In fresh mode:
 
-- `validate` detects no prior state (mode resolves to `fresh`).
+- `validate` confirms the warehouse and Lakebase endpoint.
 - `bootstrap_lakebase` provisions the OAuth role, grants, ALTER DEFAULT
   PRIVILEGES, and the `setup_state` table.
 - `migrate_delta` is a no-op (nothing to migrate).
-- `seed_genie` grants the app service principal `CAN_RUN` on the Genie
-  space and writes curation to it (skipped entirely if `genie_space_id`
-  is empty).
+- `build_gold` creates the catalog/schema if needed, builds every warehouse
+  gold table from `system.*`, and copies those aggregates into Lakebase.
+- `seed_genie` creates the `cost-obs` Genie space when `genie_space_id` is
+  empty, grants the app service principal `CAN_RUN`, and stores the id.
 - `setup_usage_policy` provisions the serverless usage policy for
   attribution.
 - `verify` runs the smoke checks and writes the final `setup_state` row.
 
 ### How dashboard tables reach Lakebase
 
-The one-time setup job initializes the Lakebase project, OAuth role, grants,
-schema, and setup markers. Its `migrate_delta` task is only for legacy 1.x
-application-state tables (`budget_alerts`, `tagging_rules`, and
-`cost_snapshots`); it does not copy the dashboard's `daily_*` gold tables.
+The setup job's `build_gold` task is the first gold build. It uses the same
+warehouse builders as Settings → rebuild, then range-replaces the dashboard
+aggregates into Lakebase. Later scheduled or manual refreshes keep both copies
+current. Lakebase-first serving is on by default, with warehouse gold used if
+a Postgres copy is missing or empty.
 
-Dashboard gold is built by the app's normal materialized-view refresh in the
-SQL warehouse. At the end of the same serialized refresh, the app range-replaces
-those aggregates into Lakebase. New deployments therefore need one successful
-table build/refresh after setup; subsequent scheduled or manual refreshes keep
-Lakebase current automatically. Lakebase-first serving is enabled by default,
-with warehouse gold used if a Postgres copy is missing or empty.
+`migrate_delta` only copies legacy 1.x application-state tables
+(`budget_alerts`, `tagging_rules`, `cost_snapshots`). It does not build gold.
 
 > **Why the Genie space isn't a DAB app-resource binding.** `genie_space_id`
 > is empty by default (the space is usually created after the first deploy),
@@ -133,17 +140,16 @@ databricks bundle deploy -t <target>
 databricks bundle run cost_obs_setup -t <target>
 ```
 
-Same commands as fresh, but the setup job takes a different code path:
+Same commands as fresh. Paste v1 catalog, schema, and warehouse id into the
+upgrade target (operator or customer). Setup then:
 
-- `validate` finds `daily_usage_summary` in the target schema and resolves
-  the mode to `migrate`.
-- `bootstrap_lakebase` provisions the OAuth role and grants against the
-  newly-created Lakebase branch — the existing MVs are untouched.
-- `migrate_delta` copies the 1.1 app state (permissions, alerts, config,
-  workspace_config) from Delta / DBFS into Lakebase. Idempotent: safe to
-  re-run.
-- `seed_genie` grants the app SP `CAN_RUN` and seeds curation on the space
-  in `genie_space_id`.
+- `validate` confirms it can reach that warehouse.
+- `bootstrap_lakebase` provisions Lakebase grants. Existing MVs stay.
+- `migrate_delta` copies 1.1 app state (permissions, alerts, config,
+  workspace_config) from Delta / DBFS into Lakebase.
+- `build_gold` incrementally refreshes existing MVs, creates any new v2 gold
+  tables, and full-loads Lakebase so dashboards do not wait on Settings.
+- `seed_genie` creates the Genie space if none is set.
 - `setup_usage_policy` no-ops if the policy already exists.
 - `verify` writes the final `setup_state` marker.
 
@@ -188,7 +194,8 @@ databricks bundle run cost_obs_setup -t <target>
 If a v2.1 deploy fails after `bundle deploy` but before or during the
 setup job:
 
-- The materialized views are untouched (setup job never rebuilds them).
+- On upgrade, existing v1 materialized views are only incrementally
+  refreshed; a failed `build_gold` does not drop them.
 - The v1.x app service principal still has its warehouse resource
   binding; you can point DNS / users back at the 1.1 app.
 - To fully roll back the DAB changes, redeploy the previous git SHA:
@@ -215,8 +222,8 @@ databricks apps get <app-name> -o json | jq '.pending_deployment.status.state'
 
 Then open the app and confirm:
 
-- **DBU Spend** tab renders (fresh install: MVs may still be building on
-  first load; retry in a few minutes).
+- **DBU Spend** tab renders (gold is built during `cost_obs_setup`; a
+  first load should not need a Settings rebuild).
 - **AI Gateway** tab shows the "Cost" sub-tab as its default view.
 - **Genie** tab (new in 2.1) is present.
 - Settings → Tab visibility no longer shows an "AI/ML" entry.

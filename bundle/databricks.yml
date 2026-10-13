@@ -54,11 +54,10 @@ variables:
     default: ""
   deployment_mode:
     description: >
-      Setup-job behaviour when the target workspace may already have a cost-obs
-      deployment. "auto" (default) probes for existing MVs and setup_state rows
-      to decide between fresh install and 1.1 -> 2.1 migration.  Override to
-      "fresh" (skip migration; treat catalog as empty) or "migrate" (force
-      migration; fail if prior state is absent) for explicit control.
+      Setup-job behaviour. Pin "fresh" or "migrate" in the target file
+      (see bundle/examples/). "auto" (default) probes for existing MVs.
+      "fresh" full-builds gold. "migrate" reuses v1 catalog/schema/warehouse
+      MVs, incrementally refreshes gold, and full-loads Lakebase.
     default: auto
 
 sync:

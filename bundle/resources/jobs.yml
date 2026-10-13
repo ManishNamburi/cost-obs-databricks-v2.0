@@ -49,10 +49,30 @@ resources:
               DEPLOYMENT_MODE: ${var.deployment_mode}
           environment_key: default
 
+        - task_key: build_gold
+          description: >
+            Build warehouse gold (full on fresh, incremental on v1 upgrade) and
+            copy dashboard aggregates into Lakebase so the app does not wait on
+            a Settings rebuild.
+          timeout_seconds: 14400
+          depends_on:
+            - task_key: bootstrap_lakebase
+          notebook_task:
+            notebook_path: ${workspace.root_path}/files/setup/notebooks/02c_build_gold
+            source: WORKSPACE
+            base_parameters:
+              ENDPOINT_NAME: ${var.lakebase_endpoint_name}
+              DATABRICKS_WAREHOUSE_ID: ${var.warehouse_id}
+              COST_OBS_CATALOG: ${var.catalog}
+              COST_OBS_SCHEMA: ${var.schema}
+              DEPLOYMENT_MODE: ${var.deployment_mode}
+              LOOKBACK_DAYS: "180"
+          environment_key: default
+
         - task_key: seed_genie
           description: Create and configure the customer Genie space (creates one if GENIE_SPACE_ID is empty)
           depends_on:
-            - task_key: bootstrap_lakebase
+            - task_key: build_gold
           notebook_task:
             notebook_path: ${workspace.root_path}/files/setup/notebooks/03_seed_genie
             source: WORKSPACE
@@ -89,6 +109,7 @@ resources:
           depends_on:
             - task_key: seed_genie
             - task_key: setup_usage_policy
+            - task_key: migrate_delta
           notebook_task:
             notebook_path: ${workspace.root_path}/files/setup/notebooks/05_post_setup_verify
             source: WORKSPACE

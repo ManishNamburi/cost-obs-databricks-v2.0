@@ -4,6 +4,7 @@ Shared setup library for cost-obs V2 onboarding notebooks.
 Each function maps to one task in the cost_obs_setup Databricks job:
   validate()           → 01_validate_prereqs
   bootstrap_lakebase() → 02_lakebase_bootstrap
+  build_gold()         → 02c_build_gold
   seed_genie()         → 03_seed_genie
   setup_usage_policy() → 04_usage_policy_setup
   verify()             → 05_post_setup_verify
@@ -239,12 +240,122 @@ def validate() -> None:
     if mode == "migrate":
         print(
             "[validate] Migration mode: existing 1.1 state detected. "
-            "MV rebuild will be skipped; app state migrated to Lakebase."
+            "Existing MVs are reused (incremental gold); Lakebase + Genie are created."
         )
     else:
         print("[validate] Fresh install mode: no prior cost-obs state detected.")
 
     print("[validate] All prerequisites satisfied.")
+
+
+def _ensure_app_on_sys_path() -> None:
+    """Put the bundled app package on sys.path so setup can reuse gold builders.
+
+    Workspace layout: ``.../files/setup/python`` and ``.../files/app``.
+    Local layout: ``<repo>/setup/python`` and ``<repo>/app``.
+    """
+    import sys
+
+    here = os.path.dirname(os.path.abspath(__file__))
+    files_root = os.path.dirname(os.path.dirname(here))
+    app_dir = os.path.join(files_root, "app")
+    if os.path.isdir(app_dir) and app_dir not in sys.path:
+        sys.path.insert(0, app_dir)
+
+
+def _gold_lookback_days() -> int:
+    raw = (os.environ.get("LOOKBACK_DAYS") or "180").strip()
+    try:
+        days = int(raw)
+    except ValueError:
+        days = 180
+    return max(1, min(days, 730))
+
+
+def _gold_hard_errors(results: dict) -> list[str]:
+    errors: list[str] = []
+    for name, status in results.items():
+        if name.startswith("__"):
+            continue
+        if isinstance(status, str) and status.startswith("error"):
+            errors.append(f"{name}: {status}")
+    return errors
+
+
+def build_gold(*, _create_mvs=None, _sync_all=None) -> None:
+    """Build warehouse gold and copy dashboard aggregates into Lakebase.
+
+    Fresh: full CREATE OR REPLACE of MVs + gold, then Lakebase load.
+    Migrate: reuse existing MVs (incremental MERGE), create any missing v2
+    gold tables, then a full Lakebase backfill so dashboards do not wait on
+    a Settings rebuild.
+    """
+    _resolve_lakebase_env()
+    catalog = os.environ["COST_OBS_CATALOG"]
+    schema = os.environ["COST_OBS_SCHEMA"]
+    lookback = _gold_lookback_days()
+    mode = detect_deployment_mode()
+    force_full = mode == "fresh"
+
+    with pg_conn() as conn:
+        if _is_step_done(conn, "build_gold"):
+            print("[build_gold] Already complete — skipping.")
+            return
+
+    print(
+        f"[build_gold] mode={mode} catalog={catalog} schema={schema} "
+        f"lookback_days={lookback} force_full={force_full}"
+    )
+
+    create_mvs = _create_mvs
+    sync_all = _sync_all
+    if create_mvs is None or sync_all is None:
+        _ensure_app_on_sys_path()
+        from backend.materialized_views import create_materialized_views
+        from backend.lakebase_sync import sync_all_aggregates
+        create_mvs = create_mvs or create_materialized_views
+        sync_all = sync_all or sync_all_aggregates
+
+    results = create_mvs(
+        catalog=catalog,
+        schema=schema,
+        lookback_days=lookback,
+        force_full_rebuild=force_full,
+    )
+    if not isinstance(results, dict):
+        raise RuntimeError(f"Gold build returned unexpected result: {results!r}")
+    if results.get("error"):
+        raise RuntimeError(f"Gold build refused: {results['error']}")
+    hard = _gold_hard_errors(results)
+    if hard:
+        raise RuntimeError("Gold build failed for required tables: " + "; ".join(hard))
+
+    table_status = {
+        k: v for k, v in results.items() if not str(k).startswith("__") and isinstance(v, str)
+    }
+    print(f"[build_gold] warehouse tables: {table_status}")
+
+    # Fresh already full-syncs inside create_materialized_views. Migrate uses
+    # incremental MV refresh, so Lakebase still needs a one-time full copy.
+    sync_summary = results.get("lakebase_sync")
+    if mode == "migrate" or not sync_summary or (
+        isinstance(sync_summary, dict) and sync_summary.get("skipped")
+    ):
+        sync_summary = sync_all(catalog, schema, full=True)
+        print(f"[build_gold] lakebase_sync (full): {sync_summary}")
+    else:
+        print(f"[build_gold] lakebase_sync: {sync_summary}")
+
+    with pg_conn() as conn:
+        _mark_step_done(conn, "build_gold", {
+            "mode": mode,
+            "catalog": catalog,
+            "schema": schema,
+            "lookback_days": lookback,
+            "force_full": force_full,
+            "tables": table_status,
+        })
+    print("[build_gold] Complete.")
 
 
 def _get_app_sp_identities() -> tuple[str, str]:
@@ -754,6 +865,29 @@ def verify() -> None:
         print(f"[verify] system.billing.usage is queryable.")
     except Exception as e:
         print(f"[verify] WARNING: billing usage check failed: {e}")
+
+    try:
+        gold_stmt = w.statement_execution.execute_statement(
+            warehouse_id=wh_id,
+            statement=(
+                f"SELECT COUNT(*) FROM system.information_schema.tables "
+                f"WHERE table_catalog = '{catalog}' "
+                f"AND table_schema = '{schema}' "
+                f"AND table_name = 'daily_usage_summary'"
+            ),
+            wait_timeout="30s",
+        )
+        gold_rows = (gold_stmt.result.data_array or []) if gold_stmt.result else []
+        gold_ok = bool(gold_rows) and int(gold_rows[0][0]) > 0
+        if gold_ok:
+            print(f"[verify] Gold table {catalog}.{schema}.daily_usage_summary is present.")
+        else:
+            print(
+                f"[verify] WARNING: {catalog}.{schema}.daily_usage_summary is missing. "
+                "Re-run cost_obs_setup or rebuild from Settings."
+            )
+    except Exception as e:
+        print(f"[verify] WARNING: gold table check failed: {e}")
 
     # Smoke check: Lakebase setup_state is populated
     with pg_conn() as conn:

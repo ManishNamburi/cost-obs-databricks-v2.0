@@ -1,0 +1,44 @@
+# v1 → v2 upgrade — copy to bundle/targets/<your-target>.yml and paste the
+# catalog, schema, warehouse, and other values from the existing v1 deploy.
+# The customer or operator supplies those; the bundle does not invent them.
+#
+# Motion: bind the existing warehouse and MVs, then setup creates gold,
+# Lakebase, and Genie. Use a new app name and Lakebase project so v1 keeps
+# running until you cut over.
+#
+#   cd bundle
+#   databricks bundle deploy -t <your-target>
+#   databricks bundle run cost_obs_setup -t <your-target>
+
+targets:
+  REPLACE_ME_TARGET_NAME:
+    mode: production
+    workspace:
+      host: https://REPLACE_ME.cloud.databricks.com
+      # profile: REPLACE_ME_CLI_PROFILE
+    variables:
+      deployment_mode: migrate
+      # New v2 app — leave the v1 app in place until cutover
+      app_name: cost-observability-v2
+      # Paste from v1
+      catalog: REPLACE_ME_V1_CATALOG
+      schema: REPLACE_ME_V1_SCHEMA
+      warehouse_id: REPLACE_ME_V1_WAREHOUSE_ID
+      workspace_scope: ""
+      ai_gateway_usage_table: ""
+      databricks_account_id: ""
+      # New in v2 — do not reuse a v1 name (v1 has no Lakebase)
+      lakebase_project_name: cost-obs-db-v2
+      lakebase_endpoint_name: projects/cost-obs-db-v2/branches/production/endpoints/primary
+      lakebase_read_mode: on
+      # Leave empty — setup creates the cost-obs Genie space
+      genie_space_id: ""
+    resources:
+      postgres_projects:
+        cost_obs_db:
+          project_id: ${var.lakebase_project_name}
+          pg_version: 16
+          default_endpoint_settings:
+            autoscaling_limit_min_cu: 0.5
+            autoscaling_limit_max_cu: 4
+            suspend_timeout_duration: 300s
