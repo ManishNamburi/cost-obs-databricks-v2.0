@@ -31,6 +31,7 @@ import {
   warehouseHealthPollInterval,
   type WarehouseHealth,
 } from "@/utils/warehouseGuidance";
+import { downloadArchitecturePdf } from "@/utils/architectureDownload";
 import { Bot, Check, Copy, Settings } from "lucide-react";
 
 // Retry a dynamic import once on failure (handles cold-start chunk load errors)
@@ -1544,6 +1545,10 @@ function Dashboard() {
         tabLoading={tabLoadingFlags}
         onPrepare={prepareExportData}
         onRetryFailed={retryFailedExportData}
+        enableArchitectureView={appSettings.enableArchitectureView}
+        enableMvShareRunbook={appSettings.enableMvShareRunbook}
+        isAdmin={user?.role === "admin"}
+        onExportArchitecture={downloadArchitecturePdf}
       />
 
       <SettingsDialog

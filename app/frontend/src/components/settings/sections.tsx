@@ -224,6 +224,12 @@ export function ExperimentalSection({ localSettings, updateSetting }: CommonProp
         <Row label={<span className="inline-flex items-center gap-2">Debugger link <Badge>Experimental</Badge></span>}
           helper="Show the query debugger (SQL + timing per tile) as a nav-footer link."
           control={<Toggle checked={localSettings.expDebuggerLink} onChange={(v) => updateSetting("expDebuggerLink", v)} />} />
+        <Row label="Architecture PDF"
+          helper="Offer the customer-facing v2 architecture document, including Lakebase serving and state."
+          control={<Toggle checked={localSettings.enableArchitectureView} onChange={(v) => updateSetting("enableArchitectureView", v)} />} />
+        <Row label="Materialized-view share runbook"
+          helper="Let administrators download the Run All notebook for publishing gold aggregates through Delta Sharing."
+          control={<Toggle checked={localSettings.enableMvShareRunbook} onChange={(v) => updateSetting("enableMvShareRunbook", v)} />} />
         <Row label="Clear query cache" helper="Next loads re-query the warehouse."
           control={<SecondaryButton disabled={clearing} onClick={async () => {
             setClearing(true);

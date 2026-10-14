@@ -1,0 +1,168 @@
+/* cost-obs v2 architecture PDF — Databricks palette, local fonts only. */
+
+@page {
+  size: Letter;
+  margin: 1.7cm 1.9cm 2.1cm 1.9cm;
+
+  @top-left {
+    content: "cost-obs architecture  ·  v2.1";
+    font-family: "Helvetica Neue", Helvetica, Arial, sans-serif;
+    font-size: 8pt;
+    color: #618794;
+  }
+
+  @top-right {
+    content: "Customer-facing design";
+    font-family: "Helvetica Neue", Helvetica, Arial, sans-serif;
+    font-size: 8pt;
+    color: #618794;
+  }
+
+  @bottom-left {
+    content: "Databricks Apps  ·  Lakebase serving  ·  warehouse gold refresh";
+    font-family: "Helvetica Neue", Helvetica, Arial, sans-serif;
+    font-size: 8pt;
+    color: #618794;
+  }
+
+  @bottom-right {
+    content: counter(page) " / " counter(pages);
+    font-family: "Helvetica Neue", Helvetica, Arial, sans-serif;
+    font-size: 8pt;
+    color: #618794;
+  }
+}
+
+:root {
+  --db-dark: #1B3139;
+  --db-teal: #1B5162;
+  --db-teal-muted: #618794;
+  --db-navy: #143D4A;
+  --db-light: #F5F3F0;
+  --db-accent: #FF3621;
+  --db-green: #00A972;
+  --db-border: #C4CCD6;
+}
+
+html, body {
+  font-family: "Helvetica Neue", Helvetica, Arial, sans-serif;
+  font-size: 9.45pt;
+  line-height: 1.45;
+  color: var(--db-dark);
+  background: #FFFFFF;
+}
+
+h1, h2, h3, h4 {
+  font-family: "Helvetica Neue", Helvetica, Arial, sans-serif;
+  page-break-after: avoid;
+  margin-top: 1.15em;
+  margin-bottom: 0.35em;
+}
+
+h1 {
+  font-size: 20pt;
+  font-weight: 700;
+  color: var(--db-dark);
+  border-bottom: 3px solid var(--db-accent);
+  padding-bottom: 0.2em;
+  margin-top: 0;
+}
+
+h2 {
+  font-size: 13.5pt;
+  font-weight: 700;
+  color: var(--db-dark);
+  border-bottom: 1px solid var(--db-border);
+  padding-bottom: 0.15em;
+}
+
+h3 {
+  font-size: 11pt;
+  font-weight: 700;
+  color: var(--db-teal);
+}
+
+blockquote {
+  margin: 0.6em 0 1em;
+  padding: 0.55em 0.85em;
+  background: var(--db-light);
+  border-left: 4px solid var(--db-accent);
+  color: var(--db-navy);
+}
+
+blockquote p {
+  margin: 0.25em 0;
+}
+
+p { margin: 0.4em 0; }
+strong { font-weight: 700; }
+em { font-style: italic; }
+
+ul, ol {
+  margin: 0.35em 0 0.55em 1.2em;
+  padding: 0;
+}
+
+li { margin: 0.18em 0; }
+
+code {
+  font-family: "Menlo", "Consolas", "Courier New", monospace;
+  font-size: 8.4pt;
+  background: var(--db-light);
+  padding: 0.05em 0.28em;
+  border-radius: 2px;
+}
+
+pre {
+  font-family: "Menlo", "Consolas", "Courier New", monospace;
+  font-size: 7.6pt;
+  line-height: 1.35;
+  background: #1B3139;
+  color: #F5F3F0;
+  padding: 0.7em 0.85em;
+  border-radius: 4px;
+  border-left: 4px solid var(--db-accent);
+  white-space: pre-wrap;
+  page-break-inside: avoid;
+}
+
+pre code {
+  background: transparent;
+  color: inherit;
+  padding: 0;
+  font-size: inherit;
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 0.55em 0 0.9em;
+  font-size: 8.4pt;
+  page-break-inside: auto;
+}
+
+thead { display: table-header-group; }
+
+th {
+  background: var(--db-dark);
+  color: #FFFFFF;
+  font-weight: 700;
+  text-align: left;
+  padding: 0.38em 0.5em;
+  border: 1px solid var(--db-navy);
+}
+
+td {
+  padding: 0.32em 0.5em;
+  border: 1px solid var(--db-border);
+  vertical-align: top;
+}
+
+tr { page-break-inside: avoid; }
+tbody tr:nth-child(even) td { background: var(--db-light); }
+
+hr {
+  border: none;
+  border-top: 1px solid var(--db-border);
+  margin: 1em 0;
+}

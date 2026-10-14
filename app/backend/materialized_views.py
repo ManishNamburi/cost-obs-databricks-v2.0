@@ -1587,6 +1587,72 @@ def create_materialized_views(catalog: str | None = None, schema: str | None = N
         return result
 
 
+# Warehouse CREATE SQL for the core gold tables (system.* → Unity Catalog).
+# Extra/remaining/viewer gold is appended from EXTRA_CREATE at refresh time.
+CORE_GOLD_CREATE: dict[str, str] = {
+    "daily_usage_summary": CREATE_DAILY_USAGE_SUMMARY,
+    "daily_product_breakdown": CREATE_DAILY_PRODUCT_BREAKDOWN,
+    "daily_workspace_breakdown": CREATE_DAILY_WORKSPACE_BREAKDOWN,
+    "sql_tool_attribution": CREATE_SQL_TOOL_ATTRIBUTION,
+    "daily_query_stats": CREATE_QUERY_STATS,
+    "dbsql_cost_per_query": CREATE_DBSQL_COST_PER_QUERY,
+    "daily_tag_summary": CREATE_DAILY_TAG_SUMMARY,
+    "daily_apps_summary": CREATE_DAILY_APPS_SUMMARY,
+}
+
+# AI Gateway gold is valid only when its administrator-managed source exists.
+# Connected cloud invoice actuals are deliberately excluded from v2 publishing.
+OPTIONAL_SHARE_TABLES = frozenset({
+    "daily_ai_gateway",
+})
+
+
+def gold_share_create_sql() -> dict[str, str]:
+    """Warehouse CREATE SQL for every gold table the share publisher can build.
+
+    Templates keep ``{catalog}``, ``{schema}``, ``{billing_lookback_days}``.
+    Optional AI Gateway SQL keeps a table placeholder instead of an
+    environment-baked name so the generated notebook stays customer-neutral.
+    Connected cloud invoice actuals and Lakebase copies are not included.
+    """
+    from backend.materialized_views_extra import (
+        CREATE_DAILY_AIML_ENDPOINTS,
+        CREATE_DAILY_DBSQL_SOURCE,
+        CREATE_DAILY_DBSQL_TOP,
+        CREATE_DAILY_INTERACTIVE_SPEND,
+        CREATE_DAILY_JOB_PIPELINE_SPEND,
+        CREATE_DAILY_SKU_BREAKDOWN,
+        CREATE_DAILY_TAG_COVERAGE,
+    )
+    from backend.materialized_views_remaining import CREATE_DAILY_AI_GATEWAY, REMAINING_CREATE
+    from backend.materialized_views_viewer import (
+        VIEWER_CREATE,
+    )
+
+    extra_static = {
+        "daily_sku_breakdown": CREATE_DAILY_SKU_BREAKDOWN,
+        "daily_job_pipeline_spend": CREATE_DAILY_JOB_PIPELINE_SPEND,
+        "daily_interactive_spend": CREATE_DAILY_INTERACTIVE_SPEND,
+        "daily_tag_coverage": CREATE_DAILY_TAG_COVERAGE,
+        "daily_dbsql_source": CREATE_DAILY_DBSQL_SOURCE,
+        "daily_aiml_endpoints": CREATE_DAILY_AIML_ENDPOINTS,
+        "daily_dbsql_top": CREATE_DAILY_DBSQL_TOP,
+    }
+    tables: dict[str, str] = {}
+    for group in (
+        CORE_GOLD_CREATE,
+        extra_static,
+        REMAINING_CREATE,
+        VIEWER_CREATE,
+        {
+            "daily_ai_gateway": CREATE_DAILY_AI_GATEWAY,
+        },
+    ):
+        for name, sql in group.items():
+            tables[name] = sql.strip()
+    return tables
+
+
 def _create_materialized_views_impl(catalog: str | None = None, schema: str | None = None, lookback_days: int = 180, on_table_event: "Callable[[str, str], None] | None" = None, force_full_rebuild: bool = False) -> dict:
     """Create all materialized view tables.
 
@@ -1721,17 +1787,7 @@ def _create_materialized_views_impl(catalog: str | None = None, schema: str | No
     except Exception as _rse:
         logger.warning("_ensure_refresh_state_table failed (non-fatal): %s", _rse)
 
-    # List of tables to create
-    tables = [
-        ("daily_usage_summary", CREATE_DAILY_USAGE_SUMMARY),
-        ("daily_product_breakdown", CREATE_DAILY_PRODUCT_BREAKDOWN),
-        ("daily_workspace_breakdown", CREATE_DAILY_WORKSPACE_BREAKDOWN),
-        ("sql_tool_attribution", CREATE_SQL_TOOL_ATTRIBUTION),
-        ("daily_query_stats", CREATE_QUERY_STATS),
-        ("dbsql_cost_per_query", CREATE_DBSQL_COST_PER_QUERY),
-        ("daily_tag_summary", CREATE_DAILY_TAG_SUMMARY),
-        ("daily_apps_summary", CREATE_DAILY_APPS_SUMMARY),
-    ]
+    tables = list(CORE_GOLD_CREATE.items())
     extra_tables = list(EXTRA_CREATE.items())
 
     # Create all tables in parallel — none depend on each other
@@ -1885,14 +1941,7 @@ def drop_materialized_views(catalog: str | None = None, schema: str | None = Non
 
 
 _MV_TABLES = [
-    "daily_usage_summary",
-    "daily_product_breakdown",
-    "daily_workspace_breakdown",
-    "sql_tool_attribution",
-    "daily_query_stats",
-    "dbsql_cost_per_query",
-    "daily_tag_summary",
-    "daily_apps_summary",
+    *CORE_GOLD_CREATE,
     *EXTRA_CREATE.keys(),
 ]
 

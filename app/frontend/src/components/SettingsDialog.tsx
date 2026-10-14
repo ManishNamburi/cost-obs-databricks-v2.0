@@ -61,6 +61,8 @@ export interface AppSettings {
   anomalySensitivity: "low" | "medium" | "high";
   expSetupWizardLink: boolean;
   expDebuggerLink: boolean;
+  enableArchitectureView: boolean;
+  enableMvShareRunbook: boolean;
   companyName: string;
   appDisplayName: string;
   monthlyBudget: number;
@@ -87,6 +89,8 @@ const DEFAULT_APP_SETTINGS: AppSettings = {
   anomalySensitivity: "medium",
   expSetupWizardLink: false,
   expDebuggerLink: false,
+  enableArchitectureView: true,
+  enableMvShareRunbook: true,
   companyName: "",
   appDisplayName: "",
   monthlyBudget: 0,
@@ -138,7 +142,12 @@ interface UnifiedSettings {
   general?: Record<string, unknown>;
   tab_visibility?: Partial<TabVisibility>;
   thresholds?: { spike_threshold_percent?: number; daily_budget?: number; workspace_budget?: number; anomaly_sensitivity?: "low" | "medium" | "high" };
-  experimental?: { exp_setup_wizard_link?: boolean; exp_debugger_link?: boolean };
+  experimental?: {
+    exp_setup_wizard_link?: boolean;
+    exp_debugger_link?: boolean;
+    enable_architecture_view?: boolean;
+    enable_mv_share_runbook?: boolean;
+  };
   capabilities?: SettingsCapabilities;
 }
 
@@ -223,6 +232,8 @@ function SettingsShell({ onClose, onTabVisibilityChange, onSettingsChange, tabVi
       anomalySensitivity: unified.thresholds?.anomaly_sensitivity ?? prev.anomalySensitivity,
       expSetupWizardLink: unified.experimental?.exp_setup_wizard_link ?? prev.expSetupWizardLink,
       expDebuggerLink: unified.experimental?.exp_debugger_link ?? prev.expDebuggerLink,
+      enableArchitectureView: unified.experimental?.enable_architecture_view ?? prev.enableArchitectureView,
+      enableMvShareRunbook: unified.experimental?.enable_mv_share_runbook ?? prev.enableMvShareRunbook,
     }));
     if (unified.tab_visibility) setLocalVisibility((prev) => ({ ...prev, ...unified.tab_visibility }));
   }, [unified, dirty]);
@@ -308,7 +319,12 @@ function SettingsShell({ onClose, onTabVisibilityChange, onSettingsChange, tabVi
         spike_threshold_percent: settings.alertSpikePercent, daily_budget: settings.alertDailyBudget,
         workspace_budget: settings.alertWorkspaceBudget, anomaly_sensitivity: settings.anomalySensitivity,
       },
-      experimental: { exp_setup_wizard_link: settings.expSetupWizardLink, exp_debugger_link: settings.expDebuggerLink },
+      experimental: {
+        exp_setup_wizard_link: settings.expSetupWizardLink,
+        exp_debugger_link: settings.expDebuggerLink,
+        enable_architecture_view: settings.enableArchitectureView,
+        enable_mv_share_runbook: settings.enableMvShareRunbook,
+      },
     };
     if (settings.slackWebhookUrl && settings.slackWebhookUrl !== appSettings.slackWebhookUrl) {
       body.webhook = { slack_webhook_url: settings.slackWebhookUrl };
@@ -350,7 +366,12 @@ function SettingsShell({ onClose, onTabVisibilityChange, onSettingsChange, tabVi
           spike_threshold_percent: d.alertSpikePercent, daily_budget: d.alertDailyBudget,
           workspace_budget: d.alertWorkspaceBudget, anomaly_sensitivity: d.anomalySensitivity,
         },
-        experimental: { exp_setup_wizard_link: d.expSetupWizardLink, exp_debugger_link: d.expDebuggerLink },
+        experimental: {
+          exp_setup_wizard_link: d.expSetupWizardLink,
+          exp_debugger_link: d.expDebuggerLink,
+          enable_architecture_view: d.enableArchitectureView,
+          enable_mv_share_runbook: d.enableMvShareRunbook,
+        },
       }),
       signal: AbortSignal.timeout(10000),
     }).then(() => rqClient.invalidateQueries({ queryKey: ["unified-settings"] })).catch(() => {});

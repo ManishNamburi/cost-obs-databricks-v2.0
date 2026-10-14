@@ -7,15 +7,22 @@ import os
 import time
 import uuid
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any, Optional
 from urllib.parse import quote, urlparse
 
 import httpx
 from fastapi import APIRouter, BackgroundTasks, HTTPException, Request
+from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
+_MV_SHARE_RUNBOOK = (
+    Path(__file__).resolve().parents[1]
+    / "assets"
+    / "cost_obs_mv_share_publisher.py"
+)
 
 # Captured at module load time — proxy for "when this app process started",
 # which in Databricks Apps corresponds to the most recent deployment.
@@ -45,6 +52,19 @@ def _require_admin(request: Request) -> str:
     if admins and str(email).strip().lower() not in admins:
         raise HTTPException(status_code=403, detail="Admin role required")
     return email
+
+
+@router.get("/materialized-view-runbook")
+async def download_materialized_view_runbook(request: Request) -> FileResponse:
+    """Download the generated warehouse gold / Delta Share Run All notebook."""
+    _require_admin(request)
+    if not _MV_SHARE_RUNBOOK.is_file():
+        raise HTTPException(status_code=404, detail="Materialized view runbook is unavailable")
+    return FileResponse(
+        _MV_SHARE_RUNBOOK,
+        media_type="text/x-python",
+        filename="cost_obs_mv_share_publisher.py",
+    )
 
 # In-process cache for /api/settings/tables — expensive parallel SQL + owner lookups
 _tables_cache: dict | None = None
@@ -3134,6 +3154,8 @@ _APP_SETTINGS_DEFAULTS: dict = {
     "anomaly_sensitivity": "medium",
     "exp_setup_wizard_link": False,
     "exp_debugger_link": False,
+    "enable_architecture_view": True,
+    "enable_mv_share_runbook": True,
     "enable_use_case_tracking": False,
     "enable_accuracy_checks": False,
     "tab_visibility": _DEFAULT_TAB_VISIBILITY,
@@ -3298,6 +3320,8 @@ def _settings_snapshot(request: Request) -> dict:
         "experimental": {
             "exp_setup_wizard_link": bool(app.get("exp_setup_wizard_link", False)),
             "exp_debugger_link": bool(app.get("exp_debugger_link", False)),
+            "enable_architecture_view": bool(app.get("enable_architecture_view", True)),
+            "enable_mv_share_runbook": bool(app.get("enable_mv_share_runbook", True)),
         },
         "capabilities": _capabilities(request),
     }
@@ -3329,7 +3353,12 @@ async def put_unified_settings(request: Request) -> dict:
                     app_partial[k] = general[k]
         exp = body.get("experimental")
         if isinstance(exp, dict):
-            for k in ("exp_setup_wizard_link", "exp_debugger_link"):
+            for k in (
+                "exp_setup_wizard_link",
+                "exp_debugger_link",
+                "enable_architecture_view",
+                "enable_mv_share_runbook",
+            ):
                 if k in exp:
                     app_partial[k] = bool(exp[k])
         tv = body.get("tab_visibility")
