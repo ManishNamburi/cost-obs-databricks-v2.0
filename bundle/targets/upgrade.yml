@@ -1,9 +1,9 @@
 # v1 → v2 upgrade. Reuse the customer's v1 catalog, schema, and warehouse.
 # Lakebase and the v2 app are new — v1 keeps running until cutover.
+# Workspace host comes from the CLI profile (`--profile` or DATABRICKS_HOST).
 #
 #   cd bundle
 #   databricks bundle deploy -t upgrade \
-#     --var="workspace_host=https://<workspace>.cloud.databricks.com" \
 #     --var="catalog=<v1_catalog>" \
 #     --var="schema=<v1_schema>" \
 #     --var="warehouse_id=<v1_warehouse_id>"
@@ -13,7 +13,7 @@ targets:
   upgrade:
     mode: production
     workspace:
-      host: ${var.workspace_host}
+      root_path: /Workspace/Users/${workspace.current_user.userName}/.bundle/${bundle.name}/${bundle.target}
     variables:
       deployment_mode: migrate
       app_name: cost-observability-v2

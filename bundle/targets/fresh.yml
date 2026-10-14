@@ -1,9 +1,8 @@
-# Fresh customer install. Pin this target and pass catalog, schema,
-# warehouse, and workspace host — do not inherit v1 names.
+# Fresh customer install. Workspace host comes from the CLI profile
+# (`--profile` or DATABRICKS_HOST). Pass catalog, schema, and warehouse.
 #
 #   cd bundle
 #   databricks bundle deploy -t fresh \
-#     --var="workspace_host=https://<workspace>.cloud.databricks.com" \
 #     --var="catalog=<catalog>" \
 #     --var="schema=cost_obs" \
 #     --var="warehouse_id=<warehouse_id>"
@@ -13,7 +12,7 @@ targets:
   fresh:
     mode: production
     workspace:
-      host: ${var.workspace_host}
+      root_path: /Workspace/Users/${workspace.current_user.userName}/.bundle/${bundle.name}/${bundle.target}
     variables:
       deployment_mode: fresh
       app_name: cost-observability

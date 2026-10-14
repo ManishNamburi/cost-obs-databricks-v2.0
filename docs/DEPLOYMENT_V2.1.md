@@ -1,9 +1,11 @@
 # Cost Observability — v2.1 Deployment
 
 Two supported deployment paths, both driven end-to-end by the Databricks
-Asset Bundle (DAB) in `bundle/`. Pick the target at deploy time and pass
-the customer's catalog, schema, warehouse, and workspace host as `--var`
-values — do not copy example files.
+Asset Bundle (DAB) in `bundle/`. Pick the target at deploy time. Authenticate
+with a CLI profile (or `DATABRICKS_HOST`) for the customer workspace, and
+pass catalog, schema, and warehouse as `--var` values. The bundle cannot
+take the workspace URL as a variable — the CLI rejects `${var.*}` in
+`workspace.host`.
 
 | Starting state | Target | `deployment_mode` | Catalog / schema / warehouse |
 |---|---|---|---|
@@ -13,7 +15,6 @@ values — do not copy example files.
 ```bash
 cd bundle
 databricks bundle deploy -t fresh \
-  --var="workspace_host=https://<workspace>.cloud.databricks.com" \
   --var="catalog=<catalog>" \
   --var="schema=cost_obs" \
   --var="warehouse_id=<warehouse_id>"
@@ -23,7 +24,6 @@ databricks bundle run cost_obs_setup -t fresh
 ```bash
 cd bundle
 databricks bundle deploy -t upgrade \
-  --var="workspace_host=https://<workspace>.cloud.databricks.com" \
   --var="catalog=<v1_catalog>" \
   --var="schema=<v1_schema>" \
   --var="warehouse_id=<v1_warehouse_id>"
@@ -53,13 +53,14 @@ Same for both paths.
 
 ## Bundle variables
 
-For `-t fresh` and `-t upgrade`, pass catalog, schema, warehouse, and
-workspace host on the `bundle deploy` command line. Other targets may
-pin those in their YAML.
+For `-t fresh` and `-t upgrade`, pass catalog, schema, and warehouse on
+the `bundle deploy` command line. Point the CLI at the customer workspace
+with `--profile` (or `DATABRICKS_HOST`). Other targets may pin catalog
+names in their YAML.
 
 | Variable | Purpose | Example |
 |---|---|---|
-| `workspace_host` | Databricks workspace URL | `https://acme.cloud.databricks.com` |
+| `workspace_host` | Not used by `-t fresh` / `-t upgrade`. Workspace URL comes from the CLI profile. | — |
 | `catalog` | UC catalog where MVs live | `acme_catalog` |
 | `schema` | UC schema for MVs | `cost_obs` |
 | `warehouse_id` | Serverless / Pro warehouse ID | `dd43ee29fedd958d` |
@@ -81,7 +82,6 @@ runtime can resolve it. Each `bundle/targets/*.yml` already sets this.
 ```bash
 cd bundle
 databricks bundle deploy -t fresh \
-  --var="workspace_host=https://<workspace>.cloud.databricks.com" \
   --var="catalog=<catalog>" \
   --var="schema=cost_obs" \
   --var="warehouse_id=<warehouse_id>"
@@ -153,7 +153,6 @@ Steps:
 ```bash
 cd bundle
 databricks bundle deploy -t upgrade \
-  --var="workspace_host=https://<workspace>.cloud.databricks.com" \
   --var="catalog=<v1_catalog>" \
   --var="schema=<v1_schema>" \
   --var="warehouse_id=<v1_warehouse_id>"
@@ -192,8 +191,8 @@ Pass the live v1 catalog, schema, and warehouse id. Setup then:
 
 ## Overriding detection
 
-The setup job auto-detects fresh vs. migrate. To pin it, set the
-`deployment_mode` bundle variable:
+`-t fresh` and `-t upgrade` already pin the motion. On other targets the
+setup job auto-detects unless you set `deployment_mode`:
 
 ```bash
 databricks bundle deploy -t <target> --var="deployment_mode=fresh"

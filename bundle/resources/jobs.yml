@@ -82,7 +82,7 @@ resources:
               COST_OBS_CATALOG: ${var.catalog}
               COST_OBS_SCHEMA: ${var.schema}
               DEPLOYMENT_MODE: ${var.deployment_mode}
-              # GENIE_SPACE_ID gates seed_genie — without it the task no-ops.
+              # Empty GENIE_SPACE_ID: seed_genie creates (or reuses) the cost-obs space.
               GENIE_SPACE_ID: ${var.genie_space_id}
               # APP_NAME lets seed_genie resolve the app SP's client_id to grant
               # it CAN_RUN on the Genie space at runtime (binding is not in the DAB).
