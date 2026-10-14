@@ -39,6 +39,7 @@ from backend.db import (
     delta_cache_get,
     delta_cache_put,
     get_catalog_schema,
+    source_scope_unavailable,
 )
 from backend import cache_ttls
 
@@ -585,6 +586,25 @@ async def get_ai_gateway_dashboard_bundle(
         }
 
     start_date, end_date = _defaults(start_date, end_date)
+    # AI Gateway gold is daily_ai_gateway. Missing AIML grain is not a reason
+    # to mark this tab unsupported.
+    blocked = source_scope_unavailable(
+        {"daily_ai_gateway"},
+        "The selected shared source does not publish AI Gateway detail.",
+    )
+    if blocked:
+        return {
+            **blocked,
+            "configured": True,
+            "table": tbl,
+            "start_date": start_date,
+            "end_date": end_date,
+            "summary": {},
+            "by_model": [],
+            "by_route": [],
+            "top_users": [],
+            "timeseries": [],
+        }
 
     # Delta cache check
     ws_list = sorted(workspace_ids) if workspace_ids else []

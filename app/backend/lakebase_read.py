@@ -1706,6 +1706,9 @@ def _resolve_delta(delta_result: list[dict] | None, fetch_delta) -> list[dict]:
         try:
             return fetch_delta() or []
         except Exception as e:
+            from backend.db import SourceScopeUnsupportedError
+            if isinstance(e, SourceScopeUnsupportedError):
+                raise
             logger.warning("warehouse gold fallback failed: %s", e)
             return []
     return []
@@ -1764,6 +1767,9 @@ def dual_read(
         _shadow_pool.submit(_run_shadow, name, pg_sql, pg_params, keys, delta)
         return delta
     except Exception as e:
+        from backend.db import SourceScopeUnsupportedError
+        if isinstance(e, SourceScopeUnsupportedError):
+            raise
         logger.debug("dual_read error (non-fatal, serving Delta): %s", e)
         return _resolve_delta(delta_result, fetch_delta)
 
@@ -1796,6 +1802,9 @@ def dual_read_mv(
             fetch_delta=fetch_delta,
         )
     except Exception as e:
+        from backend.db import SourceScopeUnsupportedError
+        if isinstance(e, SourceScopeUnsupportedError):
+            raise
         logger.debug("dual_read_mv error (non-fatal, serving Delta): %s", e)
         return _resolve_delta(delta_result, fetch_delta)
 
@@ -1815,8 +1824,12 @@ def gold_read(
     def _fetch():
         gold = REMAINING_GOLD_SQL.get(name)
         if gold:
+            from backend.db import source_label_filter_clause
             cat, sch = get_catalog_schema()
-            sql = gold.format(catalog=cat, schema=sch, ws_filter=ws_clause)
+            sql = gold.format(
+                catalog=cat, schema=sch,
+                ws_filter=ws_clause + source_label_filter_clause(),
+            )
             return execute_query(apply_mv_overrides(sql, cat, sch), params)
         if warehouse_view_fallback() and live_sql:
             return execute_query(live_sql, params)

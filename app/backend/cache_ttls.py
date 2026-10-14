@@ -20,6 +20,7 @@ PERMISSIONS = 60       # User role lookup: 60 s — balance freshness vs warehou
 APP_NAME = 3600        # Databricks App name list: 1 h
 APP_RESOURCES = 1800   # App SDK resource list: 30 min
 THUMBNAIL = 600        # App thumbnail: 10 min
+DEPLOYMENT_METADATA = 300  # Current app deployment provenance: 5 min
 OWNER = 3600           # Table owner lookup: 1 h
 TABLES_STATUS = 900    # Settings tables status: 15 min
 HEALTH = 1800          # Warehouse health recommendations: 30 min

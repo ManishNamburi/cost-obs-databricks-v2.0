@@ -297,5 +297,30 @@ describe("SettingsPermissions — access grid", () => {
     expect(adminRow?.querySelector("button[aria-describedby='last-admin-explanation']")).toBeDisabled();
     expect(screen.getByRole("combobox", { name: "Role for viewer@databricks.com" })).toBeEnabled();
   });
+
+  it("separates Owner persona from Admin role and protects the verified deployer", async () => {
+    mockApis(SP_AUTH_STATUS, undefined, {
+      admins: ["owner@databricks.com", "backup@databricks.com"],
+      consumers: ["viewer@databricks.com"],
+      owner: {
+        email: "owner@databricks.com",
+        source: "databricks_apps_api",
+        verified: true,
+        deployment_creator: "owner@databricks.com",
+      },
+    });
+    renderPermissions();
+
+    const ownerRow = (await screen.findByText("owner@databricks.com")).closest("[data-testid='access-user-row']");
+    expect(ownerRow).toHaveTextContent("Owner");
+    expect(ownerRow).toHaveTextContent("Admin");
+    expect(screen.getByRole("combobox", { name: "Role for owner@databricks.com" })).toBeDisabled();
+    expect(ownerRow?.querySelector(".settings-user-action--remove")).toBeDisabled();
+    expect(screen.getByText("viewer@databricks.com").closest("[data-testid='access-user-row']")).toHaveTextContent("User");
+    expect(document.querySelectorAll(".settings-persona")).toHaveLength(4);
+    document.querySelectorAll(".settings-persona").forEach((persona) => {
+      expect(["Owner", "User"]).toContain(persona.textContent);
+    });
+  });
 });
 

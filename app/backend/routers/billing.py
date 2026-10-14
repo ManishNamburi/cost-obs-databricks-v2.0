@@ -11,7 +11,18 @@ from cachetools import TTLCache
 
 from fastapi import APIRouter, Query
 
-from backend.db import execute_query, execute_queries_parallel, get_catalog_schema, get_host_url, get_workspace_client, bundle_cache_key, delta_cache_get, delta_cache_put, apply_mv_overrides
+from backend.db import (
+    execute_query,
+    execute_queries_parallel,
+    get_catalog_schema,
+    get_host_url,
+    get_workspace_client,
+    bundle_cache_key,
+    delta_cache_get,
+    delta_cache_put,
+    apply_mv_overrides,
+    source_scope_unavailable,
+)
 from backend import cache_ttls
 from backend.queries import (
     ACCOUNT_INFO,
@@ -169,8 +180,37 @@ def _get_mv_query(mv_query: str, ws_filter: str = "") -> str:
     """
     from backend.db import apply_mv_overrides, source_label_filter_clause
     catalog, schema = get_catalog_schema()
-    sql = mv_query.format(catalog=catalog, schema=schema, ws_filter=ws_filter + source_label_filter_clause())
+    sql = mv_query.format(
+        catalog=catalog, schema=schema,
+        ws_filter=ws_filter + source_label_filter_clause(mv_query),
+    )
     return apply_mv_overrides(sql, catalog, schema)
+
+
+def _optional_breakdown_unavailable(
+    kind: str,
+    collection: str,
+    params: dict[str, Any],
+    exc: Exception,
+) -> dict[str, Any]:
+    """Return a safe, settled 200 contract for non-critical DBU detail."""
+    code = str(getattr(exc, "code", "QUERY_FAILED"))
+    source_unsupported = code == "SOURCE_SCOPE_UNSUPPORTED"
+    logger.warning("%s breakdown unavailable (%s): %s", kind, code, exc)
+    return {
+        "available": False,
+        "reason": "shared_scope_unsupported" if source_unsupported else "producer_failed",
+        "reason_detail": (
+            f"The selected shared source does not publish {kind} detail."
+            if source_unsupported
+            else f"{kind.capitalize()} detail is temporarily unavailable. Retry shortly."
+        ),
+        "error_code": code,
+        collection: [],
+        "total_spend": None if source_unsupported else 0,
+        "start_date": params["start_date"],
+        "end_date": params["end_date"],
+    }
 
 
 def _exec_mv(mv_template: str, params: dict, ws_filter: str = "") -> list[dict]:
@@ -568,6 +608,14 @@ async def get_pipeline_objects(
         return _dcached
     ws_clause = wf.build_ws_filter_clause(id_list=id_list)
 
+    blocked = source_scope_unavailable(
+        {"daily_job_pipeline_spend"},
+        "The selected shared source does not publish Jobs and pipeline detail.",
+    )
+    if blocked:
+        return {**blocked, "objects": [], "total_spend": 0,
+                "start_date": params["start_date"], "end_date": params["end_date"]}
+
     try:
         raw = await asyncio.to_thread(_exec_mv, MV_PIPELINE_OBJECTS, params, _mv_ws_clause(id_list))
         if not raw:
@@ -618,13 +666,7 @@ async def get_pipeline_objects(
         delta_cache_put(_dkey, "billing:pipeline-objects", _resp, ttl_seconds=cache_ttls.BUNDLE)
         return _resp
     except Exception as e:
-        return {
-            "objects": [],
-            "total_spend": 0,
-            "start_date": params["start_date"],
-            "end_date": params["end_date"],
-            "error": f"Pipeline objects not available: {str(e)}",
-        }
+        return _optional_breakdown_unavailable("pipeline", "objects", params, e)
 
 
 @router.get("/interactive-breakdown")
@@ -644,6 +686,14 @@ async def get_interactive_breakdown(
     if (_dcached := delta_cache_get(_dkey)) is not None:
         return _dcached
     ws_clause = wf.build_ws_filter_clause(id_list=id_list)
+
+    blocked = source_scope_unavailable(
+        {"daily_interactive_spend"},
+        "The selected shared source does not publish Interactive compute detail.",
+    )
+    if blocked:
+        return {**blocked, "items": [], "total_spend": 0,
+                "start_date": params["start_date"], "end_date": params["end_date"]}
 
     try:
         results = await asyncio.to_thread(_exec_mv, MV_INTERACTIVE_BREAKDOWN, params, _mv_ws_clause(id_list))
@@ -688,13 +738,7 @@ async def get_interactive_breakdown(
         delta_cache_put(_dkey, "billing:interactive-breakdown", _resp, ttl_seconds=cache_ttls.BUNDLE)
         return _resp
     except Exception as e:
-        return {
-            "items": [],
-            "total_spend": 0,
-            "start_date": params["start_date"],
-            "end_date": params["end_date"],
-            "error": f"Interactive breakdown not available: {str(e)}",
-        }
+        return _optional_breakdown_unavailable("interactive", "items", params, e)
 
 
 @router.get("/infra-costs")
@@ -710,6 +754,23 @@ async def get_infra_costs(
         "start_date": start_date or get_default_start_date(),
         "end_date": end_date or get_default_end_date(),
     }
+    blocked = source_scope_unavailable(
+        {"daily_infra_cluster_spend"},
+        "Classic infrastructure metadata is unavailable for the selected shared sources.",
+    )
+    if blocked:
+        return {
+            **blocked,
+            "cloud": "UNKNOWN",
+            "cloud_display_name": "Cloud",
+            "clusters": [],
+            "instance_families": [],
+            "total_estimated_cost": None,
+            "total_databricks_spend": 0,
+            "total_dbu_hours": 0,
+            "start_date": params["start_date"],
+            "end_date": params["end_date"],
+        }
 
     try:
         # Single query — instance families are derived in Python from cluster results
@@ -819,6 +880,19 @@ async def get_infra_costs_timeseries(
         "start_date": start_date or get_default_start_date(),
         "end_date": end_date or get_default_end_date(),
     }
+    blocked = source_scope_unavailable(
+        {"daily_infra_cluster_spend"},
+        "Infrastructure history is unavailable for the selected shared sources.",
+    )
+    if blocked:
+        return {
+            **blocked,
+            "cloud": "UNKNOWN",
+            "cloud_display_name": "Cloud",
+            "timeseries": [],
+            "start_date": params["start_date"],
+            "end_date": params["end_date"],
+        }
 
     try:
         from backend.lakebase_read import PG_INFRA_TIMESERIES, gold_read
@@ -887,6 +961,23 @@ async def get_infra_bundle(
         "end_date": end_date or get_default_end_date(),
     }
     id_list = [i.strip() for i in workspace_ids.split(",") if i.strip()] if workspace_ids else None
+    blocked = source_scope_unavailable(
+        {"daily_infra_cluster_spend"},
+        "Classic infrastructure metadata is unavailable for the selected shared sources.",
+    )
+    if blocked:
+        return {
+            **blocked,
+            "cloud": "UNKNOWN",
+            "cloud_display_name": "Cloud",
+            "clusters": [],
+            "instance_families": [],
+            "timeseries": [],
+            "total_estimated_cost": None,
+            "total_dbu_hours": 0,
+            "start_date": params["start_date"],
+            "end_date": params["end_date"],
+        }
 
     # Delta cross-worker cache
     _dkey = bundle_cache_key("billing:infra-bundle", params["start_date"], params["end_date"], id_list)
@@ -1085,6 +1176,21 @@ async def get_aws_costs(
         "start_date": start_date or get_default_start_date(),
         "end_date": end_date or get_default_end_date(),
     }
+    blocked = source_scope_unavailable(
+        {"daily_infra_cluster_spend"},
+        "Classic infrastructure metadata is unavailable for the selected shared sources.",
+    )
+    if blocked:
+        return {
+            **blocked,
+            "clusters": [],
+            "instance_families": [],
+            "total_estimated_cost": None,
+            "total_databricks_spend": 0,
+            "total_dbu_hours": 0,
+            "start_date": params["start_date"],
+            "end_date": params["end_date"],
+        }
 
     try:
         # Get detailed cluster costs
@@ -1156,6 +1262,18 @@ async def get_aws_costs_timeseries(
         "start_date": start_date or get_default_start_date(),
         "end_date": end_date or get_default_end_date(),
     }
+    blocked = source_scope_unavailable(
+        {"daily_infra_cluster_spend"},
+        "Infrastructure history is unavailable for the selected shared sources.",
+    )
+    if blocked:
+        return {
+            **blocked,
+            "timeseries": [],
+            "instance_families": [],
+            "start_date": params["start_date"],
+            "end_date": params["end_date"],
+        }
 
     try:
         from backend.lakebase_read import PG_INFRA_TIMESERIES, gold_read
@@ -2062,34 +2180,44 @@ async def get_sku_breakdown(
     if (_dcached := delta_cache_get(_dkey)) is not None:
         return _dcached
     ws_clause = wf.build_ws_filter_clause(id_list=id_list)
-    results = await asyncio.to_thread(_exec_mv, MV_SKU_BREAKDOWN, params, _mv_ws_clause(id_list))
-    if not results:
-        results = await asyncio.to_thread(
-            _live_if_allowed, _inject_ws_filter(SKU_BREAKDOWN, ws_clause), params
-        )
+    blocked = source_scope_unavailable(
+        {"daily_sku_breakdown"},
+        "The selected shared source does not publish SKU detail.",
+    )
+    if blocked:
+        return {**blocked, "skus": [], "total_spend": 0,
+                "start_date": params["start_date"], "end_date": params["end_date"]}
+    try:
+        results = await asyncio.to_thread(_exec_mv, MV_SKU_BREAKDOWN, params, _mv_ws_clause(id_list))
+        if not results:
+            results = await asyncio.to_thread(
+                _live_if_allowed, _inject_ws_filter(SKU_BREAKDOWN, ws_clause), params
+            )
 
-    skus = []
-    total_spend = 0.0
+        skus = []
+        total_spend = 0.0
 
-    for row in results:
-        sku = {
-            "product": row.get("product"),
-            "workspaces_using": int(row.get("workspaces_using") or 0),
-            "total_dbus": float(row.get("total_dbus") or 0),
-            "total_spend": float(row.get("total_spend") or 0),
-            "percentage": float(row.get("percentage") or 0),
+        for row in results:
+            sku = {
+                "product": row.get("product"),
+                "workspaces_using": int(row.get("workspaces_using") or 0),
+                "total_dbus": float(row.get("total_dbus") or 0),
+                "total_spend": float(row.get("total_spend") or 0),
+                "percentage": float(row.get("percentage") or 0),
+            }
+            skus.append(sku)
+            total_spend += sku["total_spend"]
+
+        _resp = {
+            "skus": skus,
+            "total_spend": total_spend,
+            "start_date": params["start_date"],
+            "end_date": params["end_date"],
         }
-        skus.append(sku)
-        total_spend += sku["total_spend"]
-
-    _resp = {
-        "skus": skus,
-        "total_spend": total_spend,
-        "start_date": params["start_date"],
-        "end_date": params["end_date"],
-    }
-    delta_cache_put(_dkey, "billing:sku-breakdown", _resp, ttl_seconds=cache_ttls.BUNDLE)
-    return _resp
+        delta_cache_put(_dkey, "billing:sku-breakdown", _resp, ttl_seconds=cache_ttls.BUNDLE)
+        return _resp
+    except Exception as e:
+        return _optional_breakdown_unavailable("sku", "skus", params, e)
 
 
 _group_membership_cache: dict[str, list[str]] | None = None

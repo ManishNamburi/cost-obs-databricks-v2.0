@@ -31,6 +31,36 @@ _sp_cache_ok: bool = False
 _SP_CACHE_TTL = 24 * 3600  # 24 hours on success
 _SP_CACHE_FAIL_TTL = 300   # 5 minutes on failure — retry sooner
 
+ROLE_CAPABILITIES = {
+    "admin": {
+        "summary": (
+            "View dashboards and manage shared app settings, users, data sources, "
+            "rebuilds, alerts, setup, and experimental features."
+        ),
+        "can_view_dashboards": True,
+        "can_view_settings": True,
+        "can_manage_settings": True,
+        "can_manage_users": True,
+        "can_manage_data": True,
+    },
+    "consumer": {
+        "summary": (
+            "View dashboards and basic app information. Cannot change shared app "
+            "settings or run administrative actions."
+        ),
+        "can_view_dashboards": True,
+        "can_view_settings": True,
+        "can_manage_settings": False,
+        "can_manage_users": False,
+        "can_manage_data": False,
+    },
+}
+
+
+def get_role_capabilities(role: str) -> dict[str, Any]:
+    """Return a copy of the route/UI capabilities for an app role."""
+    return dict(ROLE_CAPABILITIES.get(role, ROLE_CAPABILITIES["consumer"]))
+
 
 def _collect_sp_names(sp_iter) -> dict[str, str]:
     """Build application_id(lowercased) -> display_name from a SCIM SP iterator."""
@@ -120,10 +150,24 @@ async def _load_permissions() -> dict:
                 lakebase_query,
                 "SELECT subject_id, role FROM user_permissions WHERE subject_type = 'user'",
             )
-            admins = [r["subject_id"] for r in rows if r.get("role") == "admin"]
-            consumers = [r["subject_id"] for r in rows if r.get("role") == "consumer"]
+            owner_emails = [
+                r["subject_id"] for r in rows
+                if r.get("role") == "owner" and r.get("subject_id")
+            ]
+            admin_emails = [
+                r["subject_id"] for r in rows
+                if r.get("role") == "admin" and r.get("subject_id")
+            ]
+            consumers = [
+                r["subject_id"] for r in rows
+                if r.get("role") == "consumer" and r.get("subject_id")
+            ]
+            admins = list(dict.fromkeys([*owner_emails, *admin_emails]))
+            consumers = [e for e in consumers if e not in admins]
             if admins or consumers:
                 result = {"admins": admins, "consumers": consumers}
+                if owner_emails:
+                    result["owner"] = owner_emails[0]
                 _perm_cache = result
                 _perm_cache_at = now
                 return result
@@ -135,10 +179,24 @@ async def _load_permissions() -> dict:
         catalog, schema = get_catalog_schema()
         table = f"`{catalog}`.`{schema}`.`app_user_permissions`"
         rows = await asyncio.to_thread(execute_query, f"SELECT role, email FROM {table}", None, no_cache=True)
-        admins = [r["email"] for r in rows if r.get("role") == "admin"]
-        consumers = [r["email"] for r in rows if r.get("role") == "consumer"]
+        owner_emails = [
+            r["email"] for r in rows
+            if r.get("role") == "owner" and r.get("email")
+        ]
+        admin_emails = [
+            r["email"] for r in rows
+            if r.get("role") == "admin" and r.get("email")
+        ]
+        consumers = [
+            r["email"] for r in rows
+            if r.get("role") == "consumer" and r.get("email")
+        ]
+        admins = list(dict.fromkeys([*owner_emails, *admin_emails]))
+        consumers = [e for e in consumers if e not in admins]
         if admins or consumers:
             result = {"admins": admins, "consumers": consumers}
+            if owner_emails:
+                result["owner"] = owner_emails[0]
             _perm_cache = result
             _perm_cache_at = now
             return result
@@ -165,9 +223,10 @@ async def _load_permissions() -> dict:
 async def _get_user_role(email: str) -> str:
     """Return 'admin' or 'consumer' for the given email based on stored permissions."""
     perms = await _load_permissions()
-    if email in perms.get("admins", []):
+    needle = email.strip().lower()
+    if needle in {str(item).strip().lower() for item in perms.get("admins", [])}:
         return "admin"
-    if email in perms.get("consumers", []):
+    if needle in {str(item).strip().lower() for item in perms.get("consumers", [])}:
         return "consumer"
     # No admins configured yet (fresh deploy) — default everyone to admin
     # so the person who set up the app can immediately configure it.
@@ -184,10 +243,12 @@ async def get_current_user(request: Request):
     user_email = request.headers.get("X-Forwarded-Email", os.getenv("USER", "dev@local"))
     user_name = request.headers.get("X-Forwarded-User", user_email.split("@")[0] if "@" in user_email else user_email)
 
+    role = await _get_user_role(user_email)
     return {
         "email": user_email,
         "name": user_name,
-        "role": await _get_user_role(user_email),
+        "role": role,
+        "capabilities": get_role_capabilities(role),
     }
 
 
@@ -220,3 +281,11 @@ async def get_service_principals() -> dict[str, Any]:
         _sp_cache_at = now
         _sp_cache_ok = False
         return {"map": {}, "available": False, "error": str(e)}
+
+
+@router.get("/feedback-targets")
+async def get_feedback_targets() -> dict[str, Any]:
+    """Expose customer-safe feedback links configured at app runtime."""
+    from backend.feedback import resolve_feedback_targets
+
+    return await resolve_feedback_targets()

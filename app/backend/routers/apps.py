@@ -18,7 +18,18 @@ import httpx
 from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import JSONResponse, Response
 
-from backend.db import execute_query, execute_queries_parallel, get_workspace_client, bundle_cache_key, delta_cache_get, delta_cache_put, apply_mv_overrides, get_catalog_schema, source_label_filter_clause
+from backend.db import (
+    execute_query,
+    execute_queries_parallel,
+    get_workspace_client,
+    bundle_cache_key,
+    delta_cache_get,
+    delta_cache_put,
+    apply_mv_overrides,
+    get_catalog_schema,
+    source_label_filter_clause,
+    source_scope_unavailable,
+)
 from backend import workspace_filter as wf
 from backend import cache_ttls
 from backend.routers.billing import _check_mv_available
@@ -721,6 +732,24 @@ def _empty_bundle(params: dict, active_only: bool) -> dict[str, Any]:
     }
 
 
+def _apps_failure_payload(
+    params: dict[str, Any],
+    code: str = "APPS_BUNDLE_FAILED",
+) -> dict[str, Any]:
+    source_unsupported = code == "SOURCE_SCOPE_UNSUPPORTED"
+    return {
+        **_empty_bundle(params, False),
+        "available": False,
+        "reason": "shared_scope_unsupported" if source_unsupported else "producer_failed",
+        "reason_detail": (
+            "The selected shared source does not publish Apps cost detail."
+            if source_unsupported
+            else "Apps cost data is temporarily unavailable. Retry shortly."
+        ),
+        "error_code": code,
+    }
+
+
 def _compute_apps_bundle(params: dict, id_list: list | None, active_only: bool, dkey: str) -> None:
     """Background worker: run all Apps queries, build response, write to Delta cache."""
     import time as _time
@@ -809,7 +838,7 @@ def _compute_apps_bundle(params: dict, id_list: list | None, active_only: bool, 
                     cat, sch = get_catalog_schema()
                     mv_sql = mv_sql_tpl.format(
                         catalog=cat, schema=sch,
-                        ws_filter=_mv_ws_clause + source_label_filter_clause(),
+                        ws_filter=_mv_ws_clause + source_label_filter_clause(mv_sql_tpl),
                         **fmt_kwargs,
                     )
                     mv_sql = apply_mv_overrides(mv_sql, cat, sch)
@@ -976,8 +1005,11 @@ def _compute_apps_bundle(params: dict, id_list: list | None, active_only: bool, 
         )
     except Exception as e:
         logger.error("apps dashboard-bundle background compute failed: %s", e, exc_info=True)
+        code = str(getattr(e, "code", "APPS_BUNDLE_FAILED"))
         try:
-            delta_cache_put(dkey, _endpoint, {"_error": str(e), "status": "error"}, ttl_seconds=60)
+            delta_cache_put(
+                dkey, _endpoint, _apps_failure_payload(params, code), ttl_seconds=60
+            )
         except Exception:
             pass
     finally:
@@ -998,6 +1030,12 @@ async def get_apps_dashboard_bundle(
         "end_date": end_date or get_default_end_date(),
     }
     id_list = [i.strip() for i in workspace_ids.split(",") if i.strip()] if workspace_ids else None
+    blocked = source_scope_unavailable(
+        {"daily_apps_summary"},
+        "The selected shared source does not publish Apps cost detail.",
+    )
+    if blocked:
+        return {**_apps_failure_payload(params, "SOURCE_SCOPE_UNSUPPORTED"), **blocked, "active_only": active_only}
     _endpoint = f"apps:dashboard-bundle:{'active' if active_only else 'all'}"
     _dkey = bundle_cache_key(_endpoint, params["start_date"], params["end_date"], id_list)
 

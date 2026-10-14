@@ -1166,6 +1166,9 @@ export interface RegionScope {
 
 export interface DBSQLDashboardBundle {
   available: boolean;
+  reason?: string;
+  reason_detail?: string;
+  error_code?: string;
   message?: string;
   summary?: DBSQLQueryCostSummary;
   by_source?: QueryCostBySourceResponse;

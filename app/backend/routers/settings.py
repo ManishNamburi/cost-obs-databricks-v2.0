@@ -6,8 +6,9 @@ import logging
 import os
 import time
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, Optional
+from urllib.parse import quote, urlparse
 
 import httpx
 from fastapi import APIRouter, BackgroundTasks, HTTPException, Request
@@ -20,15 +21,28 @@ logger = logging.getLogger(__name__)
 # which in Databricks Apps corresponds to the most recent deployment.
 _SERVER_START_TIME = datetime.utcnow().strftime("%Y-%m-%d %H:%M") + " UTC"
 
+_APP_STATE_TABLES = (
+    "app_cloud_connections",
+    "app_mv_refresh_state",
+    "app_mv_sources",
+    "app_refresh_log",
+    "app_schedule_settings",
+    "app_settings",
+    "app_unified_views",
+    "app_user_permissions",
+    "app_workspace_filter",
+)
+_APP_RESPONSE_CACHE_TABLE = "app_response_cache"
+
 
 def _require_admin(request: Request) -> str:
     """Raise 403 if the requesting user is not an admin. Returns email on success."""
     email = request.headers.get("X-Forwarded-Email", os.getenv("USER", "dev@local"))
     perms = _load_user_permissions()
-    admins = perms.get("admins", [])
+    admins = [str(item).strip().lower() for item in perms.get("admins", [])]
     # Mirror user.py::_get_user_role: if no admins configured yet, everyone is
     # admin (fresh deploy). Only enforce the list once admins have been set.
-    if admins and email not in admins:
+    if admins and str(email).strip().lower() not in admins:
         raise HTTPException(status_code=403, detail="Admin role required")
     return email
 
@@ -1355,6 +1369,44 @@ async def trigger_mv_refresh(background_tasks: BackgroundTasks, lookback_days: i
     return {"status": "queued", "lookback_days": lookback_days, "force_full": force_full}
 
 
+def _safe_identity_url(host: str, object_id: str) -> str:
+    """Return the workspace SCIM identity URL, or an empty string if unsafe."""
+    parsed = urlparse((host or "").strip())
+    if (
+        parsed.scheme != "https"
+        or not parsed.netloc
+        or parsed.username
+        or parsed.password
+        or parsed.query
+        or parsed.fragment
+        or not object_id
+    ):
+        return ""
+    clean_host = f"{parsed.scheme}://{parsed.netloc}"
+    return (
+        f"{clean_host}/api/2.0/preview/scim/v2/ServicePrincipals/"
+        f"{quote(str(object_id), safe='')}"
+    )
+
+
+def _safe_resource_link(value: str) -> str:
+    """Keep HTTPS resource links while dropping credentials and unsafe queries."""
+    parsed = urlparse((value or "").strip())
+    if (
+        parsed.scheme != "https"
+        or not parsed.netloc
+        or parsed.username
+        or parsed.password
+    ):
+        return ""
+    query = parsed.query
+    if query and not (
+        query.startswith("o=") and query.removeprefix("o=").isdigit()
+    ):
+        query = ""
+    return parsed._replace(query=query, fragment="").geturl()
+
+
 @router.get("/auth-status")
 async def get_auth_status_endpoint():
     """Return current auth mode for the settings UI indicator."""
@@ -1372,10 +1424,22 @@ async def get_auth_status_endpoint():
         status["sp_user_name"] = me.user_name or ""
         status["sp_display_name"] = me.display_name or me.user_name or ""
         status["sp_client_id"] = _os.getenv("DATABRICKS_CLIENT_ID", me.user_name or "")
+        status["sp_object_id"] = str(getattr(me, "id", "") or "")
     except Exception:
         status["sp_user_name"] = ""
         status["sp_display_name"] = ""
         status["sp_client_id"] = _os.getenv("DATABRICKS_CLIENT_ID", "")
+        status["sp_object_id"] = ""
+    host = (_os.getenv("DATABRICKS_HOST") or "").rstrip("/")
+    status["sp_identity_url"] = _safe_identity_url(
+        host, status["sp_object_id"]
+    )
+    status["effective_oauth_scopes"] = (
+        ["all-apis"] if status["sp_client_id"] else []
+    )
+    status["oauth_scope_source"] = (
+        "databricks_apps_oauth_m2m" if status["sp_client_id"] else "unavailable"
+    )
     try:
         from backend.db import get_catalog_schema
         cat, sch = get_catalog_schema()
@@ -1385,6 +1449,450 @@ async def get_auth_status_endpoint():
         status["catalog"] = ""
         status["schema"] = ""
     return status
+
+
+def _resource_connection_metadata(limit: int = 100) -> list[dict[str, Any]]:
+    """Read only non-secret connection fields with a hard result bound."""
+    try:
+        rows = _load_connections()
+    except Exception as exc:
+        logger.debug("Resource connection metadata falling back to local state: %s", exc)
+        rows = _load_connections_from_file()[:limit]
+    return [
+        {
+            key: connection.get(key)
+            for key in ("id", "name", "provider", "created_at")
+            if connection.get(key) is not None
+        }
+        for connection in rows[:limit]
+    ]
+
+
+def _resource_shared_source_metadata(limit: int = 100) -> list[dict[str, Any]]:
+    """Read safe shared-source metadata from the Lakebase/config registry."""
+    try:
+        from backend.db import get_mv_sources
+
+        rows = get_mv_sources()
+    except Exception as exc:
+        logger.debug("Shared-source resource metadata is unavailable: %s", exc)
+        return []
+
+    sources = []
+    for row in rows[:limit]:
+        tables = row.get("tables")
+        if isinstance(tables, str):
+            try:
+                tables = json.loads(tables)
+            except (TypeError, json.JSONDecodeError):
+                tables = None
+        source = {
+            key: row.get(key)
+            for key in ("label", "catalog", "schema", "cloud", "added_at")
+            if row.get(key) is not None
+        }
+        if isinstance(tables, list):
+            source["tables"] = [str(table) for table in tables[:100]]
+        workspace_ids = row.get("workspace_ids")
+        if isinstance(workspace_ids, str):
+            try:
+                workspace_ids = json.loads(workspace_ids)
+            except (TypeError, json.JSONDecodeError):
+                workspace_ids = None
+        if isinstance(workspace_ids, list):
+            source["workspace_ids"] = [str(value) for value in workspace_ids[:100]]
+        sources.append(source)
+    return sources
+
+
+def _resource_unified_views(limit: int = 100) -> list[str]:
+    """Unified-view names from the Lakebase/config registry — no warehouse SHOW VIEWS."""
+    try:
+        from backend.db import get_unified_view_tables
+
+        names = get_unified_view_tables()
+        return [str(name) for name in names[:limit] if name]
+    except Exception as exc:
+        logger.debug("Unified-view resource metadata is unavailable: %s", exc)
+        return []
+
+
+_RESOURCES_SUBSECTION_TIMEOUT_SECONDS = 3.0
+_RESOURCES_ENDPOINT_DEADLINE_SECONDS = 9.0
+
+
+def _resource_subsection_status(available: bool) -> dict[str, Any]:
+    if available:
+        return {"available": True}
+    return {"available": False, "reason": "temporarily_unavailable"}
+
+
+async def _bounded_resource_call(
+    name: str,
+    awaitable,
+    fallback: Any,
+) -> tuple[Any, dict[str, Any]]:
+    try:
+        value = await asyncio.wait_for(
+            awaitable,
+            timeout=_RESOURCES_SUBSECTION_TIMEOUT_SECONDS,
+        )
+        return value, _resource_subsection_status(True)
+    except asyncio.TimeoutError:
+        logger.warning(
+            "Settings Resources subsection %s timed out after %.1fs",
+            name,
+            _RESOURCES_SUBSECTION_TIMEOUT_SECONDS,
+        )
+    except Exception as exc:
+        logger.warning("Settings Resources subsection %s failed: %s", name, exc)
+    return fallback, _resource_subsection_status(False)
+
+
+async def _bounded_resource_thread(
+    name: str,
+    operation,
+    fallback: Any,
+) -> tuple[Any, dict[str, Any]]:
+    return await _bounded_resource_call(
+        name,
+        asyncio.to_thread(operation),
+        fallback,
+    )
+
+
+async def _bounded_async_resource(
+    name: str,
+    operation,
+    fallback: Any,
+) -> tuple[Any, dict[str, Any]]:
+    """Isolate async handlers too, because some contain blocking SDK/file work."""
+    return await _bounded_resource_thread(
+        name,
+        lambda: asyncio.run(operation()),
+        fallback,
+    )
+
+
+def _resource_inventory_from_parts(
+    sources: list[dict[str, Any]],
+    connections: list[dict[str, Any]],
+    routed_views: list[str],
+    workspace_ids: list[str],
+) -> dict[str, Any]:
+    from backend import db
+    from backend.materialized_views import _MV_TABLES
+
+    process_cache_entries = len(db._query_cache)
+
+    observed_tables = None
+    if (
+        _tables_cache is not None
+        and (time.time() - _tables_cache_ts) < _TABLES_CACHE_TTL
+    ):
+        observed_tables = {
+            "checked_at": datetime.fromtimestamp(
+                _tables_cache_ts, timezone.utc
+            ).isoformat(),
+            "available": sum(
+                1 for table in _tables_cache.get("tables", [])
+                if table.get("exists") is True
+            ),
+            "total": len(_tables_cache.get("tables", [])),
+        }
+
+    return {
+        "inventory": {
+            "aggregates": {
+                "count": len(_MV_TABLES),
+                "names": list(_MV_TABLES),
+            },
+            "state": {
+                "count": len(_APP_STATE_TABLES),
+                "names": list(_APP_STATE_TABLES),
+            },
+            "cache": {
+                "count": 2,
+                "names": ["in-process query cache", _APP_RESPONSE_CACHE_TABLE],
+                "process_entries": process_cache_entries,
+                "process_max_entries": db._CACHE_MAX_SIZE,
+                "process_ttl_seconds": db._CACHE_TTL,
+            },
+            "unified_views": {
+                "count": len(routed_views),
+                "names": list(routed_views),
+            },
+            "observed_tables": observed_tables,
+        },
+        "shared_data_sources": sources,
+        "cloud_cost_connections": connections,
+        "workspace_filter": {
+            "mode": "restricted" if workspace_ids else "all_workspaces",
+            "count": len(workspace_ids),
+        },
+    }
+
+
+def _resource_inventory_snapshot() -> dict[str, Any]:
+    """Collect bounded resource metadata without scanning managed data."""
+    from backend.workspace_filter import get_configured_workspace_ids
+
+    return _resource_inventory_from_parts(
+        _resource_shared_source_metadata(),
+        _resource_connection_metadata(),
+        _resource_unified_views(),
+        get_configured_workspace_ids(),
+    )
+
+
+async def _resource_inventory_snapshot_bounded() -> tuple[
+    dict[str, Any],
+    dict[str, dict[str, Any]],
+]:
+    """Run independent SQL/config inventory probes concurrently and fail open."""
+    from backend.workspace_filter import get_configured_workspace_ids
+
+    (
+        (sources, sources_status),
+        (connections, connections_status),
+        (views, views_status),
+        (workspace_ids, workspace_status),
+    ) = await asyncio.gather(
+        _bounded_resource_thread(
+            "shared_data_sources",
+            _resource_shared_source_metadata,
+            [],
+        ),
+        _bounded_resource_thread(
+            "cloud_cost_connections",
+            _resource_connection_metadata,
+            [],
+        ),
+        _bounded_resource_thread(
+            "unified_views",
+            _resource_unified_views,
+            [],
+        ),
+        _bounded_resource_thread(
+            "workspace_filter",
+            get_configured_workspace_ids,
+            [],
+        ),
+    )
+    return (
+        _resource_inventory_from_parts(
+            sources,
+            connections,
+            views,
+            workspace_ids,
+        ),
+        {
+            "shared_data_sources": sources_status,
+            "cloud_cost_connections": connections_status,
+            "unified_views": views_status,
+            "workspace_filter": workspace_status,
+        },
+    )
+
+
+def _refresh_log_status_for_resources() -> dict | None:
+    """Best-effort refresh-log status from Lakebase, then the local file."""
+    log_data = None
+    try:
+        from backend.db import lb_get_config
+
+        cfg = lb_get_config("refresh_log")
+        if isinstance(cfg, dict) and cfg:
+            log_data = cfg
+    except Exception as exc:
+        logger.debug("Resource refresh-log Lakebase read failed: %s", exc)
+    if log_data is None:
+        log_path = os.path.join(
+            os.path.dirname(__file__), "..", "..", ".settings", "mv_refresh_log.json"
+        )
+        try:
+            with open(log_path) as handle:
+                loaded = json.load(handle)
+            if isinstance(loaded, dict) and loaded:
+                log_data = loaded
+        except (FileNotFoundError, json.JSONDecodeError, OSError):
+            return None
+    if not isinstance(log_data, dict):
+        return None
+    last_refresh = log_data.get("last_refresh_utc")
+    hours_since = None
+    if last_refresh:
+        try:
+            last = datetime.strptime(last_refresh, "%Y-%m-%dT%H:%M:%SZ").replace(
+                tzinfo=timezone.utc
+            )
+            hours_since = round((datetime.now(timezone.utc) - last).total_seconds() / 3600, 1)
+        except (TypeError, ValueError):
+            hours_since = None
+    result: dict[str, Any] = {
+        "last_refresh_utc": last_refresh,
+        "last_attempt_utc": log_data.get("last_attempt_utc"),
+        "hours_since_refresh": hours_since,
+        "stale": hours_since is None or hours_since > 26,
+        "status": log_data.get("status"),
+        "refresh_history": log_data.get("refresh_history", []),
+    }
+    return result
+
+
+def _resource_refresh_snapshot() -> dict[str, Any]:
+    return {
+        "schedule": load_schedule_settings(),
+        "status": _refresh_log_status_for_resources(),
+    }
+
+
+def _deployment_metadata_from_process_start() -> dict[str, Any]:
+    from backend.routers import health as health_mod
+
+    return {
+        "deployed_at": getattr(health_mod, "_PROCESS_STARTED_AT", None),
+        "deployer": None,
+        "commit_sha": None,
+        "available": True,
+        "source": "process_start_approximate_restart",
+    }
+
+
+@router.get("/resources")
+async def get_resources() -> dict[str, Any]:
+    """Return partial safe metadata within a hard Settings deadline."""
+    from backend.routers.health import deployment_metadata
+
+    empty_config = {
+        "storage_location": {},
+        "warehouse": None,
+        "version": {},
+    }
+    empty_links = {
+        "app_name": os.getenv("DATABRICKS_APP_NAME", ""),
+        "app_url": "",
+        "app_page_url": "",
+        "source_code_url": "",
+    }
+    empty_refresh = {
+        "schedule": {
+            "enabled": False,
+            "frequency": "nightly",
+            "hour_utc": 5,
+            "lookback_days": 180,
+        },
+        "status": None,
+    }
+    calls = asyncio.gather(
+        _bounded_async_resource("config", get_app_config, empty_config),
+        _bounded_async_resource(
+            "service_principal",
+            get_auth_status_endpoint,
+            {},
+        ),
+        _bounded_async_resource("app_links", get_app_links, empty_links),
+        _bounded_async_resource(
+            "deployment",
+            deployment_metadata,
+            _deployment_metadata_from_process_start(),
+        ),
+        _resource_inventory_snapshot_bounded(),
+        _bounded_resource_thread(
+            "refresh",
+            _resource_refresh_snapshot,
+            empty_refresh,
+        ),
+    )
+    try:
+        (
+            (config, config_status),
+            (auth_status, auth_status_status),
+            (links, links_status),
+            (deployment, deployment_status),
+            (inventory, inventory_statuses),
+            (refresh, refresh_status),
+        ) = await asyncio.wait_for(
+            calls,
+            timeout=_RESOURCES_ENDPOINT_DEADLINE_SECONDS,
+        )
+    except asyncio.TimeoutError:
+        logger.error(
+            "Settings Resources exceeded its %.1fs hard deadline",
+            _RESOURCES_ENDPOINT_DEADLINE_SECONDS,
+        )
+        config, config_status = empty_config, _resource_subsection_status(False)
+        auth_status, auth_status_status = {}, _resource_subsection_status(False)
+        links, links_status = empty_links, _resource_subsection_status(False)
+        deployment = _deployment_metadata_from_process_start()
+        deployment_status = _resource_subsection_status(False)
+        inventory = _resource_inventory_from_parts([], [], [], [])
+        inventory_statuses = {
+            name: _resource_subsection_status(False)
+            for name in (
+                "shared_data_sources",
+                "cloud_cost_connections",
+                "unified_views",
+                "workspace_filter",
+            )
+        }
+        refresh, refresh_status = empty_refresh, _resource_subsection_status(False)
+
+    storage = config.get("storage_location") or {}
+    return {
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "subsections": {
+            "config": config_status,
+            "service_principal": auth_status_status,
+            "app_links": links_status,
+            "deployment": deployment_status,
+            **inventory_statuses,
+            "refresh": refresh_status,
+        },
+        "app": {
+            "name": links.get("app_name") or os.getenv("DATABRICKS_APP_NAME", ""),
+            "url": _safe_resource_link(links.get("app_url") or ""),
+            "page_url": _safe_resource_link(links.get("app_page_url") or ""),
+            "source_code_url": _safe_resource_link(
+                links.get("source_code_url") or ""
+            ),
+            "deployment": deployment,
+            "version": {
+                key: (config.get("version") or {}).get(key)
+                for key in ("commit_sha", "branch", "commit_date")
+                if (config.get("version") or {}).get(key)
+            },
+        },
+        "service_principal": {
+            "display_name": auth_status.get("sp_display_name") or "",
+            "client_id": auth_status.get("sp_client_id") or "",
+            "object_id": auth_status.get("sp_object_id") or "",
+            "user_name": auth_status.get("sp_user_name") or "",
+            "identity_url": auth_status.get("sp_identity_url") or "",
+            "execution_identity": "service_principal",
+            "execution_explanation": (
+                "Dashboard queries and managed-data maintenance run as this "
+                "Databricks Apps service principal, not as an interactive user."
+            ),
+            "effective_oauth_scopes": auth_status.get(
+                "effective_oauth_scopes", []
+            ),
+            "oauth_scope_source": auth_status.get("oauth_scope_source"),
+        },
+        "warehouse": config.get("warehouse"),
+        "storage": {
+            "catalog": storage.get("catalog") or "",
+            "schema": storage.get("schema") or "",
+            "permissions_table": (
+                f"{storage.get('catalog')}.{storage.get('schema')}."
+                "app_user_permissions"
+                if storage.get("catalog") and storage.get("schema")
+                else ""
+            ),
+        },
+        "refresh": refresh,
+        **inventory,
+    }
 
 
 @router.get("/billing-access")
@@ -1862,6 +2370,61 @@ def _ensure_permissions_table() -> None:
     )
 
 
+def _permissions_from_role_rows(rows: list[dict], email_key: str) -> dict:
+    """Build admins/consumers/owner from stored role rows. Owner is also an admin."""
+    owner_emails = [
+        str(row.get(email_key) or "").strip()
+        for row in rows
+        if row.get("role") == "owner" and str(row.get(email_key) or "").strip()
+    ]
+    admin_emails = [
+        str(row.get(email_key) or "").strip()
+        for row in rows
+        if row.get("role") == "admin" and str(row.get(email_key) or "").strip()
+    ]
+    consumer_emails = [
+        str(row.get(email_key) or "").strip()
+        for row in rows
+        if row.get("role") == "consumer" and str(row.get(email_key) or "").strip()
+    ]
+    admins = list(dict.fromkeys([*owner_emails, *admin_emails]))
+    consumers = [email for email in dict.fromkeys(consumer_emails) if email not in admins]
+    result: dict[str, Any] = {"admins": admins, "consumers": consumers}
+    if owner_emails:
+        result["owner"] = owner_emails[0]
+    return result
+
+
+def _normalized_permission_rows(
+    admins: list[str],
+    consumers: list[str],
+    *,
+    owner: str | None = None,
+) -> tuple[list[tuple[str, str]], list[str], list[str], str]:
+    normalized_admins = list(dict.fromkeys(
+        email.strip().lower() for email in admins if email.strip()
+    ))
+    if not normalized_admins:
+        raise ValueError("At least one administrator is required.")
+    normalized_consumers = [
+        email
+        for email in dict.fromkeys(
+            item.strip().lower() for item in consumers if item.strip()
+        )
+        if email not in normalized_admins
+    ]
+    normalized_owner = (owner or "").strip().lower()
+    if normalized_owner not in normalized_admins:
+        normalized_owner = normalized_admins[0]
+    rows = [("owner", normalized_owner)]
+    rows.extend(
+        ("admin", email) for email in normalized_admins
+        if email != normalized_owner
+    )
+    rows.extend(("consumer", email) for email in normalized_consumers)
+    return rows, normalized_admins, normalized_consumers, normalized_owner
+
+
 def _load_user_permissions() -> dict:
     """Load permissions — Lakebase first, then UC Delta table, then local file."""
     # Primary: Lakebase user_permissions
@@ -1871,10 +2434,9 @@ def _load_user_permissions() -> dict:
             rows = lakebase_query(
                 "SELECT subject_id, role FROM user_permissions WHERE subject_type = 'user'"
             )
-            admins = [r["subject_id"] for r in rows if r.get("role") == "admin"]
-            consumers = [r["subject_id"] for r in rows if r.get("role") == "consumer"]
-            if admins or consumers:
-                return {"admins": admins, "consumers": consumers}
+            perms = _permissions_from_role_rows(rows or [], "subject_id")
+            if perms["admins"] or perms["consumers"]:
+                return perms
     except Exception as e:
         logger.debug("Lakebase permissions read failed, will try UC: %s", e)
     try:
@@ -1882,11 +2444,14 @@ def _load_user_permissions() -> dict:
         _ensure_permissions_table()
         table = _permissions_table()
         rows = execute_query(f"SELECT role, email FROM {table}", None, no_cache=True)
-        admins = [r["email"] for r in rows if r.get("role") == "admin"]
-        consumers = [r["email"] for r in rows if r.get("role") == "consumer"]
-        if admins or consumers:
-            logger.info(f"Loaded permissions from Delta table ({len(admins)} admins, {len(consumers)} consumers)")
-            return {"admins": admins, "consumers": consumers}
+        perms = _permissions_from_role_rows(rows or [], "email")
+        if perms["admins"] or perms["consumers"]:
+            logger.info(
+                "Loaded permissions from Delta table (%d admins, %d consumers)",
+                len(perms["admins"]),
+                len(perms["consumers"]),
+            )
+            return perms
     except Exception as e:
         if _table_missing(e):
             logger.debug("Could not load permissions from Delta table (not yet created): %s", e)
@@ -1898,20 +2463,34 @@ def _load_user_permissions() -> dict:
         if os.path.exists(USER_PERMISSIONS_FILE):
             with open(USER_PERMISSIONS_FILE) as f:
                 data = json.load(f)
-            return {"admins": data.get("admins", []), "consumers": data.get("consumers", [])}
+            result = {
+                "admins": data.get("admins", []),
+                "consumers": data.get("consumers", []),
+            }
+            if data.get("owner"):
+                result["owner"] = data["owner"]
+            return result
     except (json.JSONDecodeError, IOError):
         pass
     return {"admins": [], "consumers": []}
 
 
-def _save_user_permissions_to_table(admins: list[str], consumers: list[str]) -> None:
+def _save_user_permissions_to_table(
+    admins: list[str],
+    consumers: list[str],
+    *,
+    owner: str | None = None,
+) -> None:
     """Write permissions (replaces all user rows). Lakebase primary; UC dual-write.
 
     Security-sensitive: if NEITHER store succeeds we raise, so an admin change
-    is never silently lost.
+    is never silently lost. Owner is persisted as role='owner' when supplied
+    (or as the first admin when omitted).
     """
     from backend.db import execute_write, clear_query_cache, lakebase_available, lakebase_execute
-    pairs = [("admin", e) for e in admins] + [("consumer", e) for e in consumers]
+    pairs, normalized_admins, normalized_consumers, _normalized_owner = (
+        _normalized_permission_rows(admins, consumers, owner=owner)
+    )
 
     # Primary: Lakebase user_permissions (subject_id = email, subject_type = 'user')
     lb_ok = False
@@ -1947,7 +2526,51 @@ def _save_user_permissions_to_table(admins: list[str], consumers: list[str]) -> 
         else:
             raise
     clear_query_cache("perms")
-    logger.info(f"Saved user permissions ({len(admins)} admins, {len(consumers)} consumers; lakebase={lb_ok})")
+    logger.info(
+        "Saved user permissions (%d admins, %d consumers; lakebase=%s)",
+        len(normalized_admins),
+        len(normalized_consumers),
+        lb_ok,
+    )
+
+
+async def _permission_owner(perms: dict[str, Any]) -> dict[str, Any]:
+    """Resolve the UI persona owner without changing the authorization policy."""
+    admins = [
+        str(email).strip().lower()
+        for email in perms.get("admins", [])
+        if str(email).strip()
+    ]
+    durable_owner = str(perms.get("owner") or "").strip().lower()
+    deployment: dict[str, Any] = {}
+    try:
+        from backend.routers.health import deployment_metadata
+
+        deployment = await deployment_metadata()
+    except Exception as exc:
+        logger.debug("Deployment creator unavailable for permission personas: %s", exc)
+    deployment_creator = str(deployment.get("deployer") or "").strip().lower()
+
+    if deployment_creator and deployment_creator in admins:
+        return {
+            "email": deployment_creator,
+            "source": deployment.get("source") or "deployment_metadata",
+            "verified": deployment.get("source") == "databricks_apps_api",
+            "deployment_creator": deployment_creator,
+        }
+    if durable_owner and durable_owner in admins:
+        return {
+            "email": durable_owner,
+            "source": "permission_store",
+            "verified": False,
+            "deployment_creator": deployment_creator or None,
+        }
+    return {
+        "email": admins[0] if admins else None,
+        "source": "first_configured_admin" if admins else "unavailable",
+        "verified": False,
+        "deployment_creator": deployment_creator or None,
+    }
 
 
 @router.get("/user-permissions")
@@ -1960,8 +2583,23 @@ async def get_user_permissions(request: Request) -> dict:
         perms["table_location"] = f"{catalog}.{schema}.app_user_permissions"
     except Exception:
         perms["table_location"] = None
-    # Tell the UI who the current user is so it can show implicit admin status
-    perms["current_user"] = request.headers.get("X-Forwarded-Email", os.getenv("USER", "dev@local"))
+    current_user = request.headers.get("X-Forwarded-Email", os.getenv("USER", "dev@local"))
+    current_role = (
+        "admin"
+        if str(current_user).strip().lower() in {
+            str(email).strip().lower() for email in perms.get("admins", [])
+        }
+        else "consumer"
+    )
+    from backend.routers.user import ROLE_CAPABILITIES
+
+    perms["current_user"] = current_user
+    perms["current_role"] = current_role
+    perms["role_capabilities"] = {
+        role: dict(capabilities)
+        for role, capabilities in ROLE_CAPABILITIES.items()
+    }
+    perms["owner"] = await _permission_owner(perms)
     return perms
 
 
@@ -1969,6 +2607,34 @@ async def get_user_permissions(request: Request) -> dict:
 async def save_user_permissions(request: Request, data: UserPermissionsModel) -> dict:
     """Save permissions to Delta table."""
     _require_admin(request)
+    normalized_admins = list(dict.fromkeys(
+        email.strip() for email in data.admins if email.strip()
+    ))
+    normalized_consumers = list(dict.fromkeys(
+        email.strip() for email in data.consumers
+        if email.strip() and email.strip() not in normalized_admins
+    ))
+    if not normalized_admins:
+        raise HTTPException(
+            status_code=400,
+            detail="At least one explicit admin must remain once permissions are configured.",
+        )
+    try:
+        current_permissions = _load_user_permissions()
+    except Exception as exc:
+        raise HTTPException(
+            status_code=503,
+            detail="Permission state is temporarily unavailable",
+        ) from exc
+    owner = await _permission_owner(current_permissions)
+    owner_email = str(owner.get("email") or "").strip().lower()
+    if owner_email and owner_email not in {
+        email.lower() for email in normalized_admins
+    }:
+        raise HTTPException(
+            status_code=400,
+            detail="The Owner must remain an administrator.",
+        )
     try:
         from backend.db import get_catalog_schema
         catalog, schema = get_catalog_schema()
@@ -1985,8 +2651,16 @@ async def save_user_permissions(request: Request, data: UserPermissionsModel) ->
             detail="App storage location not configured — complete the Setup Wizard before managing permissions.",
         )
     try:
-        _save_user_permissions_to_table(data.admins, data.consumers)
-        logger.info(f"Permissions saved to Delta table ({len(data.admins)} admins, {len(data.consumers)} consumers)")
+        _save_user_permissions_to_table(
+            normalized_admins,
+            normalized_consumers,
+            owner=owner_email or None,
+        )
+        logger.info(
+            "Permissions saved to Delta table (%s admins, %s consumers)",
+            len(normalized_admins),
+            len(normalized_consumers),
+        )
         return {"status": "ok"}
     except Exception as e:
         logger.error(f"Failed to save permissions: {e}")

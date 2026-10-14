@@ -72,8 +72,91 @@ async function fetchJson<T>(url: string): Promise<T> {
 // means "all sources" (no filter). Appended to every data URL so the backend can
 // narrow MV reads by source; changing it invalidates queries to force a refetch.
 let _activeSourceLabels: string[] = [];
+let _activeSourceRequestLabels: string[] = [];
+let _activeSourceWorkspaceIds: string[] = [];
+let _activeSourceTables: string[] | null = null;
 export function setActiveSourceLabels(labels: string[]): void {
-  _activeSourceLabels = labels ?? [];
+  _activeSourceLabels = Array.from(new Set(labels ?? [])).filter(Boolean).sort();
+  _activeSourceRequestLabels = [..._activeSourceLabels];
+  _activeSourceWorkspaceIds = [];
+  _activeSourceTables = null;
+}
+
+export function getActiveSourceLabels(): string[] {
+  return [..._activeSourceLabels];
+}
+
+export function setActiveSourceRouting(
+  requestLabels: string[],
+  workspaceIds: string[],
+): void {
+  _activeSourceRequestLabels = Array.from(new Set(requestLabels ?? [])).filter(Boolean).sort();
+  _activeSourceWorkspaceIds = Array.from(new Set(workspaceIds ?? [])).filter(Boolean).sort();
+}
+
+export function getActiveSourceRouting(): {
+  requestLabels: string[];
+  workspaceIds: string[];
+  tables: string[] | null;
+} {
+  return {
+    requestLabels: [..._activeSourceRequestLabels],
+    workspaceIds: [..._activeSourceWorkspaceIds],
+    tables: _activeSourceTables ? [..._activeSourceTables] : null,
+  };
+}
+
+export function setActiveSourceTables(tables: string[] | null): void {
+  _activeSourceTables = tables
+    ? Array.from(new Set(tables)).filter(Boolean).sort()
+    : null;
+}
+
+export function getActiveSourceTables(): string[] | null {
+  return _activeSourceTables ? [..._activeSourceTables] : null;
+}
+
+export function getActiveSourceScopeKey(): string {
+  return _activeSourceLabels.join("\u0001");
+}
+
+export function getWorkspaceScopeKey(workspaceIds?: string[]): string {
+  return workspaceIds?.length ? [...workspaceIds].sort().join(",") : "";
+}
+
+/**
+ * Add the dashboard's active source/workspace scope to an API URL. Source labels
+ * remain repeated query parameters so labels containing commas round-trip.
+ */
+export function buildFilteredUrl(
+  endpoint: string,
+  params: URLSearchParams = new URLSearchParams(),
+  workspaceIds?: string[],
+): string {
+  const scoped = new URLSearchParams(params);
+  for (const label of _activeSourceRequestLabels) {
+    scoped.append("source_labels", label);
+  }
+  const explicitWorkspaceIds = (
+    getWorkspaceScopeKey(workspaceIds)
+    || scoped.get("workspace_ids")
+    || ""
+  )
+    .split(",")
+    .filter(Boolean);
+  const sourceWorkspaceSet = new Set(_activeSourceWorkspaceIds);
+  const effectiveWorkspaceIds = sourceWorkspaceSet.size === 0
+    ? explicitWorkspaceIds
+    : explicitWorkspaceIds.length === 0
+      ? [...sourceWorkspaceSet]
+      : explicitWorkspaceIds.filter((id) => sourceWorkspaceSet.has(id));
+  if (sourceWorkspaceSet.size > 0 && effectiveWorkspaceIds.length === 0) {
+    scoped.set("workspace_ids", "source-scope-no-overlap");
+  } else if (effectiveWorkspaceIds.length > 0) {
+    scoped.set("workspace_ids", effectiveWorkspaceIds.sort().join(","));
+  }
+  const queryString = scoped.toString();
+  return queryString ? `${endpoint}?${queryString}` : endpoint;
 }
 
 function buildUrl(endpoint: string, dateRange?: DateRange): string {
@@ -84,19 +167,14 @@ function buildUrl(endpoint: string, dateRange?: DateRange): string {
   if (dateRange?.endDate) {
     params.set("end_date", dateRange.endDate);
   }
-  // One param per label (not comma-joined) so a label containing a comma round-trips.
-  for (const lbl of _activeSourceLabels) {
-    if (lbl) params.append("source_labels", lbl);
-  }
-  const queryString = params.toString();
-  return queryString ? `${endpoint}?${queryString}` : endpoint;
+  return buildFilteredUrl(endpoint, params);
 }
 
 function buildUrlWithWs(endpoint: string, dateRange?: DateRange, workspaceIds?: string[]): string {
-  const base = buildUrl(endpoint, dateRange);
-  const wsKey = workspaceIds?.length ? workspaceIds.join(",") : null;
-  if (!wsKey) return base;
-  return `${base}${base.includes("?") ? "&" : "?"}workspace_ids=${encodeURIComponent(wsKey)}`;
+  const params = new URLSearchParams();
+  if (dateRange?.startDate) params.set("start_date", dateRange.startDate);
+  if (dateRange?.endDate) params.set("end_date", dateRange.endDate);
+  return buildFilteredUrl(endpoint, params, workspaceIds);
 }
 
 export function useBillingSummary(dateRange?: DateRange) {
@@ -265,6 +343,9 @@ export interface UserSpend {
 }
 
 export interface UsersGroupsBundle {
+  available?: boolean;
+  reason?: string;
+  reason_detail?: string;
   summary: {
     user_count: number;
     workspace_count: number;

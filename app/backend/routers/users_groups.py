@@ -12,7 +12,16 @@ import httpx
 from fastapi import APIRouter, Query, Request
 from pydantic import BaseModel
 
-from backend.db import execute_query, execute_queries_parallel, get_workspace_client, bundle_cache_key, delta_cache_get, delta_cache_put
+from backend.db import (
+    execute_query,
+    execute_queries_parallel,
+    get_workspace_client,
+    bundle_cache_key,
+    delta_cache_get,
+    delta_cache_put,
+    get_local_source_label,
+    selected_source_labels,
+)
 from backend import workspace_filter as wf
 from backend.email_service import send_alert_email
 
@@ -21,6 +30,57 @@ router = APIRouter()
 
 SETTINGS_DIR = os.path.join(os.path.dirname(__file__), "..", "..", ".settings")
 USER_REPORTS_FILE = os.path.join(SETTINGS_DIR, "user_reports.json")
+
+
+def _users_failure_payload(
+    start_date: str,
+    end_date: str,
+    error_code: str = "USERS_BUNDLE_FAILED",
+) -> dict[str, Any]:
+    return {
+        "available": False,
+        "reason": "producer_failed",
+        "reason_detail": "User summary data is temporarily unavailable. Retry shortly.",
+        "error_code": error_code,
+        "summary": {},
+        "top_users": [],
+        "timeseries": [],
+        "timeseries_users": [],
+        "by_workspace": [],
+        "user_growth": [],
+        "start_date": start_date,
+        "end_date": end_date,
+    }
+
+
+def _identity_scope(
+    labels: list[str],
+    workspace_ids: list[str] | None = None,
+) -> tuple[bool, dict[str, Any]]:
+    """Describe which identity detail is safe for the selected source scope."""
+    del workspace_ids
+    if not labels:
+        return True, {"available": True}
+    local_label = get_local_source_label()
+    if local_label not in labels:
+        return False, {
+            "available": False,
+            "reason": "identity_detail_unavailable_for_shared_sources",
+            "reason_detail": (
+                "User and group identities are not included in shared cost sources."
+            ),
+        }
+    shared_labels = [label for label in labels if label != local_label]
+    if shared_labels:
+        return True, {
+            "available": True,
+            "reason": "shared_identity_detail_omitted",
+            "reason_detail": (
+                "Identity detail includes only the selected local source; shared "
+                "sources do not expose user or group identities."
+            ),
+        }
+    return True, {"available": True}
 
 # ── SQL Queries ───────────────────────────────────────────────────────────────
 
@@ -442,6 +502,9 @@ async def get_users_groups_bundle(
 
     params = {"start_date": start_date, "end_date": end_date}
     id_list = [i.strip() for i in workspace_ids.split(",") if i.strip()] if workspace_ids else None
+    allowed, scope = _identity_scope(selected_source_labels(), id_list)
+    if not allowed:
+        return {**_users_failure_payload(start_date, end_date), **scope}
     _dkey = bundle_cache_key("users:dashboard-bundle", start_date, end_date, id_list)
     if (_dcached := delta_cache_get(_dkey)) is not None:
         return _dcached
@@ -479,17 +542,7 @@ async def get_users_groups_bundle(
         results = await asyncio.to_thread(execute_queries_parallel, queries, timeout=90.0)
     except Exception as e:
         logger.error("users dashboard-bundle failed: %s", e)
-        return {
-            "summary": {},
-            "top_users": [],
-            "timeseries": [],
-            "timeseries_users": [],
-            "by_workspace": [],
-            "user_growth": [],
-            "start_date": start_date,
-            "end_date": end_date,
-            "error": str(e),
-        }
+        return {**_users_failure_payload(start_date, end_date, str(getattr(e, "code", "USERS_BUNDLE_FAILED"))), "error": str(e)}
 
     # Summary
     summary_rows = results.get("summary") or []
@@ -592,6 +645,7 @@ async def get_users_groups_bundle(
         "user_growth": user_growth,
         "start_date": start_date,
         "end_date": end_date,
+        **scope,
     }
     delta_cache_put(_dkey, "users:dashboard-bundle", _resp, ttl_seconds=600 if id_list else 1800)
     return _resp

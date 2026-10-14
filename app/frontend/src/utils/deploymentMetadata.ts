@@ -4,6 +4,7 @@ export interface DeploymentMetadata {
   commit_sha: string | null;
   available: boolean;
   source: string;
+  verified?: boolean;
 }
 
 function parsedDate(value: string | null): Date | null {

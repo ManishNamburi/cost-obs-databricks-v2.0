@@ -45,7 +45,7 @@ interface ExportDialogProps {
   onRetryFailed?: () => Promise<void>;
 }
 
-const sectionToTab: Record<keyof ExportSections, keyof TabVisibility | null> = {
+export const SECTION_TO_TAB: Record<keyof ExportSections, keyof TabVisibility | null> = {
   summary: "dbu",
   products: "dbu",
   workspaces: "dbu",
@@ -62,6 +62,18 @@ const sectionToTab: Record<keyof ExportSections, keyof TabVisibility | null> = {
   awsCosts: "infra",
   optimize: "optimizer",
 };
+
+export function getRequiredExportTabs(
+  sections: ExportSections,
+  visibility: TabVisibility,
+): Array<keyof TabVisibility> {
+  return Array.from(new Set(
+    (Object.keys(SECTION_TO_TAB) as Array<keyof ExportSections>)
+      .filter((section) => sections[section])
+      .map((section) => SECTION_TO_TAB[section])
+      .filter((tab): tab is keyof TabVisibility => Boolean(tab && visibility[tab])),
+  ));
+}
 
 const tabLabels: Record<keyof TabVisibility, string> = {
   dbu: "$DBU Spend",
@@ -117,8 +129,8 @@ export function ExportDialog({
   const prepared = dataPrepared ?? !onPrepare;
   const visibleSections = useMemo(() => {
     const result: ExportSections = {} as ExportSections;
-    for (const key of Object.keys(sectionToTab) as Array<keyof ExportSections>) {
-      const tab = sectionToTab[key];
+    for (const key of Object.keys(SECTION_TO_TAB) as Array<keyof ExportSections>) {
+      const tab = SECTION_TO_TAB[key];
       result[key] = tab === null || tabVisibility[tab];
     }
     return result;
@@ -168,11 +180,11 @@ export function ExportDialog({
 
   const selectNone = () => {
     const none: ExportSections = {} as ExportSections;
-    for (const key of Object.keys(sectionToTab) as Array<keyof ExportSections>) none[key] = false;
+    for (const key of Object.keys(SECTION_TO_TAB) as Array<keyof ExportSections>) none[key] = false;
     updateSections(none);
   };
 
-  const visibleKeys = (Object.keys(sectionToTab) as Array<keyof ExportSections>).filter((k) => visibleSections[k]);
+  const visibleKeys = (Object.keys(SECTION_TO_TAB) as Array<keyof ExportSections>).filter((k) => visibleSections[k]);
   const selectedCount = visibleKeys.filter((k) => sections[k]).length;
   const failedSelectedTabs = Array.from(new Set(
     requiredTabs.filter((tab) => Boolean(dataErrors[tab])),
@@ -427,7 +439,7 @@ export function ExportDialog({
               {visibleKeys.map((key) => {
                 const { label, description } = sectionLabels[key];
                 const checked = sections[key];
-                const tab = sectionToTab[key];
+                const tab = SECTION_TO_TAB[key];
                 const sectionError = tab ? dataErrors[tab] : undefined;
 
                 return (

@@ -1,6 +1,10 @@
 import type { ReactNode } from "react";
 import { APP_VERSION, C, FONT_MONO, FONT_SANS } from "@/theme";
 import { cn } from "@/lib/utils";
+import {
+  getActiveSourceLabels,
+  getActiveSourceTables,
+} from "@/hooks/useBillingData";
 
 export function CostObsMark({ className, whiteOrbit = false }: { className?: string; whiteOrbit?: boolean }) {
   const orbit = whiteOrbit ? C.white : C.ink;
@@ -51,7 +55,7 @@ export function PageHero({
   action,
   dateRange,
   workspaceScope,
-  sourceLabels = [],
+  sourceLabels,
 }: {
   icon: ReactNode;
   title: string;
@@ -61,6 +65,7 @@ export function PageHero({
   workspaceScope?: ReactNode;
   sourceLabels?: string[];
 }) {
+  const activeSourceLabels = sourceLabels ?? getActiveSourceLabels();
   const formatDate = (value?: string) => value
     ? new Date(`${value}T00:00:00`).toLocaleDateString("en-US", {
         month: "short",
@@ -102,11 +107,11 @@ export function PageHero({
             {workspaceScope}
           </Chip>
         )}
-        {sourceLabels.length > 0 && (
+        {activeSourceLabels.length > 0 && (
           <Chip kind="filter" label="Data source(s)" wrapperClassName="min-w-[112px]">
-            {sourceLabels.length === 1
-              ? sourceLabels[0]
-              : `${sourceLabels.length} sources`}
+            {activeSourceLabels.length === 1
+              ? activeSourceLabels[0]
+              : `${activeSourceLabels.length} sources`}
           </Chip>
         )}
         {dateLabel && (
@@ -202,7 +207,14 @@ export function SourceCapabilityNotice({
   requiredAggregates?: string[];
   onRetry?: () => void;
 }) {
-  const aggregateLabel = `Required shared ${requiredAggregates.length === 1 ? "aggregate" : "aggregates"}`;
+  const sourceLabels = getActiveSourceLabels();
+  const activeSourceTables = getActiveSourceTables();
+  const displayedAggregates = sourceLabels.length > 0 && activeSourceTables
+    ? requiredAggregates.filter((aggregate) => !activeSourceTables.includes(aggregate))
+    : requiredAggregates;
+  const aggregateLabel = sourceLabels.length > 0 && activeSourceTables
+    ? "Missing from selected source"
+    : `Required shared ${displayedAggregates.length === 1 ? "aggregate" : "aggregates"}`;
 
   return (
     <div className="rounded-lg border border-gray-200 bg-gray-50 p-4 text-gray-700">
@@ -213,10 +225,10 @@ export function SourceCapabilityNotice({
         <div>
           <p className="text-sm font-semibold">{title}</p>
           <p className="mt-1 text-sm text-gray-500">{description}</p>
-          {requiredAggregates.length > 0 && (
+          {displayedAggregates.length > 0 && (
             <p className="mt-2 text-xs text-gray-500">
               {aggregateLabel}:{" "}
-              {requiredAggregates.map((aggregate, index) => (
+              {displayedAggregates.map((aggregate, index) => (
                 <span key={aggregate}>
                   {index > 0 && ", "}
                   <code className="rounded bg-gray-200 px-1 py-0.5 text-[11px] text-gray-700">{aggregate}</code>

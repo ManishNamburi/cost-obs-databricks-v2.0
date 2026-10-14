@@ -284,8 +284,8 @@ export function DataTablesSection({ localSettings, updateSetting, caps }: Common
       <Group label="Storage location">
         <Row first label="Catalog & schema" helper="Fixed after setup. Redeploy or re-run setup to change."
           control={<MonoChip>{loc?.catalog && loc?.schema ? `${loc.catalog}.${loc.schema}` : "—"}</MonoChip>} />
-        <Row label="Workspace filter" helper="Set at deploy time via COST_OBS_WORKSPACES. Redeploy to change."
-          control={<span style={{ fontSize: 12, color: T.textSecondary }}>All workspaces</span>} />
+        <Row label="Workspace filter" helper="The workspace pool is shown on Resources. Change it from setup, not by redeploying."
+          control={<span style={{ fontSize: 12, color: T.textSecondary }}>See Resources</span>} />
         {appLinks?.setup_job_url && (
           <Row label="Setup job" helper="One-time onboarding and Lakebase bootstrap. Nightly gold refreshes run in the app, not this job."
             control={<LinkButton href={appLinks.setup_job_url}><span className="inline-flex items-center gap-1">Open setup job {ext}</span></LinkButton>} />

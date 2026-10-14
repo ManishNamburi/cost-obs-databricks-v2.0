@@ -8,6 +8,11 @@ import { Group, Row, SecondaryButton, LinkButton, MonoChip, Callout, useToast, T
 import { organizationForEmail } from "@/utils/domainIcons";
 import { InfoPopover } from "@/components/ui/InfoPopover";
 import "./settings.css";
+import type {
+  AuthStatusPayload,
+  UserPermissionsPayload,
+  UserRole,
+} from "./resourceTypes";
 
 const EMAIL_RE = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
 const USER_GRID_STYLE = {
@@ -18,31 +23,8 @@ const ROLE_OPTIONS = [
   { value: "admin", label: "Admin" },
 ] as const;
 
-type UserRole = "admin" | "consumer";
-
-interface UserPermissions {
-  admins: string[];
-  consumers: string[];
-  table_location?: string | null;
-  current_user?: string | null;
-  current_role?: UserRole;
-}
-
-interface AuthStatus {
-  user_token_active: boolean;
-  identity: "user_oauth" | "service_principal";
-  locked_to_sp: boolean;
-  has_sql_scope: boolean | null;
-  auth_mode: "unknown" | "user" | "sp";
-  token_present: boolean;
-  token_scopes: string[];
-  user_email: string | null;
-  override_mode: "sp" | "auto" | null;
-  sp_client_id: string;
-  sp_display_name: string;
-  catalog: string;
-  schema: string;
-}
+type UserPermissions = UserPermissionsPayload;
+type AuthStatus = AuthStatusPayload;
 
 function OrganizationIdentity({ email }: { email: string }) {
   const organization = organizationForEmail(email);
@@ -328,10 +310,16 @@ export function SettingsPermissions() {
   const [newUserEmail, setNewUserEmail] = useState("");
   const [newUserRole, setNewUserRole] = useState<UserRole>("consumer");
 
+  const ownerEmail = permissions?.owner?.email?.toLowerCase() ?? null;
   const allUsers = [
     ...(permissions?.admins ?? []).map(e => ({ email: e, role: "admin" as const })),
     ...(permissions?.consumers ?? []).map(e => ({ email: e, role: "consumer" as const })),
-  ].sort((a, b) => a.email.localeCompare(b.email));
+  ].sort((a, b) => {
+    const aOwner = a.email.toLowerCase() === ownerEmail;
+    const bOwner = b.email.toLowerCase() === ownerEmail;
+    if (aOwner !== bOwner) return aOwner ? -1 : 1;
+    return a.email.localeCompare(b.email);
+  });
   const explicitAdminCount = permissions?.admins?.length ?? 0;
   const currentRole: UserRole | undefined = permissions?.current_role
     ?? (permissions?.current_user && (permissions.admins ?? []).some((email) => email.toLowerCase() === permissions.current_user!.toLowerCase())
@@ -510,24 +498,28 @@ GRANT SELECT ON SCHEMA \`${cat}\`.\`${sch}\` TO \`${spName}\`;`;
         ) : (
           allUsers.map(({ email, role }, i) => {
             const isLastAdmin = role === "admin" && explicitAdminCount === 1;
+            const isOwner = email.toLowerCase() === ownerEmail;
+            const protectedAdmin = isLastAdmin || isOwner;
             return (
               <div data-testid="access-user-row" className="settings-access-user-grid" key={email} style={{ ...USER_GRID_STYLE, minHeight: 52, padding: "9px 16px", borderTop: i === 0 ? "none" : `1px solid ${T.borderRow}` }}>
                 <span title={email} style={{ fontSize: 13, color: T.text, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{email}</span>
                 <OrganizationIdentity email={email} />
-                <span className="settings-persona settings-persona--member">User</span>
+                <span className={`settings-persona settings-persona--${isOwner ? "owner" : "member"}`}>
+                  {isOwner ? "Owner" : "User"}
+                </span>
                 <RoleMenuSelect
                   value={role}
                   onChange={(nextRole) => changeRole(email, nextRole)}
-                  disabled={saveMutation.isPending || isLastAdmin}
+                  disabled={saveMutation.isPending || protectedAdmin}
                   ariaLabel={`Role for ${email}`}
                 />
                 <span className="settings-user-action-cell">
                   <button
                     type="button"
                     onClick={() => removeUser(email)}
-                    disabled={saveMutation.isPending || isLastAdmin}
+                    disabled={saveMutation.isPending || protectedAdmin}
                     aria-describedby={isLastAdmin ? "last-admin-explanation" : undefined}
-                    title={isLastAdmin ? "Add another admin before removing this administrator." : undefined}
+                    title={isOwner ? "The Owner must remain an administrator." : isLastAdmin ? "Add another admin before removing this administrator." : undefined}
                     className="settings-user-action settings-user-action--remove"
                   >
                     Remove
@@ -570,8 +562,8 @@ GRANT SELECT ON SCHEMA \`${cat}\`.\`${sch}\` TO \`${spName}\`;`;
             label="Permission role storage details"
             text={
               permissions?.table_location
-                ? `Roles are stored in ${permissions.table_location} and persist across deploys.`
-                : "Roles persist in the app's managed permissions table."
+                ? `Roles are stored in ${permissions.table_location} and persist across deploys. Owner is sourced from the current Databricks Apps deployment creator.`
+                : "Roles persist in the app's managed permissions table. Owner is sourced from the current Databricks Apps deployment creator."
             }
           />
         </div>

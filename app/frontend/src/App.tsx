@@ -1,5 +1,5 @@
-import React, { useState, useEffect, useMemo, useRef, lazy, Suspense } from "react";
-import { QueryClient, QueryClientProvider, useQuery, useQueryClient } from "@tanstack/react-query";
+import React, { useState, useEffect, useMemo, useRef, useCallback, lazy, Suspense } from "react";
+import { QueryClient, QueryClientProvider, useIsFetching, useQuery, useQueryClient } from "@tanstack/react-query";
 import { TabRefreshRegion } from "@/components/TabRefreshRegion";
 import { SetupWizard } from "@/components/SetupWizard";
 import { SummaryCards } from "@/components/SummaryCards";
@@ -12,7 +12,7 @@ import { WorkspaceFilter } from "@/components/WorkspaceFilter";
 import { SourceLabelFilter } from "@/components/SourceLabelFilter";
 import { TopProgressBar } from "@/components/TopProgressBar";
 import { SKUBreakdown } from "@/components/SKUBreakdown";
-import { ExportDialog, type ExportSections, type ExportFormat } from "@/components/ExportDialog";
+import { ExportDialog, getRequiredExportTabs, type ExportSections, type ExportFormat } from "@/components/ExportDialog";
 import { SettingsDialog, loadTabVisibility, loadAppSettings, type TabVisibility, type AppSettings } from "@/components/SettingsDialog";
 import { PricingProvider, usePricing } from "@/context/PricingContext";
 import { SpNameMapContext } from "@/utils/identity";
@@ -26,7 +26,11 @@ import {
   WarehouseGuidanceBanner,
   WarehouseHealthCheckBanner,
 } from "@/components/WarehouseGuidanceBanner";
-import type { WarehouseHealth } from "@/utils/warehouseGuidance";
+import {
+  fetchWarehouseHealth,
+  warehouseHealthPollInterval,
+  type WarehouseHealth,
+} from "@/utils/warehouseGuidance";
 import { Bot, Check, Copy, Settings } from "lucide-react";
 
 // Retry a dynamic import once on failure (handles cold-start chunk load errors)
@@ -501,6 +505,8 @@ function Dashboard() {
     return first ?? "dbu";
   });
   const [showExportDialog, setShowExportDialog] = useState(false);
+  const [requiredExportTabs, setRequiredExportTabs] = useState<ViewTab[]>([]);
+  const [exportPrepared, setExportPrepared] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const [showConversational, setShowConversational] = useState(false);
   const [selectedWorkspaceIds, setSelectedWorkspaceIds] = useState<string[]>([]);
@@ -679,8 +685,13 @@ function Dashboard() {
     refetch: retryWarehouseHealthCheck,
   } = useQuery<WarehouseHealth>({
     queryKey: ["health", "sql-warehouse"],
-    queryFn: () => fetch("/api/health/sql-warehouse").then(r => r.ok ? r.json().catch(() => ({ status: "warm" })) : { status: "warm" }).catch(() => ({ status: "warm" })),
-    refetchInterval: (query) => (query.state.data?.status === "warming_up") ? 5000 : 15000,
+    queryFn: fetchWarehouseHealth,
+    retry: 2,
+    retryDelay: (attempt) => Math.min(1000 * 2 ** attempt, 4000),
+    refetchInterval: (query) => warehouseHealthPollInterval(
+      query.state.data?.status,
+      query.state.status === "error",
+    ),
     staleTime: 0,
   });
   const warehouseReady = warehouseStatus?.status === "warm";
@@ -940,6 +951,29 @@ function Dashboard() {
     end_date: infraCostsTimeseries.end_date,
   } : undefined, [infraCostsTimeseries]);
 
+  const fetchingCount = useIsFetching();
+
+  const prepareExportData = useCallback((sections: ExportSections) => {
+    const tabs = getRequiredExportTabs(sections, tabVisibility) as ViewTab[];
+    setExportPrepared(false);
+    setRequiredExportTabs(tabs);
+    void rqClient.invalidateQueries({ refetchType: "active" });
+  }, [rqClient, tabVisibility]);
+
+  const retryFailedExportData = useCallback(async () => {
+    setExportPrepared(false);
+    await rqClient.refetchQueries({
+      type: "active",
+      predicate: (query) => query.state.status === "error",
+    });
+  }, [rqClient]);
+
+  const closeExportDialog = useCallback(() => {
+    setShowExportDialog(false);
+    setRequiredExportTabs([]);
+    setExportPrepared(false);
+  }, []);
+
   const handleExport = (sections: ExportSections, format: ExportFormat) => {
     const workspaceFilter = _wsIds?.length
       ? { ids: _wsIds, names: _wsIds.map((id: string) => workspaceNameMap[id] || id) }
@@ -1032,6 +1066,17 @@ function Dashboard() {
     tagging: taggingLoading,
     "users-groups": usersGroupsLoading,
   };
+
+  const exportDataLoading = showExportDialog
+    && requiredExportTabs.length > 0
+    && !exportPrepared
+    && (fetchingCount > 0 || requiredExportTabs.some((tab) => Boolean(tabLoadingFlags[tab])));
+
+  useEffect(() => {
+    if (!showExportDialog || requiredExportTabs.length === 0) return;
+    if (exportDataLoading) return;
+    setExportPrepared(true);
+  }, [exportDataLoading, requiredExportTabs.length, showExportDialog]);
 
   if (setupCheckPending) {
     return (
@@ -1487,12 +1532,18 @@ function Dashboard() {
 
       <ExportDialog
         isOpen={showExportDialog}
-        onClose={() => setShowExportDialog(false)}
+        onClose={closeExportDialog}
         onExport={handleExport}
         tabVisibility={{
           ...tabVisibility,
           "use-cases": tabVisibility["use-cases"] && appSettings.enableUseCaseTracking,
         }}
+        dataLoading={exportDataLoading}
+        dataPrepared={exportPrepared}
+        requiredTabs={requiredExportTabs}
+        tabLoading={tabLoadingFlags}
+        onPrepare={prepareExportData}
+        onRetryFailed={retryFailedExportData}
       />
 
       <SettingsDialog

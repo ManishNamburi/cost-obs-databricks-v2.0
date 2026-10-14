@@ -15,7 +15,12 @@ from typing import Any
 
 from fastapi import APIRouter
 
-from backend.db import execute_query, execute_queries_parallel
+from backend.db import (
+    execute_query,
+    execute_queries_parallel,
+    local_source_is_selected,
+    selected_sources_publish,
+)
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -32,6 +37,24 @@ _OVERSIZED_MAX_QUEUE_MS = 15000     # 15 s avg queue — warehouse is not under 
 _OVERSIZED_MAX_MEDIAN_DURATION_S = 180  # 3 min execution — queries don't need Large
 _OVERSIZED_MIN_QUERIES = 5
 _LARGE_SIZES = ("Large", "X-Large", "2X-Large", "3X-Large", "4X-Large")
+
+
+def _shared_scope_unavailable() -> dict[str, Any]:
+    return {
+        "available": False,
+        "reason": "shared_scope_unsupported",
+        "reason_detail": "Optimize recommendations use local warehouse metadata.",
+        "error_code": "SOURCE_SCOPE_UNSUPPORTED",
+        "error": "Optimize recommendations use local warehouse metadata.",
+        "recommendations": [],
+        "warehouses_analyzed": 0,
+    }
+
+
+def _warehouse_scope_blocked() -> bool:
+    return (not local_source_is_selected()) and not selected_sources_publish(
+        {"daily_warehouse_idle"}
+    )
 
 _SQL_IDLE = f"""
 WITH current_warehouses AS (
@@ -276,6 +299,9 @@ def _run_health_queries() -> dict[str, Any]:
 async def get_warehouse_health() -> dict[str, Any]:
     """Return rightsizing recommendations for all warehouses."""
     global _health_cache, _health_cache_ts
+
+    if _warehouse_scope_blocked():
+        return _shared_scope_unavailable()
 
     if _health_cache is not None and (time.time() - _health_cache_ts) < _HEALTH_CACHE_TTL:
         return _health_cache
@@ -551,6 +577,14 @@ async def get_warehouse_idle_time(
 
     sd = start_date or get_default_start_date()
     ed = end_date or get_default_end_date()
+    if _warehouse_scope_blocked():
+        return {
+            **_shared_scope_unavailable(),
+            "warehouses": [],
+            "serverless_detected": False,
+            "start_date": sd,
+            "end_date": ed,
+        }
     id_list = [i.strip() for i in workspace_ids.split(",") if i.strip()] if workspace_ids else None
     cache_key = f"{sd}:{ed}:{','.join(id_list) if id_list else ''}"
 

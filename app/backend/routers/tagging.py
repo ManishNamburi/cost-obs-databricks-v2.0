@@ -8,7 +8,18 @@ from typing import Any
 
 from fastapi import APIRouter, Query
 
-from backend.db import execute_query, execute_queries_parallel, bundle_cache_key, delta_cache_get, delta_cache_put, get_workspace_client, apply_mv_overrides, get_catalog_schema
+from backend.db import (
+    execute_query,
+    execute_queries_parallel,
+    bundle_cache_key,
+    delta_cache_get,
+    delta_cache_put,
+    get_workspace_client,
+    apply_mv_overrides,
+    get_catalog_schema,
+    local_source_is_selected,
+    source_scope_unavailable,
+)
 from backend import workspace_filter as wf
 from backend import cache_ttls
 from backend.materialized_views import MV_TAG_STATS, MV_TAGGING_SUMMARY
@@ -1008,6 +1019,19 @@ async def get_top_objects_by_tag(
         "tag_value": tag_value,
     }
 
+    if not local_source_is_selected():
+        return {
+            "available": False,
+            "reason": "shared_scope_unsupported",
+            "reason_detail": "The selected shared source does not publish tag object detail.",
+            "error_code": "SOURCE_SCOPE_UNSUPPORTED",
+            "objects": [],
+            "tag_key": tag_key,
+            "tag_value": tag_value,
+            "start_date": params["start_date"],
+            "end_date": params["end_date"],
+        }
+
     results = await asyncio.to_thread(execute_query, TOP_OBJECTS_BY_TAG, params)
 
     objects = []
@@ -1158,6 +1182,27 @@ async def get_tagging_dashboard_bundle(
         "end_date": end_date or get_default_end_date(),
     }
     id_list = [i.strip() for i in workspace_ids.split(",") if i.strip()] if workspace_ids else None
+    blocked = source_scope_unavailable(
+        {"daily_tag_summary", "daily_tag_coverage"},
+        "The selected shared source does not publish the Tagging aggregates.",
+    )
+    if blocked:
+        empty_untagged = {"items": [], "total_spend": 0, "count": 0}
+        return {
+            **blocked,
+            "summary": {},
+            "untagged": {
+                "clusters": empty_untagged,
+                "jobs": empty_untagged,
+                "pipelines": empty_untagged,
+                "warehouses": empty_untagged,
+                "endpoints": empty_untagged,
+            },
+            "cost_by_tag": {"tags": [], "total_spend": 0},
+            "timeseries": {"timeseries": [], "categories": ["Tagged", "Untagged"]},
+            "start_date": params["start_date"],
+            "end_date": params["end_date"],
+        }
     _dkey = bundle_cache_key("tagging:dashboard-bundle", params["start_date"], params["end_date"], id_list)
     if (_dcached := delta_cache_get(_dkey)) is not None:
         return _dcached
@@ -1294,7 +1339,17 @@ async def get_tagging_dashboard_bundle(
     except Exception as e:
         logger.error("tagging dashboard-bundle failed: %s", e)
         empty_untagged = {"items": [], "total_spend": 0, "count": 0}
+        code = str(getattr(e, "code", "TAGGING_BUNDLE_FAILED"))
+        source_unsupported = code == "SOURCE_SCOPE_UNSUPPORTED"
         return {
+            "available": False,
+            "reason": "shared_scope_unsupported" if source_unsupported else "producer_failed",
+            "reason_detail": (
+                "The selected shared source does not publish the Tagging aggregates."
+                if source_unsupported
+                else "Tag coverage data is temporarily unavailable. Retry shortly."
+            ),
+            "error_code": code,
             "summary": {"tagged_spend": 0, "untagged_spend": 0, "total_spend": 0, "tagged_percentage": 0, "untagged_percentage": 0},
             "untagged": {"clusters": empty_untagged, "jobs": empty_untagged, "pipelines": empty_untagged, "warehouses": empty_untagged, "endpoints": empty_untagged},
             "cost_by_tag": {"tags": [], "total_spend": 0},

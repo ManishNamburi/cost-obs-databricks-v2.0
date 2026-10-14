@@ -1,31 +1,312 @@
 """Health check endpoints with actual service verification."""
 
 import asyncio
+import json
 import logging
+import os
+import re
+import threading
 import time
+from concurrent.futures import Future, ThreadPoolExecutor
+from pathlib import Path
 from typing import Any
 
+from cachetools import TTLCache
 from fastapi import APIRouter, BackgroundTasks
+
+from backend import cache_ttls
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
-_PROCESS_STARTED_AT = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+_deployment_metadata_cache: TTLCache[str, dict[str, Any]] = TTLCache(
+    maxsize=8,
+    ttl=cache_ttls.DEPLOYMENT_METADATA,
+)
+_deployment_metadata_lock = threading.Lock()
+_deployment_metadata_inflight: dict[str, Future[dict[str, Any]]] = {}
+_deployment_metadata_executor = ThreadPoolExecutor(
+    max_workers=1,
+    thread_name_prefix="deployment-metadata",
+)
+_DEPLOYMENT_METADATA_TIMEOUT_SECONDS = 5.0
+_APP_NAME_PATTERN = re.compile(r"^[a-z0-9][a-z0-9-]{1,29}$")
+_COMMITTED_DEPLOYMENT_METADATA_PATH = (
+    Path(__file__).resolve().parents[3] / "release-metadata.json"
+)
+
+
+def _metadata_text(value: Any) -> str | None:
+    text = str(value or "").strip()
+    return text or None
+
+
+def _metadata_attr(value: Any, name: str) -> Any:
+    if isinstance(value, dict):
+        return value.get(name)
+    return getattr(value, name, None)
+
+
+def _deployment_metadata_from_app(app: Any) -> dict[str, Any]:
+    """Select the current app deployment's public provenance fields."""
+    deployment = _metadata_attr(app, "active_deployment")
+    git_source = (
+        _metadata_attr(deployment, "git_source")
+        or _metadata_attr(app, "git_source")
+        or _metadata_attr(app, "default_git_source")
+        or _metadata_attr(deployment, "git_repository")
+        or _metadata_attr(app, "git_repository")
+    )
+    deployed_at = _metadata_text(
+        _metadata_attr(deployment, "create_time")
+        or _metadata_attr(deployment, "update_time")
+        or _metadata_attr(app, "update_time")
+        or _metadata_attr(app, "create_time")
+    )
+    deployer = _metadata_text(
+        _metadata_attr(deployment, "creator")
+        or _metadata_attr(deployment, "updater")
+        or _metadata_attr(app, "updater")
+        or _metadata_attr(app, "creator")
+    )
+    commit_sha = _metadata_text(
+        _metadata_attr(git_source, "resolved_commit")
+        or _metadata_attr(git_source, "commit")
+    )
+    return {
+        "deployed_at": deployed_at,
+        "deployer": deployer,
+        "commit_sha": commit_sha,
+        "available": any((deployed_at, deployer, commit_sha)),
+        "source": "databricks_apps_api",
+    }
+
+
+def _deployment_metadata_from_deployment(deployment: Any) -> dict[str, Any]:
+    git_source = (
+        _metadata_attr(deployment, "git_source")
+        or _metadata_attr(deployment, "git_repository")
+    )
+    deployed_at = _metadata_text(
+        _metadata_attr(deployment, "create_time")
+        or _metadata_attr(deployment, "update_time")
+    )
+    deployer = _metadata_text(
+        _metadata_attr(deployment, "creator")
+        or _metadata_attr(deployment, "updater")
+    )
+    commit_sha = _metadata_text(
+        _metadata_attr(git_source, "resolved_commit")
+        or _metadata_attr(git_source, "commit")
+    )
+    return {
+        "deployed_at": deployed_at,
+        "deployer": deployer,
+        "commit_sha": commit_sha,
+        "available": any((deployed_at, deployer, commit_sha)),
+        "source": "databricks_apps_api",
+    }
+
+
+def _deployment_metadata_from_env() -> dict[str, Any]:
+    """Read optional release-provided values without inventing build timestamps."""
+    deployed_at = _metadata_text(os.getenv("COST_OBS_DEPLOYED_AT"))
+    deployer = _metadata_text(os.getenv("COST_OBS_DEPLOYER"))
+    commit_sha = _metadata_text(os.getenv("COST_OBS_COMMIT_SHA"))
+    return {
+        "deployed_at": deployed_at,
+        "deployer": deployer,
+        "commit_sha": commit_sha,
+        "available": any((deployed_at, deployer, commit_sha)),
+        "source": "release_environment",
+    }
+
+
+def _deployment_metadata_from_databricks_app_env() -> dict[str, Any]:
+    """v2 runtime env names — extra merge inputs, never a fabricated deploy time."""
+    deployed_at = _metadata_text(os.getenv("DATABRICKS_APP_DEPLOYED_AT"))
+    deployer = _metadata_text(os.getenv("DATABRICKS_APP_DEPLOYER"))
+    commit_sha = _metadata_text(
+        os.getenv("DATABRICKS_APP_COMMIT") or os.getenv("GIT_COMMIT")
+    )
+    return {
+        "deployed_at": deployed_at,
+        "deployer": deployer,
+        "commit_sha": commit_sha,
+        "available": any((deployed_at, deployer, commit_sha)),
+        "source": "databricks_app_environment",
+    }
+
+
+def _deployment_metadata_from_committed_file() -> dict[str, Any]:
+    """Read a customer-safe, optional metadata file shipped with the source tree."""
+    payload: dict[str, Any] = {}
+    try:
+        raw = json.loads(_COMMITTED_DEPLOYMENT_METADATA_PATH.read_text())
+        if isinstance(raw, dict):
+            payload = raw
+    except (OSError, ValueError, TypeError, json.JSONDecodeError):
+        pass
+    deployed_at = _metadata_text(payload.get("deployed_at"))
+    deployer = _metadata_text(payload.get("deployer"))
+    commit_sha = _metadata_text(payload.get("commit_sha"))
+    return {
+        "deployed_at": deployed_at,
+        "deployer": deployer,
+        "commit_sha": commit_sha,
+        "available": any((deployed_at, deployer, commit_sha)),
+        "source": "committed_release_metadata",
+    }
+
+
+def _deployment_metadata_from_process_start() -> dict[str, Any]:
+    """Last-resort availability only — never invent a deploy timestamp."""
+    return {
+        "deployed_at": None,
+        "deployer": None,
+        "commit_sha": None,
+        "available": False,
+        "source": "process_start_approximate_restart",
+    }
+
+
+def _merge_deployment_metadata(*sources: dict[str, Any]) -> dict[str, Any]:
+    fields = ("deployed_at", "deployer", "commit_sha")
+    merged = {field: None for field in fields}
+    used_sources: list[str] = []
+    for source in sources:
+        source_used = False
+        for field in fields:
+            if merged[field] is None:
+                value = _metadata_text(source.get(field))
+                if value is not None:
+                    merged[field] = value
+                    source_used = True
+        if source_used:
+            source_name = _metadata_text(source.get("source"))
+            if source_name and source_name not in used_sources:
+                used_sources.append(source_name)
+    merged["available"] = any(merged[field] for field in fields)
+    merged["source"] = "+".join(used_sources) if used_sources else "unavailable"
+    merged["verified"] = merged["source"] == "databricks_apps_api"
+    return merged
+
+
+def _runtime_app_name() -> str | None:
+    app_name = _metadata_text(os.getenv("DATABRICKS_APP_NAME"))
+    return app_name if app_name and _APP_NAME_PATTERN.fullmatch(app_name) else None
+
+
+def _resolve_app_name_from_runtime(apps_api: Any) -> str | None:
+    """Resolve this app from the runtime SP when a legacy runtime omits its name."""
+    client_id = _metadata_text(os.getenv("DATABRICKS_CLIENT_ID"))
+    if not client_id:
+        return None
+    matches: list[str] = []
+    for app in apps_api.list():
+        app_client_ids = {
+            _metadata_text(getattr(app, "service_principal_client_id", None)),
+            _metadata_text(getattr(app, "service_principal_name", None)),
+        }
+        name = _metadata_text(getattr(app, "name", None))
+        if (
+            client_id in app_client_ids
+            and name
+            and _APP_NAME_PATTERN.fullmatch(name)
+        ):
+            matches.append(name)
+    return matches[0] if len(matches) == 1 else None
+
+
+def _fetch_deployment_metadata(app_name: str | None) -> dict[str, Any]:
+    from backend.db import get_workspace_client
+
+    apps_api = get_workspace_client().apps
+    resolved_name = app_name or _resolve_app_name_from_runtime(apps_api)
+    if not resolved_name:
+        return _deployment_metadata_from_app(None)
+    app_detail = apps_api.get(resolved_name)
+    active_deployment = getattr(app_detail, "active_deployment", None)
+    deployment_id = _metadata_text(
+        getattr(active_deployment, "deployment_id", None)
+    )
+    if deployment_id and callable(getattr(apps_api, "get_deployment", None)):
+        try:
+            deployment = apps_api.get_deployment(resolved_name, deployment_id)
+            metadata = _deployment_metadata_from_deployment(deployment)
+            if metadata["available"]:
+                return metadata
+        except Exception as exc:
+            logger.debug(
+                "Active deployment detail unavailable for app %s: %s",
+                resolved_name,
+                exc,
+            )
+    return _deployment_metadata_from_app(app_detail)
+
+
+def _finish_deployment_metadata_fetch(
+    cache_key: str,
+    future: Future[dict[str, Any]],
+) -> None:
+    try:
+        metadata = future.result()
+    except Exception as exc:
+        logger.debug("Current app deployment metadata is unavailable: %s", exc)
+        metadata = None
+    with _deployment_metadata_lock:
+        if metadata and metadata["available"]:
+            _deployment_metadata_cache[cache_key] = dict(metadata)
+        if _deployment_metadata_inflight.get(cache_key) is future:
+            _deployment_metadata_inflight.pop(cache_key, None)
 
 
 @router.get("/deployment")
 async def deployment_metadata() -> dict[str, Any]:
-    """Best-effort deploy badge for the account rail. Process start if Apps API is absent."""
-    import os
+    """Return authoritative metadata for the deployment currently serving the app."""
+    app_name = _runtime_app_name()
+    runtime_identity = _metadata_text(os.getenv("DATABRICKS_CLIENT_ID"))
+    cache_key = app_name or runtime_identity
+    api_metadata: dict[str, Any] | None = None
+    if cache_key:
+        started_fetch = False
+        future: Future[dict[str, Any]] | None = None
+        with _deployment_metadata_lock:
+            cached = _deployment_metadata_cache.get(cache_key)
+            future = _deployment_metadata_inflight.get(cache_key)
+            if cached is not None:
+                api_metadata = dict(cached)
+            elif future is None:
+                future = _deployment_metadata_executor.submit(
+                    _fetch_deployment_metadata,
+                    app_name,
+                )
+                _deployment_metadata_inflight[cache_key] = future
+                started_fetch = True
+        if started_fetch and future is not None:
+            future.add_done_callback(
+                lambda completed, key=cache_key: _finish_deployment_metadata_fetch(
+                    key,
+                    completed,
+                )
+            )
+        if api_metadata is None and future is not None:
+            try:
+                api_metadata = await asyncio.wait_for(
+                    asyncio.shield(asyncio.wrap_future(future)),
+                    timeout=_DEPLOYMENT_METADATA_TIMEOUT_SECONDS,
+                )
+            except Exception as exc:
+                logger.debug("Current app deployment metadata is unavailable: %s", exc)
 
-    return {
-        "deployed_at": os.getenv("DATABRICKS_APP_DEPLOYED_AT") or _PROCESS_STARTED_AT,
-        "deployer": os.getenv("DATABRICKS_APP_DEPLOYER"),
-        "commit_sha": os.getenv("GIT_COMMIT") or os.getenv("DATABRICKS_APP_COMMIT"),
-        "available": True,
-        "source": "process_start" if not os.getenv("DATABRICKS_APP_DEPLOYED_AT") else "env",
-    }
+    return _merge_deployment_metadata(
+        api_metadata or _deployment_metadata_from_app(None),
+        _deployment_metadata_from_env(),
+        _deployment_metadata_from_databricks_app_env(),
+        _deployment_metadata_from_committed_file(),
+        _deployment_metadata_from_process_start(),
+    )
 
 
 @router.get("/ping")
@@ -93,55 +374,97 @@ async def get_sql_warehouse_status() -> dict[str, Any]:
     query warm the warehouse on demand.
 
     Returns:
-        status: "warm" | "warming_up"
+        status: "warm" | "warming_up" | "unavailable"
         state:  raw warehouse state string (or None if API unavailable)
         latency_ms: always None (kept for response-shape compatibility)
         warehouse_id: warehouse ID being checked (or None if not configured)
+        warehouse_name / warehouse_size / warehouse_type: REST metadata, or null
     """
-    import os
-    import re as _re
-
     # Prefer DATABRICKS_WAREHOUSE_ID if injected; fall back to parsing HTTP path.
     # The regex handles /sql/1.0/warehouses/<id> and /sql/1.0/endpoints/<id>,
     # strips query-string params, and is safe against trailing slashes.
     warehouse_id = os.getenv("DATABRICKS_WAREHOUSE_ID") or None
     if not warehouse_id:
         http_path = os.getenv("DATABRICKS_HTTP_PATH", "").split("?")[0].rstrip("/")
-        _m = _re.search(r"/(?:warehouses|endpoints)/([a-f0-9]+)$", http_path, _re.IGNORECASE)
+        _m = re.search(r"/(?:warehouses|endpoints)/([a-f0-9]+)$", http_path, re.IGNORECASE)
         warehouse_id = _m.group(1) if _m else None
 
-    # ── 1. Try warehouse REST API state ──────────────────────────────────────
+    warehouse_metadata: dict[str, Any] = {
+        "warehouse_name": None,
+        "warehouse_size": None,
+        "warehouse_type": None,
+    }
+
+    # A missing binding is definitive configuration state, not a transient REST
+    # failure. Keep it distinct so the client can preserve the real unavailable
+    # experience without treating network errors the same way.
+    if not warehouse_id:
+        return {
+            "status": "unavailable",
+            "state": "NOT_CONFIGURED",
+            "latency_ms": None,
+            "warehouse_id": None,
+            **warehouse_metadata,
+        }
+
     # IMPORTANT: the Databricks SDK uses the blocking `requests` library.
     # Calling warehouses.get() directly in an async function freezes the
     # asyncio event loop for the duration of the HTTP round-trip (can be
     # seconds to minutes in degraded environments). Run it in a thread with
-    # a hard 5-second timeout so a hung SDK call falls through to the SQL
-    # probe instead of blocking all other requests.
-    if warehouse_id:
-        try:
-            import asyncio as _asyncio
-            from backend.db import get_workspace_client
-            _wh_id = warehouse_id  # capture for lambda
-            wh = await _asyncio.wait_for(
-                _asyncio.to_thread(lambda: get_workspace_client().warehouses.get(_wh_id)),
-                timeout=5.0,
-            )
-            raw_state = str(wh.state.value) if wh.state else "UNKNOWN"
-            warming_states = {"STOPPED", "STOPPING", "STARTING", "DELETING", "DELETED"}
-            if raw_state.upper() in warming_states:
-                return {"status": "warming_up", "state": raw_state, "latency_ms": None, "warehouse_id": warehouse_id}
-            # Any other state (RUNNING, RESIZING, SCALING_DOWN, etc.) — warehouse accepts queries.
-            return {"status": "warm", "state": raw_state, "latency_ms": None, "warehouse_id": warehouse_id}
-        except Exception as e:
-            logger.debug("Warehouse REST check failed, trying SQL probe: %s", e)
+    # a hard 5-second timeout so a hung SDK call falls through to transient
+    # status handling. This poll never issues SQL.
+    try:
+        from backend.db import get_workspace_client
 
-    # ── 2. REST-only — no SQL probe ───────────────────────────────────────────
-    # This endpoint is polled by the frontend every 5-15s. It must NOT issue a
-    # probe query: that would fire against the warehouse continuously and keep
-    # it warm forever (the exact 24x7 pinning we removed). If the REST state check
-    # above was unavailable (no warehouse id, or SDK error), report warming_up and
-    # let the first real user query warm the warehouse on demand.
-    return {"status": "warming_up", "state": None, "latency_ms": None, "warehouse_id": warehouse_id}
+        _wh_id = warehouse_id  # capture for lambda
+        wh = await asyncio.wait_for(
+            asyncio.to_thread(lambda: get_workspace_client().warehouses.get(_wh_id)),
+            timeout=5.0,
+        )
+        raw_state = str(wh.state.value) if wh.state else "UNKNOWN"
+        warehouse_type = (
+            "SERVERLESS"
+            if getattr(wh, "enable_serverless_compute", False)
+            else "CLASSIC"
+        )
+        warehouse_metadata = {
+            "warehouse_name": getattr(wh, "name", None),
+            "warehouse_size": getattr(wh, "cluster_size", None),
+            "warehouse_type": warehouse_type,
+        }
+        if raw_state.upper() in {"DELETING", "DELETED"}:
+            return {
+                "status": "unavailable",
+                "state": raw_state,
+                "latency_ms": None,
+                "warehouse_id": warehouse_id,
+                **warehouse_metadata,
+            }
+        if raw_state.upper() in {"STOPPED", "STOPPING", "STARTING"}:
+            return {
+                "status": "warming_up",
+                "state": raw_state,
+                "latency_ms": None,
+                "warehouse_id": warehouse_id,
+                **warehouse_metadata,
+            }
+        # Any other state (RUNNING, RESIZING, SCALING_DOWN, etc.) accepts queries.
+        return {
+            "status": "warm",
+            "state": raw_state,
+            "latency_ms": None,
+            "warehouse_id": warehouse_id,
+            **warehouse_metadata,
+        }
+    except Exception as e:
+        logger.debug("Warehouse REST check failed; treating status as transient: %s", e)
+        return {
+            "status": "warming_up",
+            "state": "REST_UNVERIFIED",
+            "latency_ms": None,
+            "warehouse_id": warehouse_id,
+            **warehouse_metadata,
+        }
 
 
 async def _check_lakebase() -> dict[str, Any]:

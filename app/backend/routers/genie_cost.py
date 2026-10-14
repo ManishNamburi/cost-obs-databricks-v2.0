@@ -35,11 +35,15 @@ from typing import Any
 from fastapi import APIRouter, Query
 
 from backend.db import (
+    apply_mv_overrides,
     bundle_cache_key,
     delta_cache_get,
     delta_cache_put,
     execute_queries_parallel,
     execute_query,
+    get_catalog_schema,
+    source_label_filter_clause,
+    source_scope_unavailable,
 )
 from backend import cache_ttls
 from backend import workspace_filter as wf
@@ -294,6 +298,20 @@ async def get_genie_dashboard_bundle(
     """
     sd, ed = _defaults(start_date, end_date)
     id_list = [i.strip() for i in workspace_ids.split(",") if i.strip()] if workspace_ids else None
+    # Genie gold is daily_sku_breakdown (genie_surface). Missing AIML grain is
+    # not a reason to mark this tab unsupported.
+    blocked = source_scope_unavailable(
+        {"daily_sku_breakdown"},
+        "The selected shared source does not publish Genie cost detail.",
+    )
+    if blocked:
+        return {
+            **blocked,
+            "summary": {},
+            "workspaces": [],
+            "timeseries": [],
+            "surface_breakdown": [],
+        }
     dkey = bundle_cache_key("genie:dashboard-bundle", sd, ed, id_list)
     if (cached := delta_cache_get(dkey)) is not None:
         return cached
@@ -305,41 +323,76 @@ async def get_genie_dashboard_bundle(
     dbx_total_sql = _DATABRICKS_TOTAL_SQL.format(ws_clause=ws_clause_u)
     ts_sql = _GENIE_TIMESERIES_SQL.format(ws_clause=ws_clause_u)
 
+    def _gold_sql(pg_tmpl: str) -> list[dict[str, Any]]:
+        cat, sch = get_catalog_schema()
+        ws_pg = wf.build_ws_filter_clause(col="workspace_id", id_list=id_list)
+        delta = (
+            pg_tmpl.replace("%(start_date)s", ":start_date")
+            .replace("%(end_date)s", ":end_date")
+            .replace("daily_sku_breakdown", f"`{cat}`.`{sch}`.`daily_sku_breakdown`")
+            .replace("daily_usage_summary", f"`{cat}`.`{sch}`.`daily_usage_summary`")
+            .replace("NULLIF(workspace_id, '__account__')", "workspace_id")
+        )
+        sql = delta.format(ws_filter=ws_pg + source_label_filter_clause())
+        return execute_query(apply_mv_overrides(sql, cat, sch), params)
+
+    def _fetch_delta(pg_tmpl: str, live_sql: str):
+        from backend.db import selected_source_labels
+        from backend.lakebase_read import warehouse_view_fallback
+        if not warehouse_view_fallback():
+            return None
+        if selected_source_labels():
+            return lambda: _gold_sql(pg_tmpl)
+        return lambda: execute_query(live_sql, params)
+
     def _q_ws() -> list[dict[str, Any]]:
         from backend.lakebase_read import PG_GENIE_BY_WORKSPACE, dual_read
         ws_pg = wf.build_ws_filter_clause(col="workspace_id", id_list=id_list)
-        from backend.lakebase_read import warehouse_view_fallback
-        live = (lambda: execute_query(by_ws_sql, params)) if warehouse_view_fallback() else None
         return dual_read(
             "genie_by_workspace", PG_GENIE_BY_WORKSPACE, params, ws_pg,
-            fetch_delta=live,
+            fetch_delta=_fetch_delta(PG_GENIE_BY_WORKSPACE, by_ws_sql),
         )
 
     def _q_total() -> list[dict[str, Any]]:
         from backend.lakebase_read import PG_ACCOUNT_TOTAL, dual_read
         ws_pg = wf.build_ws_filter_clause(col="workspace_id", id_list=id_list)
-        from backend.lakebase_read import warehouse_view_fallback
-        live = (lambda: execute_query(dbx_total_sql, params)) if warehouse_view_fallback() else None
         return dual_read(
             "genie_account_total", PG_ACCOUNT_TOTAL, params, ws_pg,
-            fetch_delta=live,
+            fetch_delta=_fetch_delta(PG_ACCOUNT_TOTAL, dbx_total_sql),
         )
 
     def _q_ts() -> list[dict[str, Any]]:
         from backend.lakebase_read import PG_GENIE_TIMESERIES, dual_read
         ws_pg = wf.build_ws_filter_clause(col="workspace_id", id_list=id_list)
-        from backend.lakebase_read import warehouse_view_fallback
-        live = (lambda: execute_query(ts_sql, params)) if warehouse_view_fallback() else None
         return dual_read(
             "genie_timeseries", PG_GENIE_TIMESERIES, params, ws_pg,
-            fetch_delta=live,
+            fetch_delta=_fetch_delta(PG_GENIE_TIMESERIES, ts_sql),
         )
 
-    results = execute_queries_parallel([
-        ("by_workspace", _q_ws),
-        ("dbx_total", _q_total),
-        ("timeseries", _q_ts),
-    ], timeout=60.0)
+    try:
+        results = execute_queries_parallel([
+            ("by_workspace", _q_ws),
+            ("dbx_total", _q_total),
+            ("timeseries", _q_ts),
+        ], timeout=60.0)
+    except Exception as e:
+        logger.error("genie dashboard-bundle failed: %s", e, exc_info=True)
+        code = str(getattr(e, "code", "GENIE_BUNDLE_FAILED"))
+        source_unsupported = code == "SOURCE_SCOPE_UNSUPPORTED"
+        return {
+            "available": False,
+            "reason": "shared_scope_unsupported" if source_unsupported else "producer_failed",
+            "reason_detail": (
+                "The selected shared source does not publish Genie cost detail."
+                if source_unsupported
+                else "Genie cost data is temporarily unavailable. Retry shortly."
+            ),
+            "error_code": code,
+            "summary": {},
+            "workspaces": [],
+            "timeseries": [],
+            "surface_breakdown": [],
+        }
 
     ws_rows = results.get("by_workspace") or []
     dbx_total_rows = results.get("dbx_total") or []

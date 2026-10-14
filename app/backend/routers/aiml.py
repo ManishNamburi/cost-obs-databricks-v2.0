@@ -10,9 +10,47 @@ from typing import Any
 from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import JSONResponse
 
-from backend.db import execute_query, execute_queries_parallel, bundle_cache_key, delta_cache_get, delta_cache_put
+from backend.db import (
+    execute_query,
+    execute_queries_parallel,
+    bundle_cache_key,
+    delta_cache_get,
+    delta_cache_put,
+    source_label_filter_clause,
+    source_scope_unavailable,
+)
 from backend import workspace_filter as wf
 from backend import cache_ttls
+
+
+def _aiml_failure_payload(
+    params: dict[str, str],
+    error_code: str,
+) -> dict[str, Any]:
+    source_unsupported = error_code == "SOURCE_SCOPE_UNSUPPORTED"
+    unavailable = {
+        "available": False,
+        "reason": "shared_scope_unsupported" if source_unsupported else "producer_failed",
+        "reason_detail": (
+            "The selected shared source does not publish AI/ML cost detail."
+            if source_unsupported
+            else "AI/ML data is temporarily unavailable. Retry shortly."
+        ),
+        "error_code": error_code,
+    }
+    return {
+        **unavailable,
+        "summary": {**unavailable, "total_dbus": 0, "total_spend": 0},
+        "providers": {**unavailable, "providers": [], "total_spend": 0},
+        "endpoints": {**unavailable, "endpoints": [], "total_spend": 0},
+        "categories": {**unavailable, "categories": [], "total_spend": 0},
+        "timeseries": {**unavailable, "timeseries": [], "categories": []},
+        "models": {**unavailable, "models": []},
+        "ml_clusters": {**unavailable, "clusters": []},
+        "agent_bricks": {**unavailable, "agents": []},
+        "start_date": params["start_date"],
+        "end_date": params["end_date"],
+    }
 
 
 def _aiml_rows_empty(rows: list[dict[str, Any]]) -> bool:
@@ -44,7 +82,10 @@ def _gold_then_live(name: str, pg_tmpl: str, params: dict, live_sql: str, ws_cla
         gold = AIML_GOLD_SQL.get(name)
         if gold:
             cat, sch = get_catalog_schema()
-            sql = gold.format(catalog=cat, schema=sch, ws_filter=ws_clause)
+            sql = gold.format(
+                catalog=cat, schema=sch,
+                ws_filter=ws_clause + source_label_filter_clause(),
+            )
             return execute_query(apply_mv_overrides(sql, cat, sch), params)
         if warehouse_view_fallback():
             return execute_query(live_sql, params)
@@ -1262,8 +1303,11 @@ def _compute_aiml_bundle(params: dict, id_list: list | None, ws_clause: str, dke
         logger.info("aiml dashboard-bundle background compute complete: %s", dkey)
     except Exception as e:
         logger.error("aiml dashboard-bundle background compute failed: %s", e, exc_info=True)
+        code = str(getattr(e, "code", "AIML_PRODUCER_FAILED"))
         try:
-            delta_cache_put(dkey, "aiml:dashboard-bundle", {"_error": str(e), "status": "error"}, ttl_seconds=60)
+            delta_cache_put(
+                dkey, "aiml:dashboard-bundle", _aiml_failure_payload(params, code), ttl_seconds=60
+            )
         except Exception:
             pass
     finally:
@@ -1283,6 +1327,14 @@ async def get_aiml_dashboard_bundle(
         "end_date": end_date or get_default_end_date(),
     }
     id_list = [i.strip() for i in workspace_ids.split(",") if i.strip()] if workspace_ids else None
+    # AIML cost grain is daily_sku_breakdown. Missing models/clusters/agents
+    # gold must not mark this tab (or Genie / AI Gateway) unsupported.
+    blocked = source_scope_unavailable(
+        {"daily_sku_breakdown"},
+        "The selected shared source does not publish AI/ML cost detail.",
+    )
+    if blocked:
+        return _aiml_failure_payload(params, "SOURCE_SCOPE_UNSUPPORTED")
 
     _dkey = bundle_cache_key("aiml:dashboard-bundle", params["start_date"], params["end_date"], id_list)
 

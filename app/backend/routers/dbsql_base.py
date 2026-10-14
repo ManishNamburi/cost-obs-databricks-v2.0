@@ -16,7 +16,17 @@ from typing import Any
 from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import JSONResponse
 
-from backend.db import execute_query, execute_queries_parallel, get_catalog_schema, get_host_url, bundle_cache_key, delta_cache_get, delta_cache_put
+from backend.db import (
+    execute_query,
+    execute_queries_parallel,
+    get_catalog_schema,
+    get_host_url,
+    bundle_cache_key,
+    delta_cache_get,
+    delta_cache_put,
+    source_label_filter_clause,
+    source_scope_unavailable,
+)
 from backend import workspace_filter as wf
 from backend import cache_ttls
 
@@ -239,7 +249,10 @@ def create_dbsql_router(table_name: str) -> APIRouter:
                 gold = DBSQL_GOLD_SQL.get(query_key)
                 if gold:
                     cat, sch = get_catalog_schema()
-                    sql = gold.format(catalog=cat, schema=sch, ws_filter=ws_clause)
+                    sql = gold.format(
+                        catalog=cat, schema=sch,
+                        ws_filter=ws_clause + source_label_filter_clause(),
+                    )
                     return execute_query(apply_mv_overrides(sql, cat, sch), params)
                 if warehouse_view_fallback():
                     return _delta()
@@ -442,9 +455,34 @@ def create_dbsql_router(table_name: str) -> APIRouter:
             logger.info("dbsql dashboard-bundle background compute complete: %.1fs table=%s", _time.time() - _start, table_name)
         except Exception as e:
             logger.error("dbsql dashboard-bundle background compute failed: %s", e, exc_info=True)
+            error_code = str(getattr(e, "code", "DBSQL_BUNDLE_FAILED"))
+            source_unsupported = error_code == "SOURCE_SCOPE_UNSUPPORTED"
             try:
-                delta_cache_put(dkey, f"dbsql:{table_name}:dashboard-bundle",
-                                {"_error": str(e), "status": "error"}, ttl_seconds=60)
+                delta_cache_put(
+                    dkey, f"dbsql:{table_name}:dashboard-bundle",
+                    {
+                        "available": False,
+                        "reason": (
+                            "shared_scope_unsupported"
+                            if source_unsupported
+                            else "producer_failed"
+                        ),
+                        "reason_detail": (
+                            "The selected shared source does not publish SQL detail."
+                            if source_unsupported
+                            else "SQL cost data is temporarily unavailable."
+                        ),
+                        "error_code": error_code,
+                        "message": (
+                            "The selected shared source does not publish SQL detail."
+                            if source_unsupported
+                            else "SQL cost data is temporarily unavailable."
+                        ),
+                        "start_date": start_date,
+                        "end_date": end_date,
+                    },
+                    ttl_seconds=60,
+                )
             except Exception:
                 pass
         finally:
@@ -946,6 +984,18 @@ def create_dbsql_router(table_name: str) -> APIRouter:
     ) -> dict[str, Any]:
         """DBSQL bundle — submit-and-poll: cache hit returns 200, cache miss starts background compute and returns 202."""
         start_date, end_date = _default_dates(start_date, end_date)
+
+        blocked = source_scope_unavailable(
+            {"daily_dbsql_source"},
+            "The selected shared source does not publish SQL detail.",
+        )
+        if blocked:
+            return {
+                **blocked,
+                "message": blocked["reason_detail"],
+                "start_date": start_date,
+                "end_date": end_date,
+            }
 
         status = await check_mv_status()
         if not status["mv_available"]:

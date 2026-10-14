@@ -1,16 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { Group, LinkButton, MonoChip, Row, SectionTitle, T } from "./dubois";
-import type { AppConfigInfo } from "./SettingsConfig";
+import type { ResourceInventoryGroup, SettingsResourcesPayload } from "./resourceTypes";
 import "./settings.css";
-
-const AGGREGATE_TABLES = new Set([
-  "daily_usage_summary",
-  "daily_product_breakdown",
-  "daily_workspace_breakdown",
-  "sql_tool_attribution",
-  "daily_query_stats",
-  "dbsql_cost_per_query",
-]);
 
 const externalIcon = (
   <svg aria-hidden="true" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor">
@@ -18,10 +9,11 @@ const externalIcon = (
   </svg>
 );
 
-function safeExternalUrl(value?: string | null): string | null {
+function safeExternalUrl(value: string, identity = false): string | null {
   try {
-    const url = new URL(value ?? "");
+    const url = new URL(value);
     if (url.protocol !== "https:" || url.username || url.password) return null;
+    if (identity && !url.pathname.includes("/ServicePrincipals/")) return null;
     return url.toString();
   } catch {
     return null;
@@ -42,96 +34,50 @@ function summarize(items: string[], limit = 5): string {
   return `${visible.join(" | ")}${remaining > 0 ? ` | +${remaining} more` : ""}`;
 }
 
-function InventoryList({ names, empty }: { names: string[]; empty: string }) {
-  if (!names.length) {
-    return <span style={{ fontSize: 12, color: T.textSecondary }}>{empty}</span>;
+function deploymentSourceLabel(source: string): string | null {
+  if (source === "unavailable") return null;
+  if (source.includes("process_start")) {
+    return "process start (approximate; may reflect a restart, not deployment)";
   }
+  return source.replaceAll("_", " ");
+}
+
+function InventoryList({
+  inventory,
+  inactiveNames = [],
+}: {
+  inventory: ResourceInventoryGroup;
+  inactiveNames?: string[];
+}) {
+  const inactive = new Set(inactiveNames);
   return (
     <div className="flex max-w-110 flex-wrap justify-end gap-1.5">
-      {names.map((name) => (
-        <MonoChip key={name}>{name}</MonoChip>
+      {inventory.names.map((name) => (
+        <span
+          key={name}
+          data-inactive={inactive.has(name) ? "true" : undefined}
+          title={inactive.has(name) ? "Created when shared-source routing is active" : undefined}
+          className={inactive.has(name) ? "opacity-45 grayscale" : undefined}
+        >
+          <MonoChip>{name}</MonoChip>
+        </span>
       ))}
     </div>
   );
 }
 
-interface TablesStatus {
-  catalog: string | null;
-  schema: string | null;
-  error?: string | null;
-  tables?: Array<{ name: string; exists: boolean | null }>;
-}
-
-interface AppLinks {
-  app_page_url?: string;
-  source_code_url?: string;
-}
-
-interface AuthStatus {
-  sp_display_name?: string;
-  sp_client_id?: string;
-}
-
-interface MvSourcesPayload {
-  sources?: Array<{ label: string; catalog: string; schema: string }>;
-}
-
-interface CloudConnection {
-  id?: string;
-  name: string;
-  provider: string;
-}
-
 export function SettingsResources() {
-  const {
-    data: appConfig,
-    isLoading: configLoading,
-    isError: configError,
-    refetch: refetchConfig,
-  } = useQuery<AppConfigInfo>({
-    queryKey: ["app-config"],
+  const { data, isLoading, isError, refetch } = useQuery<SettingsResourcesPayload>({
+    queryKey: ["settings-resources"],
     queryFn: async () => {
-      const response = await fetch("/api/settings/config");
-      if (!response.ok) throw new Error(`Config request failed (${response.status})`);
+      const response = await fetch("/api/settings/resources");
+      if (!response.ok) throw new Error(`Resources request failed (${response.status})`);
       return response.json();
     },
     staleTime: 60 * 1000,
-  });
-  const { data: authStatus } = useQuery<AuthStatus | null>({
-    queryKey: ["settings-auth-status"],
-    queryFn: () => fetch("/api/settings/auth-status").then((r) => (r.ok ? r.json() : null)).catch(() => null),
-    staleTime: 60 * 1000,
-  });
-  const { data: appLinks } = useQuery<AppLinks | null>({
-    queryKey: ["settings-app-links"],
-    queryFn: () => fetch("/api/settings/app-links").then((r) => (r.ok ? r.json() : null)).catch(() => null),
-    staleTime: 5 * 60 * 1000,
-  });
-  const {
-    data: tablesStatus,
-    isError: tablesError,
-    refetch: refetchTables,
-  } = useQuery<TablesStatus>({
-    queryKey: ["settings-tables-status"],
-    queryFn: async () => {
-      const response = await fetch("/api/settings/tables");
-      if (!response.ok) throw new Error(`Tables request failed (${response.status})`);
-      return response.json();
-    },
-    staleTime: 15 * 60 * 1000,
-  });
-  const { data: mvSources } = useQuery<MvSourcesPayload | null>({
-    queryKey: ["mv-sources"],
-    queryFn: () => fetch("/api/settings/mv-sources").then((r) => (r.ok ? r.json() : null)).catch(() => null),
-    staleTime: 60 * 1000,
-  });
-  const { data: cloudConnections } = useQuery<CloudConnection[] | null>({
-    queryKey: ["cloud-connections"],
-    queryFn: () => fetch("/api/settings/cloud-connections").then((r) => (r.ok ? r.json() : null)).catch(() => null),
-    staleTime: 5 * 60 * 1000,
   });
 
-  if (configLoading && !appConfig) {
+  if (isLoading) {
     return (
       <div>
         <SectionTitle title="Resources" subtitle="Authoritative Databricks App resources and managed-data inventory." />
@@ -143,42 +89,38 @@ export function SettingsResources() {
     );
   }
 
-  if (configError || !appConfig) {
+  if (isError || !data) {
     return (
       <div>
         <SectionTitle title="Resources" subtitle="Authoritative Databricks App resources and managed-data inventory." />
         <div role="alert" style={{ border: `1px solid ${T.dangerBorder}`, backgroundColor: T.dangerBg, color: T.dangerFg, borderRadius: 8, padding: "12px 14px", fontSize: 13 }}>
           Resource metadata is unavailable. No deployment state has been assumed.{" "}
-          <button type="button" onClick={() => refetchConfig()} style={{ color: T.dangerFg, fontWeight: 600, textDecoration: "underline" }}>Retry</button>
+          <button type="button" onClick={() => refetch()} style={{ color: T.dangerFg, fontWeight: 600, textDecoration: "underline" }}>Retry</button>
         </div>
       </div>
     );
   }
 
-  const warehouse = appConfig.warehouse;
-  const loc = appConfig.storage_location;
-  const configuredLocation = loc?.catalog && loc?.schema ? `${loc.catalog}.${loc.schema}` : "Not configured";
-  const permissionsTable = loc?.catalog && loc?.schema
-    ? `${loc.catalog}.${loc.schema}.app_user_permissions`
+  const sp = data.service_principal;
+  const warehouse = data.warehouse;
+  const deployment = data.app.deployment;
+  const identityUrl = safeExternalUrl(sp.identity_url, true);
+  const appPageUrl = safeExternalUrl(data.app.page_url);
+  const sourceCodeUrl = safeExternalUrl(data.app.source_code_url);
+  const unavailableSections = Object.entries(data.subsections ?? {})
+    .filter(([, status]) => !status.available)
+    .map(([name]) => name.replaceAll("_", " "));
+  const configuredLocation = data.storage.catalog && data.storage.schema
+    ? `${data.storage.catalog}.${data.storage.schema}`
     : "Not configured";
-  const spName = authStatus?.sp_display_name || appConfig.identity?.display_name || "Unavailable";
-  const spClientId = authStatus?.sp_client_id || appConfig.identity?.user_name;
-  const appPageUrl = safeExternalUrl(appLinks?.app_page_url);
-  const sourceCodeUrl = safeExternalUrl(appLinks?.source_code_url);
-  const existingTables = (tablesStatus?.tables ?? []).filter((table) => table.exists);
-  const aggregateNames = existingTables.filter((table) => AGGREGATE_TABLES.has(table.name)).map((table) => table.name);
-  const stateNames = existingTables.filter((table) => !AGGREGATE_TABLES.has(table.name)).map((table) => table.name);
-  const sharedSources = mvSources?.sources ?? [];
-  const connections = cloudConnections ?? [];
-  const inventoryUnavailable = tablesError || tablesStatus?.error;
 
   return (
     <div>
       <SectionTitle title="Resources" subtitle="Authoritative Databricks App resources, managed data, and integrations." />
-      {inventoryUnavailable && (
+      {unavailableSections.length > 0 && (
         <div role="status" style={{ border: `1px solid ${T.warningBorder}`, backgroundColor: T.warningBg, color: T.warningFg, borderRadius: 8, padding: "10px 12px", marginBottom: 12, fontSize: 12 }}>
-          Some resource details are temporarily unavailable (managed data inventory).{" "}
-          <button type="button" onClick={() => refetchTables()} style={{ color: T.warningFg, fontWeight: 600, textDecoration: "underline" }}>Retry</button>
+          Some resource details are temporarily unavailable ({unavailableSections.join(", ")}).{" "}
+          <button type="button" onClick={() => refetch()} style={{ color: T.warningFg, fontWeight: 600, textDecoration: "underline" }}>Retry</button>
         </div>
       )}
 
@@ -189,8 +131,10 @@ export function SettingsResources() {
           helper="Databricks Apps injects this execution identity. Credentials and tokens are never shown."
           control={
             <span className="inline-flex max-w-110 flex-wrap items-center justify-end gap-2">
-              <MonoChip>{spName}</MonoChip>
-              {spClientId && spClientId !== spName && <MonoChip>{spClientId}</MonoChip>}
+              <MonoChip>{sp.display_name || "Unavailable"}</MonoChip>
+              {sp.client_id && <MonoChip>{sp.client_id}</MonoChip>}
+              {sp.object_id && <MonoChip>{sp.object_id}</MonoChip>}
+              {identityUrl && <LinkButton href={identityUrl}><span className="inline-flex items-center gap-1">Identity record {externalIcon}</span></LinkButton>}
             </span>
           }
         />
@@ -205,11 +149,11 @@ export function SettingsResources() {
         <Row
           label="Deployment"
           helper={[
-            appConfig.version?.repo || null,
-            appConfig.version?.branch ? `branch ${appConfig.version.branch}` : null,
-            appConfig.version?.commit_sha ? `commit ${appConfig.version.commit_sha.slice(0, 12)}` : null,
+            deployment.deployer ? `by ${deployment.deployer}` : null,
+            deployment.commit_sha ? `commit ${deployment.commit_sha.slice(0, 12)}` : null,
+            deploymentSourceLabel(deployment.source),
           ].filter(Boolean).join(" · ") || "Deployment metadata unavailable."}
-          control={<span style={{ fontSize: 12, color: T.textSecondary }}>{formatTimestamp(appConfig.version?.commit_date)}</span>}
+          control={<span style={{ fontSize: 12, color: T.textSecondary }}>{formatTimestamp(deployment.deployed_at)}</span>}
         />
         {(appPageUrl || sourceCodeUrl) && (
           <Row
@@ -225,52 +169,55 @@ export function SettingsResources() {
       </Group>
 
       <Group label="Managed data inventory">
+        <Row first label={`Aggregate tables (${data.inventory.aggregates.count})`} helper="Bounded pre-aggregations maintained by the app." control={<InventoryList inventory={data.inventory.aggregates} />} />
         <Row
-          first
-          label={`Aggregate tables (${aggregateNames.length})`}
-          helper="Bounded pre-aggregations maintained by the app."
-          control={<InventoryList names={aggregateNames} empty={inventoryUnavailable ? "Unavailable" : "None"} />}
+          label={`State tables (${data.inventory.state.count})`}
+          helper={`${data.inventory.state.count} durable tables. app_settings contains six namespaced preference domains; app_unified_views is created only when shared routing is active.`}
+          control={(
+            <InventoryList
+              inventory={data.inventory.state}
+              inactiveNames={data.inventory.unified_views.count === 0 ? ["app_unified_views"] : []}
+            />
+          )}
         />
         <Row
-          label={`State tables (${stateNames.length})`}
-          helper="Durable app tables. Roles persist in app_user_permissions across redeploys."
-          control={<InventoryList names={stateNames} empty={inventoryUnavailable ? "Unavailable" : "None"} />}
+          label={`Cache layers (${data.inventory.cache.count})`}
+          helper={`In-process cache: ${data.inventory.cache.process_entries} of ${data.inventory.cache.process_max_entries} entries; TTL ${Math.round(data.inventory.cache.process_ttl_seconds / 3600)} hours.`}
+          control={<InventoryList inventory={data.inventory.cache} />}
         />
         <Row
-          label="Cache layers"
-          helper="In-process and durable cache metadata is not exposed by the current settings APIs."
-          control={<span style={{ fontSize: 12, color: T.textSecondary }}>Unavailable</span>}
-        />
-        <Row
-          label="Shared routing views"
-          helper="Unified shared-source views are not exposed by the current settings APIs."
-          control={<span style={{ fontSize: 12, color: T.textSecondary }}>Unavailable</span>}
+          label={`Shared routing views (${data.inventory.unified_views.count})`}
+          helper={data.inventory.unified_views.count ? "Verified unified views currently used for shared-source routing." : "No unified shared-source views are currently verified."}
+          control={data.inventory.unified_views.count ? <InventoryList inventory={data.inventory.unified_views} /> : <span style={{ fontSize: 12, color: T.textSecondary }}>None</span>}
         />
       </Group>
 
       <Group label="Data sources & scope">
         <Row
           first
-          label={`Shared data sources (${sharedSources.length})`}
-          helper={sharedSources.length
-            ? summarize(sharedSources.map((source) => `${source.label} · ${source.catalog}.${source.schema}`))
+          label={`Shared data sources (${data.shared_data_sources.length})`}
+          helper={data.shared_data_sources.length
+            ? summarize(data.shared_data_sources.map((source) => `${source.label} · ${source.catalog}.${source.schema}`))
             : "Only this workspace's managed data is configured."}
-          control={<span style={{ fontSize: 12, color: T.textSecondary }}>{sharedSources.length ? "Delta Sharing" : "None"}</span>}
+          control={<span style={{ fontSize: 12, color: T.textSecondary }}>{data.shared_data_sources.length ? "Delta Sharing" : "None"}</span>}
         />
         <Row
-          label={`Cloud-cost connections (${connections.length})`}
-          helper={connections.length
-            ? summarize(connections.map((connection) => `${connection.name} (${connection.provider.toUpperCase()})`))
+          label={`Cloud-cost connections (${data.cloud_cost_connections.length})`}
+          helper={data.cloud_cost_connections.length
+            ? summarize(data.cloud_cost_connections.map((connection) => `${connection.name} (${connection.provider.toUpperCase()})`))
             : "No cloud billing connections are configured."}
-          control={<span style={{ fontSize: 12, color: T.textSecondary }}>{connections.length ? "Metadata only" : "None"}</span>}
+          control={<span style={{ fontSize: 12, color: T.textSecondary }}>Metadata only</span>}
         />
         <Row
           label="Workspace filter pool"
-          helper="Set via COST_OBS_WORKSPACES at deploy time. The current pool count is not returned by a settings API."
-          control={<span style={{ fontSize: 12, color: T.textSecondary }}>Redeploy to change</span>}
+          helper={data.workspace_filter.mode === "restricted"
+            ? `${data.workspace_filter.count} workspace${data.workspace_filter.count === 1 ? "" : "s"} configured.`
+            : "All workspaces are included."}
+          control={<span style={{ fontSize: 12, color: T.textSecondary }}>{data.workspace_filter.mode === "restricted" ? "Restricted" : "All workspaces"}</span>}
         />
-        <Row label="Permissions table" helper="App roles persist here across deployments." control={<MonoChip>{permissionsTable}</MonoChip>} />
+        <Row label="Permissions table" helper="App roles persist here across deployments." control={<MonoChip>{data.storage.permissions_table || "Not configured"}</MonoChip>} />
       </Group>
+
     </div>
   );
 }

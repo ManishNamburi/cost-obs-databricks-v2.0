@@ -464,8 +464,12 @@ export function SQLWarehousing360({ sqlBreakdownData: _sqlBreakdownData, queryDa
       {/* Query-level Cost Attribution */}
       {hasQueryData === false ? (
         <SourceCapabilityNotice
-          title="Query-level cost attribution is not available"
-          description="This tab requires system.query.history access for the app's service principal. Copy the GRANT SQL from Settings → Permissions and run it as a metastore admin, then rebuild tables from Settings → Config."
+          title={queryData?.reason === "shared_scope_unsupported"
+            ? "SQL detail is not included in this source"
+            : "Query-level cost attribution is not available"}
+          description={queryData?.reason === "shared_scope_unsupported"
+            ? (queryData.reason_detail || "The selected source publishes account totals but not SQL query and warehouse attribution.")
+            : "This tab requires system.query.history access for the app's service principal. Copy the GRANT SQL from Settings → Permissions and run it as a metastore admin, then rebuild tables from Settings → Config."}
           requiredAggregates={["daily_query_stats", "sql_tool_attribution", "dbsql_cost_per_query"]}
         />
       ) : (
@@ -1409,6 +1413,8 @@ export function OptimizeMethodologyPanel() {
 export function WarehouseRightsizingView({ host }: { host?: string | null }) {
   const { data: warehouseHealth, isLoading: healthLoading } = useQuery<{
     available: boolean;
+    reason?: string;
+    reason_detail?: string;
     recommendations: Array<{
       warehouse_id: string;
       warehouse_name: string | null;
@@ -1511,6 +1517,12 @@ export function WarehouseRightsizingView({ host }: { host?: string | null }) {
         <div className="flex h-24 items-center justify-center">
           <div className="h-6 w-6 animate-spin rounded-full border-2 border-gray-200" style={{ borderTopColor: C.lava }} />
         </div>
+      ) : warehouseHealth?.available === false && warehouseHealth.reason === "shared_scope_unsupported" ? (
+        <SourceCapabilityNotice
+          title="Rightsizing detail is not included in this source"
+          description={warehouseHealth.reason_detail || "No current shared aggregate provides warehouse-event grain. The source must publish the aggregate below."}
+          requiredAggregates={["warehouse_health_summary"]}
+        />
       ) : warehouseHealth?.available === false ? (
         <SourceCapabilityNotice
           title="Rightsizing recommendations are temporarily unavailable"
@@ -1648,6 +1660,8 @@ export function WarehouseIdleTimeView({
 
   const { data, isLoading } = useQuery<{
     available: boolean;
+    reason?: string;
+    reason_detail?: string;
     serverless_detected: boolean;
     error?: string;
     warehouses: Array<{
@@ -1839,11 +1853,17 @@ export function WarehouseIdleTimeView({
         <div className="flex h-24 items-center justify-center">
           <div className="h-6 w-6 animate-spin rounded-full border-2 border-gray-200" style={{ borderTopColor: C.lava }} />
         </div>
+      ) : data?.available === false && data.reason === "shared_scope_unsupported" ? (
+        <SourceCapabilityNotice
+          title="Idle-time detail is not included in this source"
+          description={data.reason_detail || "No current shared aggregate provides warehouse lifecycle grain. The source must publish the aggregate below."}
+          requiredAggregates={["warehouse_idle_summary"]}
+        />
       ) : data?.available === false ? (
         <SourceCapabilityNotice
           title="Idle time analysis is temporarily unavailable"
-          description={(data as { error?: string }).error
-            ? `Idle time query failed: ${(data as { error?: string }).error}`
+          description={data.error
+            ? `Idle time query failed: ${data.error}`
             : "Idle time data unavailable. Requires access to system.compute.warehouse_events and system.query.history."}
           requiredAggregates={["warehouse_idle_summary"]}
         />

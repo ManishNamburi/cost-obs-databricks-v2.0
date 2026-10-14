@@ -3,46 +3,108 @@ import { render, screen } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { SettingsResources } from "../SettingsResources";
 
-const config = {
-  warehouse: { id: "warehouse-id", name: "Serverless Starter Warehouse", size: "Medium", state: "RUNNING" },
-  identity: { display_name: "app-cost-obs", user_name: "client-id" },
-  storage_location: { catalog: "east1_serverless", schema: "cost_obs_schema" },
-  version: { commit_sha: "abc123def456", branch: "main", repo: "cost-obs-app-v2", commit_date: "2026-08-30T21:29:46Z" },
+const payload = {
+  generated_at: "2026-08-31T17:00:00Z",
+  app: {
+    name: "cost-obs",
+    url: "https://cost-obs.example.databricksapps.com",
+    page_url: "https://dbc.example.com/apps-v2/app/cost-obs/overview",
+    source_code_url: "https://github.com/example/cost-obs",
+    deployment: {
+      deployed_at: "2026-08-30T21:29:46Z",
+      deployer: "owner@example.com",
+      commit_sha: "abc123def456",
+      available: true,
+      source: "databricks_apps_api",
+    },
+    version: { commit_sha: "abc123def456" },
+  },
+  service_principal: {
+    display_name: "app-cost-obs",
+    client_id: "client-id",
+    object_id: "object-id",
+    user_name: "client-id",
+    identity_url: "https://dbc.example.com/api/2.0/preview/scim/v2/ServicePrincipals/object-id",
+    execution_identity: "service_principal",
+    execution_explanation: "Queries run as this service principal.",
+    effective_oauth_scopes: ["all-apis"],
+    oauth_scope_source: "databricks_apps_oauth_m2m",
+  },
+  warehouse: {
+    id: "warehouse-id",
+    name: "Serverless Starter Warehouse",
+    size: "Medium",
+    state: "RUNNING",
+    source: "app_resource",
+  },
+  storage: {
+    catalog: "east1_serverless",
+    schema: "cost_obs_schema",
+    permissions_table: "east1_serverless.cost_obs_schema.app_user_permissions",
+  },
+  inventory: {
+    aggregates: { count: 2, names: ["daily_usage_summary", "daily_workspace_breakdown"] },
+    state: { count: 2, names: ["app_settings", "app_user_permissions"] },
+    cache: {
+      count: 2,
+      names: ["in-process query cache", "app_response_cache"],
+      process_entries: 4,
+      process_max_entries: 200,
+      process_ttl_seconds: 7200,
+    },
+    unified_views: { count: 1, names: ["daily_usage_summary"] },
+    observed_tables: {
+      checked_at: "2026-08-31T16:55:00Z",
+      available: 8,
+      total: 9,
+    },
+  },
+  shared_data_sources: [{
+    label: "west",
+    catalog: "west_share",
+    schema: "cost_obs",
+    cloud: "aws",
+  }],
+  cloud_cost_connections: [{
+    id: "connection-1",
+    name: "AWS CUR",
+    provider: "aws",
+    created_at: "2026-08-30T10:00:00Z",
+  }],
+  workspace_filter: {
+    mode: "restricted",
+    count: 2,
+  },
+  refresh: {
+    schedule: {
+      enabled: true,
+      frequency: "nightly",
+      hour_utc: 5,
+      lookback_days: 180,
+    },
+    status: {
+      last_refresh_utc: "2026-08-31T05:00:00Z",
+      hours_since_refresh: 12,
+      stale: false,
+      status: "success",
+      refresh_history: [{
+        timestamp: "2026-08-31T05:00:00Z",
+        status: "success",
+        trigger: "scheduled",
+        operation: "rebuild",
+      }],
+    },
+  },
 };
 
-const tables = {
-  catalog: "east1_serverless",
-  schema: "cost_obs_schema",
-  tables: [
-    { name: "daily_usage_summary", exists: true },
-    { name: "daily_workspace_breakdown", exists: true },
-    { name: "app_user_permissions", exists: true },
-    { name: "daily_product_breakdown", exists: false },
-  ],
-};
-
-function mockApis(overrides: Record<string, unknown> = {}) {
-  vi.stubGlobal("fetch", vi.fn().mockImplementation((input: RequestInfo | URL) => {
-    const url = String(input);
-    const json = (body: unknown, status = 200) => Promise.resolve(
-      new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } }),
-    );
-    if (url.includes("/api/settings/config")) return json(overrides.config ?? config, overrides.configStatus as number | undefined);
-    if (url.includes("/api/settings/auth-status")) return json(overrides.authStatus ?? { sp_display_name: "app-cost-obs", sp_client_id: "client-id" });
-    if (url.includes("/api/settings/app-links")) return json(overrides.appLinks ?? {
-      app_page_url: "https://dbc.example.com/apps/cost-obs",
-      source_code_url: "https://github.com/example/cost-obs",
-    });
-    if (url.includes("/api/settings/tables")) return json(overrides.tables ?? tables, overrides.tablesStatus as number | undefined);
-    if (url.includes("/api/settings/mv-sources")) return json(overrides.mvSources ?? {
-      sources: [{ label: "west", catalog: "west_share", schema: "cost_obs" }],
-    });
-    if (url.includes("/api/settings/cloud-connections")) return json(overrides.cloudConnections ?? [
-      { id: "connection-1", name: "AWS CUR", provider: "aws" },
-    ]);
-    return json({});
-  }));
-}
+beforeEach(() => {
+  vi.stubGlobal("fetch", vi.fn().mockResolvedValue(
+    new Response(JSON.stringify(payload), {
+      status: 200,
+      headers: { "Content-Type": "application/json" },
+    }),
+  ));
+});
 
 function renderResources() {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
@@ -54,11 +116,32 @@ function renderResources() {
 }
 
 describe("SettingsResources", () => {
-  beforeEach(() => {
-    mockApis();
+  it("marks the unified-view inventory inactive until shared routing is built", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({
+        ...payload,
+        inventory: {
+          ...payload.inventory,
+          state: {
+            count: 3,
+            names: ["app_settings", "app_user_permissions", "app_unified_views"],
+          },
+          unified_views: { count: 0, names: [] },
+        },
+      }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      }),
+    ));
+    renderResources();
+
+    const unifiedViews = await screen.findByText("app_unified_views");
+    expect(unifiedViews.parentElement).toHaveAttribute("data-inactive", "true");
+    expect(unifiedViews.parentElement).toHaveClass("opacity-45", "grayscale");
+    expect(screen.getByText(/app_settings contains six namespaced preference domains/i)).toBeVisible();
   });
 
-  it("renders runtime, inventory, and source cards from existing settings APIs", async () => {
+  it("keeps useful runtime, inventory, and source metadata without duplicated data-table operations", async () => {
     renderResources();
 
     expect(await screen.findByText("App runtime")).toBeVisible();
@@ -66,14 +149,25 @@ describe("SettingsResources", () => {
     expect(screen.getByText("Data sources & scope")).toBeVisible();
     expect(screen.getByText("app-cost-obs")).toBeVisible();
     expect(screen.getByText("Aggregate tables (2)")).toBeVisible();
-    expect(screen.getByText("State tables (1)")).toBeVisible();
     expect(screen.getByText("Shared data sources (1)")).toBeVisible();
     expect(screen.getByText("Cloud-cost connections (1)")).toBeVisible();
     expect(screen.getByText("east1_serverless.cost_obs_schema.app_user_permissions")).toBeVisible();
+    expect(screen.queryByText("Redeploy to change")).not.toBeInTheDocument();
+    expect(screen.queryByText("Observed table availability")).not.toBeInTheDocument();
+    expect(screen.queryByText("Refresh operations")).not.toBeInTheDocument();
   });
 
   it("shows empty source copy when no shared sources or cloud connections exist", async () => {
-    mockApis({ mvSources: { sources: [] }, cloudConnections: [] });
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({
+        ...payload,
+        shared_data_sources: [],
+        cloud_cost_connections: [],
+      }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      }),
+    ));
     renderResources();
 
     expect(await screen.findByText("Shared data sources (0)")).toBeVisible();
@@ -81,27 +175,52 @@ describe("SettingsResources", () => {
     expect(screen.getByText("No cloud billing connections are configured.")).toBeVisible();
   });
 
-  it("keeps the visual shell and retry when table inventory is unavailable", async () => {
-    mockApis({ tablesStatus: 500, tables: { error: "failed" } });
+  it("renders only valid HTTPS Databricks identity links and no secrets", async () => {
     renderResources();
 
-    expect(await screen.findByText(/resource details are temporarily unavailable \(managed data inventory\)/i)).toBeVisible();
-    expect(screen.getByText("App runtime")).toBeVisible();
-    expect(screen.getByRole("button", { name: "Retry" })).toBeVisible();
-    expect(screen.getAllByText("Unavailable").length).toBeGreaterThan(0);
-  });
-
-  it("renders only valid HTTPS app links and no secrets", async () => {
-    renderResources();
-
-    const app = await screen.findByRole("link", { name: /App resource/ });
-    expect(app).toHaveAttribute("href", "https://dbc.example.com/apps/cost-obs");
-    expect(screen.getByRole("link", { name: /Source/ })).toHaveAttribute("href", "https://github.com/example/cost-obs");
+    const identity = await screen.findByRole("link", { name: /Identity record/ });
+    expect(identity).toHaveAttribute(
+      "href",
+      "https://dbc.example.com/api/2.0/preview/scim/v2/ServicePrincipals/object-id",
+    );
+    expect(screen.getByRole("link", { name: /App resource/ })).toHaveAttribute(
+      "href",
+      "https://dbc.example.com/apps-v2/app/cost-obs/overview",
+    );
     expect(document.body.textContent).not.toMatch(/client_secret|access_key|token-value/i);
   });
 
-  it("shows the error empty state when config cannot be loaded", async () => {
-    mockApis({ configStatus: 500 });
+  it("keeps successful sections visible when one subsection is temporarily unavailable", async () => {
+    vi.mocked(fetch).mockResolvedValueOnce(
+      new Response(JSON.stringify({
+        ...payload,
+        subsections: {
+          config: { available: true },
+          shared_data_sources: {
+            available: false,
+            reason: "temporarily_unavailable",
+          },
+        },
+      }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      }),
+    );
+
+    renderResources();
+
+    expect(await screen.findByText(
+      /resource details are temporarily unavailable \(shared data sources\)/i,
+    )).toBeVisible();
+    expect(screen.getByText("App runtime")).toBeVisible();
+    expect(screen.getByText("Managed data inventory")).toBeVisible();
+    expect(screen.getByRole("button", { name: "Retry" })).toBeVisible();
+  });
+
+  it("shows the error empty state when resources cannot be loaded", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(
+      new Response("{}", { status: 500, headers: { "Content-Type": "application/json" } }),
+    ));
     renderResources();
 
     expect(await screen.findByRole("alert")).toHaveTextContent(/resource metadata is unavailable/i);

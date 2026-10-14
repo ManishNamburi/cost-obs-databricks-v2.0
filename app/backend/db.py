@@ -4,6 +4,7 @@ import hashlib
 import json
 import logging
 import os
+import re
 import threading
 import time
 from concurrent.futures import as_completed
@@ -747,20 +748,120 @@ def reset_source_labels(token: object) -> None:
         pass
 
 
+class SourceScopeUnsupportedError(Exception):
+    """A selected shared source does not publish a table required by this view."""
+
+    code = "SOURCE_SCOPE_UNSUPPORTED"
+
+    def __init__(
+        self,
+        message: str = (
+            "None of the selected sources publish the managed data required by this view."
+        ),
+    ):
+        super().__init__(message)
+
+
+def selected_source_labels() -> list[str]:
+    """Non-blank source labels selected for the current request."""
+    return [str(x) for x in _source_labels.get() if str(x).strip()]
+
+
 def source_labels_active() -> bool:
     """True when this request narrowed MV reads with ?source_labels=."""
-    return any(str(x).strip() for x in _source_labels.get())
+    return bool(selected_source_labels())
 
 
-def source_label_filter_clause() -> str:
+def local_source_is_selected() -> bool:
+    """Whether request scope includes this workspace's local managed data.
+
+    An empty selection means the normal all-sources scope. With an explicit
+    selection, local-only integrations must not leak into a shared-source-only
+    response.
+    """
+    labels = selected_source_labels()
+    if not labels:
+        return True
+    local_label = get_local_source_label().strip()
+    return any(label.strip() == local_label for label in labels)
+
+
+def selected_sources_publish(required_tables: str | list[str] | set[str] | tuple[str, ...]) -> bool:
+    """True when the current source selection can serve these gold/unified tables.
+
+    Empty selection means all sources. The local source always publishes.
+    A shared source publishes a table when it did not restrict ``tables``, or
+    the table is in its declared list, AND a unified view exists for it.
+    """
+    if isinstance(required_tables, str):
+        required = {required_tables} if required_tables.strip() else set()
+    else:
+        required = {str(t).strip() for t in required_tables if str(t).strip()}
+    if not required:
+        return True
+    labels = selected_source_labels()
+    if not labels:
+        return True
+    local_label = get_local_source_label().strip()
+    if any(label.strip() == local_label for label in labels):
+        return True
+    configured = {str(source.get("label") or ""): source for source in get_mv_sources()}
+    unified = set(get_unified_view_tables() or [])
+    for label in labels:
+        source = configured.get(label)
+        declared = source.get("tables") if isinstance(source, dict) else None
+        if source is None or not isinstance(declared, list):
+            if required.issubset(unified):
+                return True
+            continue
+        published = {str(table) for table in declared}
+        if required.issubset(published) and required.issubset(unified):
+            return True
+    return False
+
+
+def source_scope_unavailable(
+    required_tables: str | list[str] | set[str] | tuple[str, ...],
+    reason_detail: str,
+) -> dict[str, Any] | None:
+    """Typed unavailable payload when selected sources cannot serve ``required_tables``."""
+    if not selected_source_labels() or selected_sources_publish(required_tables):
+        return None
+    return {
+        "available": False,
+        "reason": "shared_scope_unsupported",
+        "reason_detail": reason_detail,
+        "error_code": "SOURCE_SCOPE_UNSUPPORTED",
+    }
+
+
+def _mv_tables_referenced_by_template(mv_query: str) -> set[str]:
+    """Managed-table names referenced by an unformatted MV SQL template."""
+    names = set(re.findall(r"`\{catalog\}`\.`\{schema\}`\.`([^`]+)`", mv_query))
+    try:
+        from backend.materialized_views import _MV_TABLES
+        return names.intersection(set(_MV_TABLES))
+    except Exception:
+        return names
+
+
+def source_label_filter_clause(mv_query: str | None = None) -> str:
     """`` AND source_label IN ('a','b') `` for the current selection, else ''.
 
     Single-quote-escaped. Appended into the MV templates' existing `{ws_filter}`
     slot by _get_mv_query, so it filters the unified views' rows by their source.
+    When a template is supplied, raises SourceScopeUnsupportedError if none of
+    the selected sources publish the referenced gold/unified tables.
     """
-    labels = [str(x) for x in _source_labels.get() if str(x).strip()]
+    labels = selected_source_labels()
     if not labels:
         return ""
+    if mv_query is not None:
+        referenced = _mv_tables_referenced_by_template(mv_query)
+        if referenced and not selected_sources_publish(referenced):
+            raise SourceScopeUnsupportedError(
+                "None of the selected sources publish the managed data required by this view."
+            )
     quoted = ", ".join("'" + x.replace("'", "''") + "'" for x in labels)
     return f" AND source_label IN ({quoted})"
 
