@@ -54,10 +54,11 @@ variables:
     default: ""
   deployment_mode:
     description: >
-      Setup-job behaviour. Pin "fresh" or "migrate" in the target file
-      (see bundle/examples/). "auto" (default) probes for existing MVs.
-      "fresh" full-builds gold. "migrate" reuses v1 catalog/schema/warehouse
-      MVs, incrementally refreshes gold, and full-loads Lakebase.
+      Setup-job behaviour. Use -t fresh (pins "fresh") or -t upgrade
+      (pins "migrate"). "auto" (default on other targets) probes for
+      existing MVs. "fresh" full-builds gold. "migrate" reuses the v1
+      catalog/schema/warehouse MVs, incrementally refreshes gold, and
+      full-loads a new Lakebase.
     default: auto
 
 sync:

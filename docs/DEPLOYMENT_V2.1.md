@@ -1,27 +1,38 @@
 # Cost Observability — v2.1 Deployment
 
 Two supported deployment paths, both driven end-to-end by the Databricks
-Asset Bundle (DAB) in `bundle/`. Use a **separate target file per motion**
-and pin `deployment_mode` — do not mix catalog/schema/warehouse from one
-motion with names from the other.
+Asset Bundle (DAB) in `bundle/`. Pick the target at deploy time and pass
+the customer's catalog, schema, warehouse, and workspace host as `--var`
+values — do not copy example files.
 
-Copy an example, fill the `REPLACE_ME` values, save it as
-`bundle/targets/<your-target>.yml`:
-
-| Starting state | Example | `deployment_mode` |
-|---|---|---|
-| No prior cost-obs deployment | `bundle/examples/target-fresh.yml` | `fresh` |
-| Existing 1.x app (keep its catalog, schema, warehouse) | `bundle/examples/target-upgrade-from-v1.yml` | `migrate` |
+| Starting state | Target | `deployment_mode` | Catalog / schema / warehouse |
+|---|---|---|---|
+| No prior cost-obs deployment | `-t fresh` | `fresh` | Customer-supplied (new) |
+| Existing 1.x app | `-t upgrade` | `migrate` | Reuse the v1 names; Lakebase and the v2 app are new |
 
 ```bash
 cd bundle
-databricks bundle deploy -t <your-target>
-databricks bundle run cost_obs_setup -t <your-target>
+databricks bundle deploy -t fresh \
+  --var="workspace_host=https://<workspace>.cloud.databricks.com" \
+  --var="catalog=<catalog>" \
+  --var="schema=cost_obs" \
+  --var="warehouse_id=<warehouse_id>"
+databricks bundle run cost_obs_setup -t fresh
 ```
 
-The setup job still probes when `deployment_mode` is `auto`, but the example
-targets pin the motion so a leftover MV cannot flip a fresh install into an
-upgrade.
+```bash
+cd bundle
+databricks bundle deploy -t upgrade \
+  --var="workspace_host=https://<workspace>.cloud.databricks.com" \
+  --var="catalog=<v1_catalog>" \
+  --var="schema=<v1_schema>" \
+  --var="warehouse_id=<v1_warehouse_id>"
+databricks bundle run cost_obs_setup -t upgrade
+```
+
+The `fresh` and `upgrade` targets pin the motion so a leftover MV cannot
+flip a fresh install into an upgrade. Other targets (`dev`, `cmegdemos`,
+…) still default `deployment_mode` to `auto`.
 
 ---
 
@@ -42,8 +53,9 @@ Same for both paths.
 
 ## Bundle variables
 
-Set the variables that don't have a good default before you deploy — either
-in a `targets/<your-target>.yml`, or on the `bundle deploy` command line.
+For `-t fresh` and `-t upgrade`, pass catalog, schema, warehouse, and
+workspace host on the `bundle deploy` command line. Other targets may
+pin those in their YAML.
 
 | Variable | Purpose | Example |
 |---|---|---|
@@ -56,7 +68,7 @@ in a `targets/<your-target>.yml`, or on the `bundle deploy` command line.
 | `genie_space_id` | (Optional) existing Genie space ID | `01f0fcc775c…` |
 | `ai_gateway_usage_table` | (Optional) admin-managed derived table over `system.ai_gateway.usage` | `acme_catalog.cost_obs.ai_gateway_usage_shared` |
 | `databricks_account_id` | Account UUID — required for account-level APIs | `f8d9…` |
-| `deployment_mode` | `auto` (default) / `fresh` / `migrate` — pin this in the target file | `fresh` or `migrate` |
+| `deployment_mode` | `auto` (default) / `fresh` / `migrate` — pinned by `-t fresh` / `-t upgrade` | `fresh` or `migrate` |
 
 The `lakebase_endpoint_name` variable must use the full path form
 `projects/<project>/branches/production/endpoints/primary` so the Apps
@@ -68,8 +80,12 @@ runtime can resolve it. Each `bundle/targets/*.yml` already sets this.
 
 ```bash
 cd bundle
-databricks bundle deploy -t <target>
-databricks bundle run cost_obs_setup -t <target>
+databricks bundle deploy -t fresh \
+  --var="workspace_host=https://<workspace>.cloud.databricks.com" \
+  --var="catalog=<catalog>" \
+  --var="schema=cost_obs" \
+  --var="warehouse_id=<warehouse_id>"
+databricks bundle run cost_obs_setup -t fresh
 ```
 
 `bundle deploy` provisions, in the target workspace:
@@ -136,12 +152,15 @@ Steps:
 
 ```bash
 cd bundle
-databricks bundle deploy -t <target>
-databricks bundle run cost_obs_setup -t <target>
+databricks bundle deploy -t upgrade \
+  --var="workspace_host=https://<workspace>.cloud.databricks.com" \
+  --var="catalog=<v1_catalog>" \
+  --var="schema=<v1_schema>" \
+  --var="warehouse_id=<v1_warehouse_id>"
+databricks bundle run cost_obs_setup -t upgrade
 ```
 
-Same commands as fresh. Paste v1 catalog, schema, and warehouse id into the
-upgrade target (operator or customer). Setup then:
+Pass the live v1 catalog, schema, and warehouse id. Setup then:
 
 - `validate` confirms it can reach that warehouse.
 - `bootstrap_lakebase` provisions Lakebase grants. Existing MVs stay.

@@ -1,0 +1,35 @@
+# Fresh customer install. Pin this target and pass catalog, schema,
+# warehouse, and workspace host — do not inherit v1 names.
+#
+#   cd bundle
+#   databricks bundle deploy -t fresh \
+#     --var="workspace_host=https://<workspace>.cloud.databricks.com" \
+#     --var="catalog=<catalog>" \
+#     --var="schema=cost_obs" \
+#     --var="warehouse_id=<warehouse_id>"
+#   databricks bundle run cost_obs_setup -t fresh
+
+targets:
+  fresh:
+    mode: production
+    workspace:
+      host: ${var.workspace_host}
+    variables:
+      deployment_mode: fresh
+      app_name: cost-observability
+      catalog: ""
+      schema: ""
+      warehouse_id: ""
+      lakebase_project_name: cost-obs-db
+      lakebase_endpoint_name: projects/cost-obs-db/branches/production/endpoints/primary
+      lakebase_read_mode: on
+      genie_space_id: ""
+    resources:
+      postgres_projects:
+        cost_obs_db:
+          project_id: ${var.lakebase_project_name}
+          pg_version: 16
+          default_endpoint_settings:
+            autoscaling_limit_min_cu: 0.5
+            autoscaling_limit_max_cu: 4
+            suspend_timeout_duration: 300s
