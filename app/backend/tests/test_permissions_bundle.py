@@ -47,7 +47,7 @@ class TestGetSpInfo:
         mock_client = MagicMock()
         mock_client.current_user.me.return_value = mock_me
 
-        with patch("server.routers.permissions.get_workspace_client", return_value=mock_client):
+        with patch("backend.routers.permissions.get_workspace_client", return_value=mock_client):
             info = _get_sp_info()
 
         assert info["client_id"] == "sp-abc-123"
@@ -60,7 +60,7 @@ class TestGetSpInfo:
         mock_client = MagicMock()
         mock_client.current_user.me.side_effect = RuntimeError("auth error")
 
-        with patch("server.routers.permissions.get_workspace_client", return_value=mock_client):
+        with patch("backend.routers.permissions.get_workspace_client", return_value=mock_client):
             info = _get_sp_info()
 
         # Must not raise — must return the env-var value
@@ -75,7 +75,7 @@ class TestGetSpInfo:
         mock_client = MagicMock()
         mock_client.current_user.me.side_effect = RuntimeError("no client id")
 
-        with patch("server.routers.permissions.get_workspace_client", return_value=mock_client):
+        with patch("backend.routers.permissions.get_workspace_client", return_value=mock_client):
             info = _get_sp_info()
 
         assert isinstance(info, dict)
@@ -93,7 +93,7 @@ class TestGetSpInfo:
         mock_client = MagicMock()
         mock_client.current_user.me.return_value = mock_me
 
-        with patch("server.routers.permissions.get_workspace_client", return_value=mock_client):
+        with patch("backend.routers.permissions.get_workspace_client", return_value=mock_client):
             info = _get_sp_info()
 
         assert info["display_name"] == "Human Readable Name"
@@ -109,7 +109,7 @@ class TestGetSpInfo:
         mock_client = MagicMock()
         mock_client.current_user.me.return_value = mock_me
 
-        with patch("server.routers.permissions.get_workspace_client", return_value=mock_client):
+        with patch("backend.routers.permissions.get_workspace_client", return_value=mock_client):
             info = _get_sp_info()
 
         assert info["display_name"] == "sp-xyz@apps.databricks.com"
@@ -135,9 +135,9 @@ class TestCheckPermissionsSyncSpBundle:
         mock_client.current_user.me.return_value = mock_me
 
         with (
-            patch("server.routers.permissions.get_workspace_client", return_value=mock_client),
-            patch("server.routers.permissions.check_table_access", side_effect=self._mock_all_granted()),
-            patch("server.routers.permissions._get_current_user", return_value=("user@db.com", "User")),
+            patch("backend.routers.permissions.get_workspace_client", return_value=mock_client),
+            patch("backend.routers.permissions.check_table_access", side_effect=self._mock_all_granted()),
+            patch("backend.routers.permissions._get_current_user", return_value=("user@db.com", "User")),
         ):
             result = _check_permissions_sync(bypass_cache=True)
 
@@ -156,9 +156,9 @@ class TestCheckPermissionsSyncSpBundle:
         mock_client.current_user.me.return_value = mock_me
 
         with (
-            patch("server.routers.permissions.get_workspace_client", return_value=mock_client),
-            patch("server.routers.permissions.check_table_access", return_value=(True, "")),
-            patch("server.routers.permissions._get_current_user", return_value=("user@db.com", "User")),
+            patch("backend.routers.permissions.get_workspace_client", return_value=mock_client),
+            patch("backend.routers.permissions.check_table_access", return_value=(True, "")),
+            patch("backend.routers.permissions._get_current_user", return_value=("user@db.com", "User")),
         ):
             result = _check_permissions_sync(bypass_cache=True)
 
@@ -182,9 +182,9 @@ class TestCheckPermissionsSyncSpBundle:
             return (True, "")
 
         with (
-            patch("server.routers.permissions.get_workspace_client", return_value=mock_client),
-            patch("server.routers.permissions.check_table_access", side_effect=selective_access),
-            patch("server.routers.permissions._get_current_user", return_value=("user@db.com", "User")),
+            patch("backend.routers.permissions.get_workspace_client", return_value=mock_client),
+            patch("backend.routers.permissions.check_table_access", side_effect=selective_access),
+            patch("backend.routers.permissions._get_current_user", return_value=("user@db.com", "User")),
         ):
             result = _check_permissions_sync(bypass_cache=True)
 
@@ -209,9 +209,9 @@ class TestCheckPermissionsSyncSpBundle:
             return (True, "")
 
         with (
-            patch("server.routers.permissions.get_workspace_client", return_value=mock_client),
-            patch("server.routers.permissions.check_table_access", side_effect=selective_access),
-            patch("server.routers.permissions._get_current_user", return_value=("user@db.com", "User")),
+            patch("backend.routers.permissions.get_workspace_client", return_value=mock_client),
+            patch("backend.routers.permissions.check_table_access", side_effect=selective_access),
+            patch("backend.routers.permissions._get_current_user", return_value=("user@db.com", "User")),
         ):
             result = _check_permissions_sync(bypass_cache=True)
 
@@ -229,9 +229,9 @@ class TestCheckPermissionsSyncSpBundle:
         mock_client.current_user.me.return_value = mock_me
 
         with (
-            patch("server.routers.permissions.get_workspace_client", return_value=mock_client),
-            patch("server.routers.permissions.check_table_access", return_value=(True, "")),
-            patch("server.routers.permissions._get_current_user", return_value=("user@db.com", "User")),
+            patch("backend.routers.permissions.get_workspace_client", return_value=mock_client),
+            patch("backend.routers.permissions.check_table_access", return_value=(True, "")),
+            patch("backend.routers.permissions._get_current_user", return_value=("user@db.com", "User")),
         ):
             result1 = _check_permissions_sync(bypass_cache=True)
             result2 = _check_permissions_sync()  # Should hit cache

@@ -79,8 +79,12 @@ def test_runbook_is_generated_from_the_exact_runtime_gold_contract():
     assert "GRANT SELECT ON SCHEMA `<recipient_catalog>`.`<shared_schema>`" in rendered
     assert "Lakebase is not part of this share" in rendered
     assert "Lakebase was not published" in rendered
-    assert "imports those rows into" in rendered
-    assert "Dashboard source filters remain Lakebase-served" in rendered
+    assert "imports compatible rows into Lakebase" in rendered
+    assert "Unfiltered dashboard reads stay on" in rendered
+    assert "source-label filter reads warehouse unified views" in rendered
+    assert "Required gold tables were not built" in rendered
+    assert "Schema share would publish invoice gold tables" in rendered
+    assert "not copied into Lakebase" in rendered
     assert "Lakebase / Postgres copies" in rendered
     assert "Connected cloud invoice actuals are intentionally out of scope" in rendered
     assert "daily_cloud_actuals" not in canonical_sql
@@ -99,6 +103,7 @@ def test_share_sql_keeps_ai_gateway_optional_and_excludes_invoice_actuals():
     assert "daily_azure_actuals" not in sql
     assert "daily_gcp_actuals" not in sql
     assert "daily_ai_gateway" in materialized_views.OPTIONAL_SHARE_TABLES
+    assert "use_case_dashboard_objects" in materialized_views.OPTIONAL_SHARE_TABLES
 
 
 def test_settings_download_serves_the_generated_notebook_to_admins():
@@ -109,6 +114,17 @@ def test_settings_download_serves_the_generated_notebook_to_admins():
     assert Path(response.path) == RUNBOOK
     assert response.media_type == "text/x-python"
     assert "cost_obs_mv_share_publisher.py" in response.headers["content-disposition"]
+
+
+def test_settings_download_honors_the_runbook_kill_switch():
+    request = SimpleNamespace(headers={"X-Forwarded-Email": "admin@example.com"})
+    with (
+        patch.object(settings, "_require_admin", return_value="admin@example.com"),
+        patch.object(settings, "get_app_settings", return_value={"enable_mv_share_runbook": False}),
+    ):
+        with pytest.raises(HTTPException) as exc:
+            asyncio.run(settings.download_materialized_view_runbook(request))
+    assert exc.value.status_code == 404
 
 
 def test_settings_download_rejects_non_admins():

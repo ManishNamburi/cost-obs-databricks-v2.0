@@ -22,6 +22,7 @@ from backend.db import (
     delta_cache_put,
     apply_mv_overrides,
     source_scope_unavailable,
+    SourceScopeUnsupportedError,
 )
 from backend import cache_ttls
 from backend.queries import (
@@ -1634,6 +1635,22 @@ async def get_dashboard_bundle_fast(
 
     id_list = [i.strip() for i in workspace_ids.split(",") if i.strip()] if workspace_ids else None
 
+    blocked = source_scope_unavailable(
+        {"daily_usage_summary", "daily_product_breakdown", "daily_workspace_breakdown"},
+        "The selected shared source does not publish usage summary gold.",
+    )
+    if blocked:
+        return {
+            "summary": {**_format_summary(None, params), **blocked},
+            "products": {**_format_products_fast(None, params), **blocked},
+            "workspaces": {**_format_workspaces(None, params), **blocked},
+            "timeseries": {**_format_timeseries_fast(None, params), **blocked},
+            "etl_breakdown": {**_format_etl_breakdown(None, params), **blocked},
+            "is_fast_mode": True,
+            "using_materialized_views": False,
+            **blocked,
+        }
+
     # Delta cross-worker cache — check before running any warehouse queries
     _dkey = bundle_cache_key("billing:dashboard-bundle-fast", params["start_date"], params["end_date"], id_list)
     if (_dcached := delta_cache_get(_dkey)) is not None:
@@ -1735,6 +1752,23 @@ async def get_dashboard_bundle_fast(
 
         delta_cache_put(_dkey, "billing:dashboard-bundle-fast", response, ttl_seconds=cache_ttls.BUNDLE_FILTERED if id_list else cache_ttls.BUNDLE)
         return response
+    except SourceScopeUnsupportedError as e:
+        blocked = {
+            "available": False,
+            "reason": "shared_scope_unsupported",
+            "reason_detail": str(e),
+            "error_code": e.code,
+        }
+        return {
+            "summary": {**_format_summary(None, params), **blocked},
+            "products": {**_format_products_fast(None, params), **blocked},
+            "workspaces": {**_format_workspaces(None, params), **blocked},
+            "timeseries": {**_format_timeseries_fast(None, params), **blocked},
+            "etl_breakdown": {**_format_etl_breakdown(None, params), **blocked},
+            "is_fast_mode": True,
+            "using_materialized_views": use_mv,
+            **blocked,
+        }
     except Exception as e:
         logger.error("dashboard-bundle-fast failed: %s", e)
         return {

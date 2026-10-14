@@ -47,6 +47,15 @@ def _source_context(monkeypatch):
         reset_source_labels(token)
 
 
+def test_unknown_share_label_does_not_publish():
+    token = set_source_labels(["not-configured"])
+    try:
+        assert selected_sources_publish({"daily_usage_summary"}) is False
+        assert source_scope_unavailable({"daily_usage_summary"}, "unused") is not None
+    finally:
+        reset_source_labels(token)
+
+
 def test_empty_selection_is_always_supported():
     assert selected_sources_publish({"daily_sku_breakdown"}) is True
     assert source_scope_unavailable({"daily_sku_breakdown"}, "unused") is None
@@ -283,3 +292,43 @@ def test_warehouse_health_blocked_for_shared_only_without_idle_gold():
     assert result["available"] is False
     assert result["reason"] == "shared_scope_unsupported"
     assert result["recommendations"] == []
+
+
+def test_warehouse_health_stays_blocked_even_when_share_lists_idle_gold(monkeypatch):
+    monkeypatch.setattr(
+        db,
+        "get_mv_sources",
+        lambda: [{"label": "shared-west", "tables": ["daily_warehouse_idle"]}],
+    )
+    monkeypatch.setattr(db, "get_unified_view_tables", lambda: ["daily_warehouse_idle"])
+    token = set_source_labels(["shared-west"])
+    try:
+        with patch.object(warehouse_health, "execute_queries_parallel") as execute:
+            result = asyncio.run(warehouse_health.get_warehouse_health())
+    finally:
+        reset_source_labels(token)
+
+    assert result["available"] is False
+    execute.assert_not_called()
+
+
+def test_fast_dbu_bundle_is_typed_unavailable_for_unpublished_usage():
+    from backend.routers import billing
+
+    token = set_source_labels(["shared-west"])
+    try:
+        with patch.object(billing, "delta_cache_get", return_value=None):
+            result = asyncio.run(
+                billing.get_dashboard_bundle_fast(
+                    start_date="2026-08-01",
+                    end_date="2026-08-28",
+                    workspace_ids=None,
+                )
+            )
+    finally:
+        reset_source_labels(token)
+
+    assert result["available"] is False
+    assert result["error_code"] == "SOURCE_SCOPE_UNSUPPORTED"
+    assert result["products"]["total_spend"] == 0
+    assert result["summary"].get("available") is False

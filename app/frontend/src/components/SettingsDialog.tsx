@@ -29,6 +29,24 @@ export interface TabVisibility {
   conversational: boolean;
 }
 
+export const DASHBOARD_TAB_ORDER: Array<keyof TabVisibility> = [
+  "dbu",
+  "sql",
+  "ai-gateway",
+  "genie",
+  "apps",
+  "tagging",
+  "users-groups",
+  "kpis",
+  "infra",
+  "optimizer",
+  "use-cases",
+];
+
+export function firstVisibleDashboardTab(visibility: TabVisibility): keyof TabVisibility {
+  return DASHBOARD_TAB_ORDER.find((key) => visibility[key]) ?? "dbu";
+}
+
 const DEFAULT_VISIBILITY: TabVisibility = {
   dbu: true, infra: true, optimizer: true, kpis: true, "ai-gateway": true, genie: true,
   sql: true, apps: true, tagging: true, "use-cases": false, "users-groups": true, conversational: true,
@@ -282,7 +300,7 @@ function SettingsShell({ onClose, onTabVisibilityChange, onSettingsChange, tabVi
   const toggleTab = (key: keyof TabVisibility) => {
     setLocalVisibility((prev) => {
       const updated = { ...prev, [key]: !prev[key] };
-      if (!Object.values(updated).some(Boolean)) return prev;
+      if (!DASHBOARD_TAB_ORDER.some((tab) => updated[tab])) return prev;
       return updated;
     });
     setDirty(true);
@@ -294,8 +312,8 @@ function SettingsShell({ onClose, onTabVisibilityChange, onSettingsChange, tabVi
     let settings = localSettings;
     const landingHidden = !localVisibility[localSettings.defaultLandingTab as keyof TabVisibility];
     if (landingHidden) {
-      const firstVisible = (Object.keys(localVisibility) as (keyof TabVisibility)[]).find((k) => localVisibility[k]);
-      if (firstVisible) settings = { ...localSettings, defaultLandingTab: firstVisible };
+      const firstVisible = firstVisibleDashboardTab(localVisibility);
+      settings = { ...localSettings, defaultLandingTab: firstVisible };
     }
     saveAppSettings(settings);
     saveTabVisibility(localVisibility);

@@ -363,6 +363,22 @@ async def detailed_health_check() -> dict[str, Any]:
     return checks
 
 
+def _classify_warehouse_type(wh: Any) -> str | None:
+    """SERVERLESS / CLASSIC when the REST payload is explicit; never guess CLASSIC."""
+    flag = getattr(wh, "enable_serverless_compute", None)
+    if flag is True:
+        return "SERVERLESS"
+    if flag is False:
+        return "CLASSIC"
+    raw = getattr(wh, "warehouse_type", None)
+    value = str(getattr(raw, "value", raw) or "").upper()
+    if "SERVERLESS" in value:
+        return "SERVERLESS"
+    if value in {"CLASSIC"}:
+        return "CLASSIC"
+    return None
+
+
 @router.get("/health/sql-warehouse")
 async def get_sql_warehouse_status() -> dict[str, Any]:
     """Check if the SQL warehouse is warm, starting, or unavailable.
@@ -422,11 +438,7 @@ async def get_sql_warehouse_status() -> dict[str, Any]:
             timeout=5.0,
         )
         raw_state = str(wh.state.value) if wh.state else "UNKNOWN"
-        warehouse_type = (
-            "SERVERLESS"
-            if getattr(wh, "enable_serverless_compute", False)
-            else "CLASSIC"
-        )
+        warehouse_type = _classify_warehouse_type(wh)
         warehouse_metadata = {
             "warehouse_name": getattr(wh, "name", None),
             "warehouse_size": getattr(wh, "cluster_size", None),

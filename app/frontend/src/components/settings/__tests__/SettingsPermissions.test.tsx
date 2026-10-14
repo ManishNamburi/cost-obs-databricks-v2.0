@@ -194,10 +194,10 @@ describe("SettingsPermissions — access grid", () => {
 
     for (const organization of [
       "Databricks",
-      "Take-Two Interactive Software",
-      "2K",
-      "Zynga",
-      "Demonware",
+      "take2games.com",
+      "2k.com",
+      "zynga.com",
+      "demonware.net",
     ]) {
       expect(await screen.findByText(organization)).toBeVisible();
     }

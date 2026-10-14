@@ -113,7 +113,9 @@ print("Lakebase is not part of this share. Receiving apps import shared gold int
 
 SOURCE_TABLES = json.loads('["system.access.workspaces_latest","system.billing.list_prices","system.billing.usage","system.compute.clusters","system.compute.warehouse_events","system.compute.warehouses","system.dashboards.dashboards","system.lakeflow.job_run_timeline","system.lakeflow.pipelines","system.query.history","system.serving.served_entities"]')
 TABLE_DEPENDENCIES = json.loads('{"daily_usage_summary":["system.billing.list_prices","system.billing.usage"],"daily_product_breakdown":["system.billing.list_prices","system.billing.usage"],"daily_workspace_breakdown":["system.access.workspaces_latest","system.billing.list_prices","system.billing.usage"],"sql_tool_attribution":["system.billing.list_prices","system.billing.usage","system.query.history"],"daily_query_stats":["system.query.history"],"dbsql_cost_per_query":["system.billing.list_prices","system.billing.usage","system.query.history"],"daily_tag_summary":["system.billing.list_prices","system.billing.usage"],"daily_apps_summary":["system.billing.list_prices","system.billing.usage"],"daily_sku_breakdown":["system.billing.list_prices","system.billing.usage"],"daily_job_pipeline_spend":["system.billing.list_prices","system.billing.usage","system.lakeflow.pipelines"],"daily_interactive_spend":["system.billing.list_prices","system.billing.usage","system.compute.clusters"],"daily_tag_coverage":["system.billing.list_prices","system.billing.usage"],"daily_dbsql_source":[],"daily_aiml_endpoints":["system.billing.list_prices","system.billing.usage"],"daily_dbsql_top":[],"daily_user_spend":["system.billing.list_prices","system.billing.usage"],"daily_untagged_objects":["system.billing.list_prices","system.billing.usage","system.compute.clusters","system.compute.warehouses"],"daily_aiml_models":["system.billing.list_prices","system.billing.usage","system.compute.clusters"],"daily_aiml_ml_clusters":["system.billing.list_prices","system.billing.usage","system.compute.clusters"],"daily_aiml_agents":["system.billing.list_prices","system.billing.usage","system.serving.served_entities"],"daily_object_spend":["system.billing.list_prices","system.billing.usage"],"daily_infra_cluster_spend":["system.access.workspaces_latest","system.billing.usage","system.compute.clusters"],"daily_dbsql_warehouse_type":["system.access.workspaces_latest","system.billing.list_prices","system.billing.usage","system.compute.warehouses"],"daily_dbsql_region_scope":["system.billing.usage","system.compute.warehouses"],"warehouse_optimizer_findings":["system.compute.warehouse_events","system.compute.warehouses","system.query.history"],"daily_warehouse_idle":["system.billing.list_prices","system.billing.usage","system.compute.warehouse_events","system.compute.warehouses","system.query.history"],"daily_kpi_facts":["system.billing.usage"],"daily_lakeflow_stats":["system.lakeflow.job_run_timeline"],"daily_query_users":["system.query.history"],"daily_apps_identities":["system.billing.usage"],"use_case_query_objects":["system.query.history"],"use_case_dashboard_objects":["system.dashboards.dashboards"],"daily_ai_gateway":[]}')
-OPTIONAL_TABLES = set(json.loads('["daily_ai_gateway"]'))
+OPTIONAL_TABLES = set(json.loads('["daily_ai_gateway","use_case_dashboard_objects"]'))
+CORE_TABLES = json.loads('["daily_usage_summary","daily_product_breakdown","daily_workspace_breakdown","sql_tool_attribution","daily_query_stats","dbsql_cost_per_query","daily_tag_summary","daily_apps_summary"]')
+INVOICE_GOLD = json.loads('["daily_cloud_actuals","daily_azure_actuals","daily_gcp_actuals"]')
 OPTIONAL_WIDGETS = {
     "daily_ai_gateway": ("ai_gateway_table", AI_GATEWAY_TABLE),
 }
@@ -238,6 +240,12 @@ if failed:
     raise RuntimeError(
         "Gold table build failed: " + ", ".join(row[0] for row in failed)
     )
+ready_names = set(row[0] for row in build_results if row[1] == "READY")
+core_missing = [name for name in CORE_TABLES if name not in ready_names]
+if core_missing:
+    raise RuntimeError(
+        "Required gold tables were not built: " + ", ".join(core_missing)
+    )
 if skipped:
     print(
         f"Skipped {len(skipped)} permission-dependent gold tables: "
@@ -278,6 +286,18 @@ share_results = []
 if SHARE_MODE == "schema":
     # A schema share covers every current AND future gold table in the schema, so
     # recipients keep working as new aggregates land without re-running share.
+    # Never point this at a live app schema that also holds invoice actuals.
+    existing_tables = [
+        str(row["tableName"])
+        for row in spark.sql(f"SHOW TABLES IN `{CATALOG}`.`{SCHEMA}`").collect()
+    ]
+    leaked_invoices = [name for name in INVOICE_GOLD if name in existing_tables]
+    if leaked_invoices:
+        raise RuntimeError(
+            "Schema share would publish invoice gold tables: "
+            + ", ".join(leaked_invoices)
+            + ". Use share_mode=table, or choose a gold-only schema."
+        )
     stale_tables = [
         obj for obj, typ in current_objects
         if typ == "TABLE" and obj.lower().startswith(schema_fqn.lower() + ".")
@@ -337,9 +357,11 @@ display(
 # MAGIC 2. Open **cost-obs → Settings → Data & tables → Shared sources** and add the
 # MAGIC    receiving catalog and schema.
 # MAGIC 3. Run the receiving app's gold refresh. It validates compatible shared
-# MAGIC    tables, labels rows with `source_label`, and imports those rows into
-# MAGIC    Lakebase. Dashboard source filters remain Lakebase-served; they do not
-# MAGIC    query the warehouse on a user request.
+# MAGIC    tables, labels rows with `source_label` on warehouse unified views, and
+# MAGIC    imports compatible rows into Lakebase. Unfiltered dashboard reads stay on
+# MAGIC    Lakebase. A source-label filter reads warehouse unified views because
+# MAGIC    serving copies do not store `source_label`. `dbsql_cost_per_query` is
+# MAGIC    warehouse-built and is not copied into Lakebase.
 # MAGIC
 # MAGIC Grant the receiving app's service principal durable schema-level access so
 # MAGIC it can discover current and future gold tables:

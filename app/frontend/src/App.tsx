@@ -13,7 +13,7 @@ import { SourceLabelFilter } from "@/components/SourceLabelFilter";
 import { TopProgressBar } from "@/components/TopProgressBar";
 import { SKUBreakdown } from "@/components/SKUBreakdown";
 import { ExportDialog, getRequiredExportTabs, type ExportSections, type ExportFormat } from "@/components/ExportDialog";
-import { SettingsDialog, loadTabVisibility, loadAppSettings, type TabVisibility, type AppSettings } from "@/components/SettingsDialog";
+import { SettingsDialog, loadTabVisibility, loadAppSettings, firstVisibleDashboardTab, type TabVisibility, type AppSettings } from "@/components/SettingsDialog";
 import { PricingProvider, usePricing } from "@/context/PricingContext";
 import { SpNameMapContext } from "@/utils/identity";
 import { Footer } from "@/components/Footer";
@@ -281,7 +281,16 @@ interface User {
   role?: "admin" | "consumer";
 }
 
-const RAIL_STATUS_BADGE_CLASS = "rail-status-badge relative inline-flex h-[22px] w-[104px] min-w-0 shrink-0 items-center justify-center gap-[3px] overflow-hidden rounded-[4px] bg-green-500/20 px-[6px] text-[10px] font-bold leading-[10px] text-green-200";
+const RAIL_STATUS_BADGE_CLASS = "rail-status-badge relative inline-flex h-[22px] w-[104px] min-w-0 shrink-0 items-center justify-center gap-[3px] overflow-hidden rounded-[4px] px-[6px] text-[10px] font-bold leading-[10px]";
+const RAIL_STATUS_TONES: Record<string, string> = {
+  warm: "bg-green-500/20 text-green-200 hover:bg-green-400/25 focus-visible:ring-green-300/40",
+  warming_up: "bg-amber-500/20 text-amber-100 hover:bg-amber-400/25 focus-visible:ring-amber-300/40",
+  unavailable: "bg-red-500/20 text-red-100 hover:bg-red-400/25 focus-visible:ring-red-300/40",
+};
+
+function railStatusClass(status?: string): string {
+  return `${RAIL_STATUS_BADGE_CLASS} ${RAIL_STATUS_TONES[status ?? "unavailable"] ?? RAIL_STATUS_TONES.unavailable}`;
+}
 
 function DuBoisAccountIcon() {
   return (
@@ -361,6 +370,7 @@ function CopyableRailBadge({
   entity,
   icon,
   tooltipAlign = "center",
+  status = "warm",
 }: {
   value: string;
   text: string;
@@ -368,12 +378,17 @@ function CopyableRailBadge({
   entity: string;
   icon: React.ReactNode;
   tooltipAlign?: "start" | "center" | "end";
+  status?: string;
 }) {
   const [copied, setCopied] = useState(false);
   const copyValue = async () => {
-    await navigator.clipboard.writeText(value);
-    setCopied(true);
-    window.setTimeout(() => setCopied(false), 1600);
+    try {
+      await navigator.clipboard.writeText(value);
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 1600);
+    } catch {
+      // Clipboard permission can be denied; keep the badge usable.
+    }
   };
   return (
     <RailBadgeTooltip align={tooltipAlign} text={
@@ -393,7 +408,7 @@ function CopyableRailBadge({
         type="button"
         aria-label={copied ? `${label} copied` : `Copy ${label}`}
         onClick={() => { void copyValue(); }}
-        className={`group ${RAIL_STATUS_BADGE_CLASS} appearance-none transition-colors hover:bg-green-400/25 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-green-300/40`}
+        className={`group appearance-none transition-colors focus-visible:outline-none focus-visible:ring-2 ${railStatusClass(status)}`}
       >
         <span className="rail-status-dot healthy-status-dot h-[5px] w-[5px] rounded-full bg-green-400" />
         <span className="min-w-0 overflow-hidden whitespace-nowrap">{compactRailBadgeText(text)}</span>
@@ -502,8 +517,7 @@ function Dashboard() {
     const v = loadTabVisibility();
     const want = appSettings.defaultLandingTab as ViewTab;
     if (want && v[want as keyof TabVisibility]) return want;
-    const first = (Object.keys(v) as ViewTab[]).find((k) => v[k as keyof TabVisibility]);
-    return first ?? "dbu";
+    return firstVisibleDashboardTab(v) as ViewTab;
   });
   const [showExportDialog, setShowExportDialog] = useState(false);
   const [requiredExportTabs, setRequiredExportTabs] = useState<ViewTab[]>([]);
@@ -707,7 +721,7 @@ function Dashboard() {
   }, []);
 
   // Fast bundle for quick initial load (uses materialized views)
-  const { data: bundle, isLoading: bundleLoading } = useDashboardBundleFast(dateRange, selectedWorkspaceIds.length ? selectedWorkspaceIds : undefined);
+  const { data: bundle, isLoading: bundleLoading, isError: bundleError } = useDashboardBundleFast(dateRange, selectedWorkspaceIds.length ? selectedWorkspaceIds : undefined);
 
   // Extract data from fast bundle — apply pricing multiplier when account prices are active
   const summary = useMemo(() => {
@@ -770,34 +784,34 @@ function Dashboard() {
   const { data: interactiveBreakdown, isLoading: interactiveLoading } = useInteractiveBreakdown(dateRange, _wsIds, true);
   const { data: skuBreakdown, isLoading: skuLoading } = useSKUBreakdown(dateRange, _wsIds, true);
 
-  const { data: infraBundle, isLoading: infraBundleLoading } = useInfraBundle(dateRange, _wsIds, true);
+  const { data: infraBundle, isLoading: infraBundleLoading, isError: infraBundleError } = useInfraBundle(dateRange, _wsIds, true);
   const infraCosts = infraBundle?.infra_costs;
   const infraCostsTimeseries = infraBundle?.infra_timeseries;
 
-  const { data: kpisBundle, isLoading: kpisBundleLoading, isFetching: kpisBundleFetching } = useKPIsBundle(dateRange, _wsIds, true);
+  const { data: kpisBundle, isLoading: kpisBundleLoading, isFetching: kpisBundleFetching, isError: kpisBundleError } = useKPIsBundle(dateRange, _wsIds, true);
   const spendAnomalies = kpisBundle?.anomalies;
   const platformKPIs = kpisBundle?.kpis;
   const anomaliesLoading = kpisBundleLoading;
   const kpisLoading = kpisBundleLoading;
 
   const { data: aimlData, isLoading: aimlLoading } = useAIMLDashboardBundle(dateRange, _wsIds, true);
-  const { data: aiGatewayData, isLoading: aiGatewayLoading } = useAIGatewayDashboardBundle(dateRange, _wsIds, activeTab === "ai-gateway");
-  const { data: genieCostData, isLoading: genieCostLoading } = useGenieCostDashboardBundle(dateRange, _wsIds, activeTab === "genie");
-  const { data: appsData, isLoading: appsLoading } = useAppsDashboardBundle(dateRange, _wsIds, true);
-  const { data: taggingData, isLoading: taggingLoading } = useTaggingDashboardBundle(dateRange, _wsIds, true);
+  const { data: aiGatewayData, isLoading: aiGatewayLoading, isError: aiGatewayError } = useAIGatewayDashboardBundle(dateRange, _wsIds, activeTab === "ai-gateway" || requiredExportTabs.includes("ai-gateway"));
+  const { data: genieCostData, isLoading: genieCostLoading } = useGenieCostDashboardBundle(dateRange, _wsIds, activeTab === "genie" || requiredExportTabs.includes("genie"));
+  const { data: appsData, isLoading: appsLoading, isError: appsError } = useAppsDashboardBundle(dateRange, _wsIds, true);
+  const { data: taggingData, isLoading: taggingLoading, isError: taggingError } = useTaggingDashboardBundle(dateRange, _wsIds, true);
 
   // Connected cloud invoices — leave on the warehouse/gold-actuals path.
   const { data: awsActualData, isLoading: awsActualLoading } = useAWSActualCosts(dateRange, warehouseReady);
   const { data: azureActualData, isLoading: azureActualLoading } = useAzureActualCosts(dateRange, warehouseReady);
   const { data: gcpActualData, isLoading: gcpActualLoading } = useGCPActualCosts(dateRange, warehouseReady);
 
-  const { data: dbsqlData, isLoading: dbsqlLoading, isFetching: dbsqlFetching } = useDBSQLQueryCosts(dateRange, _wsIds, true);
+  const { data: dbsqlData, isLoading: dbsqlLoading, isFetching: dbsqlFetching, isError: dbsqlError } = useDBSQLQueryCosts(dateRange, _wsIds, true);
   const { data: dbsqlTopQueriesData, isLoading: dbsqlTopQueriesLoading } = useDBSQLTopQueries(dateRange, _wsIds, warehouseReady);
-  const { data: usersGroupsData, isLoading: usersGroupsLoading } = useUsersGroupsBundle(dateRange, _wsIds, true);
+  const { data: usersGroupsData, isLoading: usersGroupsLoading, isError: usersGroupsError } = useUsersGroupsBundle(dateRange, _wsIds, true);
 
   // Optimizer tab — prefetch rightsizing and idle-time in background so the tab loads instantly,
   // and capture the data so the PDF export can include it under the Optimize section.
-  const { data: optimizeRightsizingData, isLoading: optimizeRightsizingLoading } = useQuery<{
+  const { data: optimizeRightsizingData, isLoading: optimizeRightsizingLoading, isError: optimizeRightsizingError } = useQuery<{
     available: boolean;
     warehouses_analyzed: number;
     recommendations: Array<{
@@ -815,9 +829,9 @@ function Dashboard() {
     retry: false,
     // Deferred: only fire when the Optimize tab is actually opened. Previously
     // this prefetched at Dashboard mount and could starve concurrent bundles.
-    enabled: activeTab === "optimizer",
+    enabled: activeTab === "optimizer" || requiredExportTabs.includes("optimizer"),
   });
-  const { data: optimizeIdleData, isLoading: optimizeIdleLoading } = useQuery<{
+  const { data: optimizeIdleData, isLoading: optimizeIdleLoading, isError: optimizeIdleError } = useQuery<{
     available: boolean;
     serverless_detected: boolean;
     warehouses: Array<{
@@ -844,8 +858,7 @@ function Dashboard() {
     },
     staleTime: 30 * 60 * 1000,
     retry: false,
-    // Deferred: only fire when the Optimize tab is actually opened.
-    enabled: activeTab === "optimizer",
+    enabled: activeTab === "optimizer" || requiredExportTabs.includes("optimizer"),
   });
 
   // Use Cases tab data - only fetch when feature is enabled
@@ -1057,7 +1070,7 @@ function Dashboard() {
 
   const tabLoadingFlags: Partial<Record<ViewTab, boolean>> = {
     dbu: bundleLoading,
-    sql: sqlLoading || dbsqlLoading,
+    sql: sqlLoading || dbsqlLoading || (requiredExportTabs.includes("sql") && dbsqlData == null && !dbsqlError),
     infra: infraBundleLoading,
     optimizer: optimizeRightsizingLoading || optimizeIdleLoading,
     kpis: kpisLoading,
@@ -1066,6 +1079,18 @@ function Dashboard() {
     apps: appsLoading,
     tagging: taggingLoading,
     "users-groups": usersGroupsLoading,
+  };
+
+  const tabErrorFlags: Partial<Record<ViewTab, string>> = {
+    dbu: bundleError ? "DBU spend failed to load" : undefined,
+    sql: dbsqlError ? "SQL data failed to load" : undefined,
+    infra: infraBundleError ? "Cloud costs failed to load" : undefined,
+    optimizer: (optimizeRightsizingError || optimizeIdleError) ? "Optimize data failed to load" : undefined,
+    kpis: kpisBundleError ? "KPI data failed to load" : undefined,
+    "ai-gateway": aiGatewayError ? "AI Gateway data failed to load" : undefined,
+    apps: appsError ? "Apps data failed to load" : undefined,
+    tagging: taggingError ? "Tagging data failed to load" : undefined,
+    "users-groups": usersGroupsError ? "User data failed to load" : undefined,
   };
 
   const exportDataLoading = showExportDialog
@@ -1170,7 +1195,20 @@ function Dashboard() {
               variant="rail"
               showClearButton={false}
             />
-            <SourceLabelFilter variant="rail" />
+            <SourceLabelFilter
+              variant="rail"
+              localWorkspaces={wsFilterList.map((workspace) => ({
+                id: workspace.workspace_id ?? "",
+                name: workspace.workspace_name,
+              }))}
+              workspaceSelection={selectedWorkspaceIds}
+              onApplied={async (workspaceIds, origin) => {
+                if (origin === "source" && workspaceIds) {
+                  setSelectedWorkspaceIds(workspaceIds);
+                }
+                await rqClient.invalidateQueries();
+              }}
+            />
             {selectedWorkspaceIds.length > 0 && (
               <button
                 type="button"
@@ -1218,10 +1256,11 @@ function Dashboard() {
                     label="SQL warehouse ID"
                     entity="SQL warehouse"
                     icon={<DatabricksSqlProductIcon />}
+                    status={warehouseStatus.status}
                   />
                 ) : (
                   <RailBadgeTooltip text={`SQL warehouse status: ${warehouseStatus.state ?? warehouseStatus.status}.`}>
-                    <span className={RAIL_STATUS_BADGE_CLASS}>
+                    <span className={railStatusClass(warehouseStatus.status)}>
                       {warehouseStatus.status === "warm" ? "Active" : warehouseStatus.status === "warming_up" ? "Starting" : "Offline"}
                     </span>
                   </RailBadgeTooltip>
@@ -1543,7 +1582,12 @@ function Dashboard() {
         dataPrepared={exportPrepared}
         requiredTabs={requiredExportTabs}
         tabLoading={tabLoadingFlags}
+        dataErrors={tabErrorFlags}
         onPrepare={prepareExportData}
+        onSelectionChange={() => {
+          setExportPrepared(false);
+          setRequiredExportTabs([]);
+        }}
         onRetryFailed={retryFailedExportData}
         enableArchitectureView={appSettings.enableArchitectureView}
         enableMvShareRunbook={appSettings.enableMvShareRunbook}
@@ -1560,8 +1604,7 @@ function Dashboard() {
           setTabVisibility(v);
           // If the active tab was hidden, switch to the first visible tab.
           if (!v[activeTab as keyof typeof v]) {
-            const firstVisible = (Object.keys(v) as ViewTab[]).find((k) => v[k as keyof typeof v]);
-            if (firstVisible) setActiveTab(firstVisible);
+            setActiveTab(firstVisibleDashboardTab(v) as ViewTab);
           }
         }}
         onSettingsChange={setAppSettings}

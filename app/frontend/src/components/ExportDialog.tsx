@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo } from "react";
+import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { createPortal } from "react-dom";
 import type { TabVisibility } from "@/components/SettingsDialog";
 import { C } from "@/theme";
@@ -25,6 +25,15 @@ export interface ExportSections {
 }
 
 export type ExportFormat = "pdf" | "csv";
+
+const FOCUSABLE = [
+  "a[href]",
+  "button:not([disabled])",
+  "input:not([disabled])",
+  "select:not([disabled])",
+  "textarea:not([disabled])",
+  "[tabindex]:not([tabindex='-1'])",
+].join(",");
 
 interface ExportDialogProps {
   isOpen: boolean;
@@ -140,7 +149,10 @@ export function ExportDialog({
   const [format, setFormat] = useState<ExportFormat>("pdf");
   const [architectureBusy, setArchitectureBusy] = useState(false);
   const [architectureError, setArchitectureError] = useState<string | null>(null);
+  const [runbookBusy, setRunbookBusy] = useState(false);
+  const [runbookError, setRunbookError] = useState<string | null>(null);
   const [retryingFailed, setRetryingFailed] = useState(false);
+  const panelRef = useRef<HTMLDivElement>(null);
   useDocumentScrollLock(isOpen);
 
   const handleKeyDown = useCallback((e: KeyboardEvent) => {
@@ -162,6 +174,39 @@ export function ExportDialog({
       document.removeEventListener("keydown", handleKeyDown);
     };
   }, [isOpen, handleKeyDown]);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    const returnFocusTo = document.activeElement instanceof HTMLElement
+      ? document.activeElement
+      : null;
+    panelRef.current?.focus();
+    const trap = (event: KeyboardEvent) => {
+      if (event.key !== "Tab" || !panelRef.current) return;
+      const focusable = Array.from(
+        panelRef.current.querySelectorAll<HTMLElement>(FOCUSABLE),
+      ).filter((element) => !element.hidden && element.getAttribute("aria-hidden") !== "true");
+      if (focusable.length === 0) {
+        event.preventDefault();
+        panelRef.current.focus();
+        return;
+      }
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+      }
+    };
+    document.addEventListener("keydown", trap);
+    return () => {
+      document.removeEventListener("keydown", trap);
+      returnFocusTo?.focus();
+    };
+  }, [isOpen]);
 
   if (!isOpen) return null;
 
@@ -212,6 +257,37 @@ export function ExportDialog({
     }
   };
 
+  const handleRunbookDownload = async () => {
+    if (runbookBusy) return;
+    setRunbookBusy(true);
+    setRunbookError(null);
+    try {
+      const response = await fetch("/api/settings/materialized-view-runbook");
+      if (!response.ok) {
+        throw new Error(`Runbook download failed with status ${response.status}`);
+      }
+      const blob = await response.blob();
+      const objectUrl = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = objectUrl;
+      link.download = "cost_obs_mv_share_publisher.py";
+      link.style.display = "none";
+      document.body.appendChild(link);
+      try {
+        link.click();
+        await new Promise((resolve) => window.setTimeout(resolve, 400));
+      } finally {
+        link.remove();
+        URL.revokeObjectURL(objectUrl);
+      }
+    } catch (error) {
+      console.error("MV share runbook download failed", error);
+      setRunbookError("The runbook could not be downloaded. Check the experimental setting and try again.");
+    } finally {
+      setRunbookBusy(false);
+    }
+  };
+
   const handleArchitectureExport = async () => {
     if (!onExportArchitecture || architectureBusy) return;
     setArchitectureBusy(true);
@@ -234,6 +310,8 @@ export function ExportDialog({
     >
       <div className="flex min-h-full items-center justify-center p-4 sm:p-6" onClick={(e) => e.target === e.currentTarget && !architectureBusy && onClose()}>
         <div
+          ref={panelRef}
+          tabIndex={-1}
           role="dialog"
           aria-modal="true"
           aria-labelledby="export-dialog-title"
@@ -344,18 +422,24 @@ export function ExportDialog({
                     <p className="mt-1 text-xs leading-5" style={{ color: C.slate }}>
                       Download the Run All notebook that builds compatible cost-obs aggregates and publishes them through Delta Sharing.
                     </p>
+                    {runbookError && (
+                      <p role="alert" className="mt-1 text-xs font-semibold" style={{ color: "#B91C1C" }}>
+                        {runbookError}
+                      </p>
+                    )}
                   </div>
-                  <a
-                    href="/api/settings/materialized-view-runbook"
-                    download="cost_obs_mv_share_publisher.py"
+                  <button
+                    type="button"
+                    onClick={() => { void handleRunbookDownload(); }}
+                    disabled={runbookBusy}
                     className="inline-flex w-fit items-center gap-2 px-4 py-2 text-sm font-semibold text-white focus-visible:outline-none focus-visible:shadow-(--focus)"
                     style={{ background: C.navy, borderRadius: 8 }}
                   >
                     <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
                     </svg>
-                    Download Runbook
-                  </a>
+                    {runbookBusy ? "Downloading runbook…" : "Download Runbook"}
+                  </button>
                 </div>
               )}
               </div>

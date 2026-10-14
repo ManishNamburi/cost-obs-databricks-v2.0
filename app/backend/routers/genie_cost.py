@@ -333,7 +333,7 @@ async def get_genie_dashboard_bundle(
             .replace("daily_usage_summary", f"`{cat}`.`{sch}`.`daily_usage_summary`")
             .replace("NULLIF(workspace_id, '__account__')", "workspace_id")
         )
-        sql = delta.format(ws_filter=ws_pg + source_label_filter_clause())
+        sql = delta.format(ws_filter=ws_pg + source_label_filter_clause(delta))
         return execute_query(apply_mv_overrides(sql, cat, sch), params)
 
     def _fetch_delta(pg_tmpl: str, live_sql: str):

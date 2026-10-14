@@ -337,6 +337,8 @@ export function SourceLabelFilter({
       <button
         disabled={disabled || isRefreshing}
         onClick={() => { if (!disabled) setOpen((o) => !o); }}
+        aria-expanded={open}
+        aria-haspopup="listbox"
         aria-label={updating ? "Updating sources" : label()}
         className={rail
           ? `rail-source-filter rail-control-border flex h-[28px] w-[116px] items-center gap-[6px] whitespace-nowrap rounded-[7px] border bg-white/[.07] px-[8px] text-[11.5px] font-medium text-[#E9EFED] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#FF3621]/35 focus-visible:ring-offset-1 focus-visible:ring-offset-[#1B3139] min-[1280px]:w-[190px] min-[1280px]:gap-[8px] min-[1280px]:px-[10px] ${disabled && !isRefreshing ? "cursor-not-allowed opacity-55" : "hover:bg-white/[.12]"}`

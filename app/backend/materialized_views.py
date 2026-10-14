@@ -1604,6 +1604,7 @@ CORE_GOLD_CREATE: dict[str, str] = {
 # Connected cloud invoice actuals are deliberately excluded from v2 publishing.
 OPTIONAL_SHARE_TABLES = frozenset({
     "daily_ai_gateway",
+    "use_case_dashboard_objects",
 })
 
 

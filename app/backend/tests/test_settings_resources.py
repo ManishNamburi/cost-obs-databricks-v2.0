@@ -213,7 +213,8 @@ def test_auth_status_exposes_safe_authoritative_identity_link(monkeypatch):
 
     assert result["sp_object_id"] == "sp-object-123"
     assert result["sp_client_id"] == "client-123"
-    assert result["effective_oauth_scopes"] == ["all-apis"]
+    assert result["effective_oauth_scopes"] == []
+    assert result["oauth_scope_source"] == "not_inspected"
     assert result["sp_identity_url"] == (
         "https://dbc.example.com/api/2.0/preview/scim/v2/"
         "ServicePrincipals/sp-object-123"

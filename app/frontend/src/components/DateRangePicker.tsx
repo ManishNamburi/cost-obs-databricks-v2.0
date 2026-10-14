@@ -40,7 +40,7 @@ const PRESETS = [
     getDates: () => {
       const end = yesterdayDate();
       return {
-        startDate: format(boundedStart(startOfMonth(new Date()), end), "yyyy-MM-dd"),
+        startDate: format(boundedStart(startOfMonth(end), end), "yyyy-MM-dd"),
         endDate: format(end, "yyyy-MM-dd"),
       };
     },

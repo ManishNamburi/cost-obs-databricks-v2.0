@@ -49,6 +49,26 @@ async def test_sql_warehouse_status_includes_bound_size_and_type(
 
 
 @pytest.mark.asyncio
+async def test_sql_warehouse_status_does_not_invent_classic_when_serverless_flag_missing():
+    warehouse = SimpleNamespace(
+        state=SimpleNamespace(value="RUNNING"),
+        name="Cost Observability",
+        cluster_size="Small",
+        warehouse_type=SimpleNamespace(value="PRO"),
+    )
+    workspace_client = MagicMock()
+    workspace_client.warehouses.get.return_value = warehouse
+
+    with (
+        patch.dict("os.environ", {"DATABRICKS_WAREHOUSE_ID": "warehouse-123"}),
+        patch("backend.db.get_workspace_client", return_value=workspace_client),
+    ):
+        result = await health.get_sql_warehouse_status()
+
+    assert result["warehouse_type"] is None
+
+
+@pytest.mark.asyncio
 async def test_sql_warehouse_status_marks_missing_binding_unavailable():
     with patch.dict(
         "os.environ",

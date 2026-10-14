@@ -18,7 +18,7 @@ describe("downloadArchitecturePdf", () => {
     vi.spyOn(document.body, "appendChild").mockImplementation((node) => node);
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue({
       ok: true,
-      blob: async () => new Blob(["pdf"]),
+      arrayBuffer: async () => new TextEncoder().encode("%PDF-1.4 mock").buffer,
     }));
     vi.stubGlobal("URL", {
       createObjectURL: vi.fn(() => "blob:architecture"),
@@ -30,8 +30,10 @@ describe("downloadArchitecturePdf", () => {
     expect(fetch).toHaveBeenCalledWith(ARCHITECTURE_PDF_PATH);
     expect(anchor.download).toBe(ARCHITECTURE_PDF_FILENAME);
     expect(click).toHaveBeenCalledOnce();
-    expect(remove).toHaveBeenCalledOnce();
-    expect(URL.revokeObjectURL).toHaveBeenCalledWith("blob:architecture");
+    await vi.waitFor(() => {
+      expect(remove).toHaveBeenCalledOnce();
+      expect(URL.revokeObjectURL).toHaveBeenCalledWith("blob:architecture");
+    });
   });
 
   it("fails instead of downloading an error response", async () => {

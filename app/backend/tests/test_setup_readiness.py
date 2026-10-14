@@ -89,8 +89,9 @@ def test_blocking_warehouse_check_internal_error():
     INTERNAL_ERROR (not silently swallow it or mis-classify it).
     """
     with (
-        patch("server.db.execute_query", side_effect=RuntimeError("unexpected crash")),
-        patch("server.db._user_token", _mock_token()),
+        patch.object(setup_mod, "_resolve_warehouse_config", return_value=("app_resource", "wh-123")),
+        patch("backend.db.execute_query", side_effect=RuntimeError("unexpected crash")),
+        patch("backend.db._user_token", _mock_token()),
     ):
         result = setup_mod._run_blocking_warehouse_check()
 

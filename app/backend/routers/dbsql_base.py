@@ -251,7 +251,7 @@ def create_dbsql_router(table_name: str) -> APIRouter:
                     cat, sch = get_catalog_schema()
                     sql = gold.format(
                         catalog=cat, schema=sch,
-                        ws_filter=ws_clause + source_label_filter_clause(),
+                        ws_filter=ws_clause + source_label_filter_clause(gold),
                     )
                     return execute_query(apply_mv_overrides(sql, cat, sch), params)
                 if warehouse_view_fallback():

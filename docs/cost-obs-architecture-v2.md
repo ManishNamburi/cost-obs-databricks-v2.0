@@ -51,9 +51,9 @@ Browser / React               FastAPI application                 Serving + comp
 | Dashboard gold (`daily_*` aggregates) | Lakebase (copied from warehouse gold) | App Postgres pool |
 | App state, settings, permissions, cache metadata | Lakebase | App Postgres pool |
 | Gold **build / refresh** | SQL warehouse over `system.*` | Setup job, scheduled refresh, admin rebuild |
-| Source-label / shared-source gold | Lakebase (local + imported shared gold, labeled by source) | App Postgres pool |
+| Source-label / shared-source gold | Unfiltered: Lakebase. Filtered: warehouse unified views | App Postgres pool, or warehouse when `source_labels` is set |
 | Ask Genie | Curated Genie space | User identity, not the app service principal |
-| Connected cloud invoice actuals | **Out of scope** | Not a v2.1 serving path |
+| Connected cloud invoice actuals | Optional warehouse gold when a bill connection is configured; never Delta-shared | Warehouse / connected source only |
 | Classic VM / cluster infrastructure | Computed estimate in Lakebase (`daily_infra_cluster_spend`) | App Postgres pool |
 
 Lakebase is the serving database, not a general OLAP replacement for `system.*`. Dimensions such as list prices and workspace names are denormalized into gold at build time so dashboard joins stay in Postgres.
@@ -62,7 +62,7 @@ Lakebase is the serving database, not a general OLAP replacement for `system.*`.
 
 The app starts with Lakebase-first serving on (`COST_OBS_LAKEBASE_READ=on`).
 
-- **Normal tab reads** hit Lakebase gold. There is no warehouse query on that path.
+- **Normal tab reads** hit Lakebase gold. There is no warehouse query on that path, except a source-label filter (see below).
 - If Lakebase is unreachable or required gold is absent, the API reports the data as temporarily unavailable rather than opening the warehouse on a dashboard request.
 - `shadow` and `off` are migration diagnostics only. They are not customer serving modes and are not part of the supported steady-state architecture.
 - Per-query SQL detail (`dbsql_cost_per_query`) is warehouse-built and **not** copied into Lakebase. It is too large for serving gold and is not on the normal tab path.
@@ -101,11 +101,11 @@ Some values are dual-written to Delta or a local file for migration and recovery
 
 Administrators can add additional gold sources — typically Delta-shared catalog/schema pairs that match this app’s gold table shapes.
 
-- During refresh, compatible shared gold is validated, labeled with `source_label`, and copied into the same Lakebase serving shape as local gold.
-- Local data is always included and labeled as the local source.
-- The browser can pass `source_labels` to narrow a request. That filter is applied in Lakebase.
+- During refresh, compatible shared gold is validated, labeled with `source_label` on warehouse unified views, and copied into the same Lakebase serving shape as local gold. The Postgres copy does not store `source_label`.
+- Local data is always included.
+- Unfiltered dashboard reads stay on Lakebase.
+- The browser can pass `source_labels` to narrow a request. That filter is applied on warehouse unified views, not in Lakebase.
 - **Source capability:** if the selected shares do not publish the gold tables a view needs, the API returns a typed unavailable payload instead of an empty or invented chart.
-- Warehouse-side unified views can be used as refresh inputs, but they are never queried by a dashboard request. Serving copies retain `source_label` in Lakebase.
 
 Source-share configuration itself is stored in Lakebase.
 
@@ -119,7 +119,7 @@ Source-share configuration itself is stored in Lakebase.
 
 ## Cloud costs: estimates only
 
-Connected AWS / Azure / GCP **invoice actuals are out of scope** for this architecture. The Cloud Costs view shows a **computed VM / cluster infrastructure estimate** from cluster metadata and billing quantities, stored in Lakebase as `daily_infra_cluster_spend`. Databricks DBUs are not treated as VM node-hours.
+The Cloud Costs view’s default path is a **computed VM / cluster infrastructure estimate** from cluster metadata and billing quantities, stored in Lakebase as `daily_infra_cluster_spend`. Databricks DBUs are not treated as VM node-hours. If an administrator configures an AWS / Azure / GCP bill connection, invoice actuals can appear on that tab from warehouse gold. Invoice gold is never published through Delta Sharing and is not Lakebase-served.
 
 ## Tab-by-tab serving
 

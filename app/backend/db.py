@@ -809,8 +809,12 @@ def selected_sources_publish(required_tables: str | list[str] | set[str] | tuple
     unified = set(get_unified_view_tables() or [])
     for label in labels:
         source = configured.get(label)
-        declared = source.get("tables") if isinstance(source, dict) else None
-        if source is None or not isinstance(declared, list):
+        if not isinstance(source, dict):
+            # Unknown labels do not publish; querying them would look like $0.
+            continue
+        declared = source.get("tables")
+        if not isinstance(declared, list):
+            # Unrestricted share: only if the required gold actually exists.
             if required.issubset(unified):
                 return True
             continue
@@ -2073,6 +2077,8 @@ def execute_queries_parallel(
     def _collect(future: Future, name: str) -> None:
         try:
             results[name] = future.result()
+        except SourceScopeUnsupportedError:
+            raise
         except Exception as e:
             if any(code in str(e) for code in _EXPECTED_CODES):
                 logger.warning("✗ %s failed (non-fatal): %s", name, e)

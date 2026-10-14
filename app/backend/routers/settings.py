@@ -4,6 +4,7 @@ import asyncio
 import json
 import logging
 import os
+import threading
 import time
 import uuid
 from datetime import datetime, timezone
@@ -54,16 +55,55 @@ def _require_admin(request: Request) -> str:
     return email
 
 
+_ARCHITECTURE_PDF = (
+    Path(__file__).resolve().parents[1]
+    / "assets"
+    / "cost-obs-architecture-v2.pdf"
+)
+
+
+def _experimental_enabled(key: str, default: bool = True) -> bool:
+    """Read an experimental flag without stalling a download on Lakebase."""
+    box: dict[str, bool] = {}
+
+    def _load() -> None:
+        try:
+            box["value"] = bool(get_app_settings().get(key, default))
+        except Exception:
+            box["value"] = default
+
+    thread = threading.Thread(target=_load, name=f"settings-flag-{key}", daemon=True)
+    thread.start()
+    thread.join(0.4)
+    return box.get("value", default)
+
+
 @router.get("/materialized-view-runbook")
 async def download_materialized_view_runbook(request: Request) -> FileResponse:
     """Download the generated warehouse gold / Delta Share Run All notebook."""
     _require_admin(request)
+    if not _experimental_enabled("enable_mv_share_runbook"):
+        raise HTTPException(status_code=404, detail="Materialized view runbook is disabled")
     if not _MV_SHARE_RUNBOOK.is_file():
         raise HTTPException(status_code=404, detail="Materialized view runbook is unavailable")
     return FileResponse(
         _MV_SHARE_RUNBOOK,
         media_type="text/x-python",
         filename="cost_obs_mv_share_publisher.py",
+    )
+
+
+@router.get("/architecture-pdf")
+async def download_architecture_pdf() -> FileResponse:
+    """Download the committed architecture PDF when the experimental view is on."""
+    if not _experimental_enabled("enable_architecture_view"):
+        raise HTTPException(status_code=404, detail="Architecture PDF is disabled")
+    if not _ARCHITECTURE_PDF.is_file():
+        raise HTTPException(status_code=404, detail="Architecture PDF is unavailable")
+    return FileResponse(
+        _ARCHITECTURE_PDF,
+        media_type="application/pdf",
+        filename="cost-obs-architecture-v2.pdf",
     )
 
 # In-process cache for /api/settings/tables — expensive parallel SQL + owner lookups
@@ -1454,11 +1494,9 @@ async def get_auth_status_endpoint():
     status["sp_identity_url"] = _safe_identity_url(
         host, status["sp_object_id"]
     )
-    status["effective_oauth_scopes"] = (
-        ["all-apis"] if status["sp_client_id"] else []
-    )
+    status["effective_oauth_scopes"] = []
     status["oauth_scope_source"] = (
-        "databricks_apps_oauth_m2m" if status["sp_client_id"] else "unavailable"
+        "not_inspected" if status["sp_client_id"] else "unavailable"
     )
     try:
         from backend.db import get_catalog_schema
@@ -1547,6 +1585,28 @@ def _resource_subsection_status(available: bool) -> dict[str, Any]:
     return {"available": False, "reason": "temporarily_unavailable"}
 
 
+def _call_resource_operation(name: str, operation):
+    """Run a blocking probe on a daemon thread so timeouts do not pin the executor."""
+    result_box: dict[str, Any] = {}
+    error_box: dict[str, BaseException] = {}
+    done = threading.Event()
+
+    def _target() -> None:
+        try:
+            result_box["value"] = operation()
+        except BaseException as exc:  # noqa: BLE001 — probe must not kill the waiter
+            error_box["exc"] = exc
+        finally:
+            done.set()
+
+    threading.Thread(target=_target, name=f"settings-res-{name}", daemon=True).start()
+    if not done.wait(_RESOURCES_SUBSECTION_TIMEOUT_SECONDS):
+        raise TimeoutError(f"{name} timed out")
+    if "exc" in error_box:
+        raise error_box["exc"]
+    return result_box.get("value")
+
+
 async def _bounded_resource_call(
     name: str,
     awaitable,
@@ -1558,7 +1618,7 @@ async def _bounded_resource_call(
             timeout=_RESOURCES_SUBSECTION_TIMEOUT_SECONDS,
         )
         return value, _resource_subsection_status(True)
-    except asyncio.TimeoutError:
+    except (asyncio.TimeoutError, TimeoutError):
         logger.warning(
             "Settings Resources subsection %s timed out after %.1fs",
             name,
@@ -1576,7 +1636,7 @@ async def _bounded_resource_thread(
 ) -> tuple[Any, dict[str, Any]]:
     return await _bounded_resource_call(
         name,
-        asyncio.to_thread(operation),
+        asyncio.to_thread(_call_resource_operation, name, operation),
         fallback,
     )
 
@@ -1768,15 +1828,9 @@ def _resource_refresh_snapshot() -> dict[str, Any]:
 
 
 def _deployment_metadata_from_process_start() -> dict[str, Any]:
-    from backend.routers import health as health_mod
+    from backend.routers.health import _deployment_metadata_from_process_start as health_fallback
 
-    return {
-        "deployed_at": getattr(health_mod, "_PROCESS_STARTED_AT", None),
-        "deployer": None,
-        "commit_sha": None,
-        "available": True,
-        "source": "process_start_approximate_restart",
-    }
+    return health_fallback()
 
 
 @router.get("/resources")
@@ -2604,13 +2658,18 @@ async def get_user_permissions(request: Request) -> dict:
     except Exception:
         perms["table_location"] = None
     current_user = request.headers.get("X-Forwarded-Email", os.getenv("USER", "dev@local"))
-    current_role = (
-        "admin"
-        if str(current_user).strip().lower() in {
-            str(email).strip().lower() for email in perms.get("admins", [])
-        }
-        else "consumer"
-    )
+    admins = {str(email).strip().lower() for email in perms.get("admins", [])}
+    consumers = {str(email).strip().lower() for email in perms.get("consumers", [])}
+    needle = str(current_user).strip().lower()
+    if needle in admins:
+        current_role = "admin"
+    elif needle in consumers:
+        current_role = "consumer"
+    elif not admins:
+        # Fresh install: no admins configured yet — same rule as /api/user/me.
+        current_role = "admin"
+    else:
+        current_role = "consumer"
     from backend.routers.user import ROLE_CAPABILITIES
 
     perms["current_user"] = current_user
@@ -3156,6 +3215,7 @@ _APP_SETTINGS_DEFAULTS: dict = {
     "exp_debugger_link": False,
     "enable_architecture_view": True,
     "enable_mv_share_runbook": True,
+    "feedback_slack_url": "",
     "enable_use_case_tracking": False,
     "enable_accuracy_checks": False,
     "tab_visibility": _DEFAULT_TAB_VISIBILITY,
@@ -3231,6 +3291,12 @@ def save_app_settings(partial: dict) -> dict:
             json.dump(merged, f, indent=2)
     except OSError:
         pass
+    try:
+        from backend.feedback import invalidate_feedback_settings_cache
+
+        invalidate_feedback_settings_cache()
+    except Exception:
+        logger.debug("Feedback settings cache invalidation skipped")
     return merged
 
 

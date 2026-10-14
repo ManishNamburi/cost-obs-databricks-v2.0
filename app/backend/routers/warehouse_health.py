@@ -19,7 +19,6 @@ from backend.db import (
     execute_query,
     execute_queries_parallel,
     local_source_is_selected,
-    selected_sources_publish,
 )
 
 router = APIRouter()
@@ -52,9 +51,9 @@ def _shared_scope_unavailable() -> dict[str, Any]:
 
 
 def _warehouse_scope_blocked() -> bool:
-    return (not local_source_is_selected()) and not selected_sources_publish(
-        {"daily_warehouse_idle"}
-    )
+    # Optimize reads this workspace's live system.compute / query.history.
+    # Shared gold must never open that path, even if the share lists idle tables.
+    return not local_source_is_selected()
 
 _SQL_IDLE = f"""
 WITH current_warehouses AS (
