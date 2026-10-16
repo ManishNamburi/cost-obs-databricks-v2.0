@@ -129,3 +129,4 @@ resources:
               - psycopg[binary]
               - psycopg_pool
               - databricks-sql-connector==3.7.4
+              - cachetools==7.0.0

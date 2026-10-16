@@ -22,10 +22,11 @@ def test_optimizer_concurrency_reads_the_subquery_column_not_the_struct():
     assert re.search(r"compute\.warehouse_id AS warehouse_id,\s*DATE_TRUNC", cte)
 
 
-def test_setup_job_environment_installs_the_sql_connector():
+def test_setup_job_environment_installs_gold_build_python_deps():
     jobs = yaml.safe_load(JOBS_YML.read_text())
     deps = jobs["resources"]["jobs"]["cost_obs_setup"]["environments"][0]["spec"]["dependencies"]
     assert any(d.startswith("databricks-sql-connector") for d in deps)
+    assert any(d.startswith("cachetools") for d in deps)
 
 
 def test_mv_lock_falls_back_to_a_per_user_path_when_shared_file_is_unwritable(tmp_path, monkeypatch):
