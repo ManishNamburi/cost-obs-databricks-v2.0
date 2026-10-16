@@ -128,3 +128,4 @@ resources:
             dependencies:
               - psycopg[binary]
               - psycopg_pool
+              - databricks-sql-connector==3.7.4

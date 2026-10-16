@@ -15,6 +15,8 @@ These tables should be refreshed daily via a scheduled job.
 
 import fcntl
 import logging
+import os
+import tempfile
 import threading
 from collections.abc import Callable
 from contextlib import contextmanager
@@ -1036,11 +1038,13 @@ from backend.materialized_views_extra import EXTRA_TABLE_REFRESH, EXTRA_CREATE, 
 _TABLE_REFRESH_CONFIG.update(EXTRA_TABLE_REFRESH)
 
 # Cloud invoice gold is only valid when CUR / Cost Management / GCP export
-# is connected. A missing source must not fail the whole rebuild.
+# is connected, and dashboard objects need system.dashboards, which some
+# metastores lack. A missing source must not fail the whole rebuild.
 OPTIONAL_GOLD_TABLES = frozenset({
     "daily_cloud_actuals",
     "daily_azure_actuals",
     "daily_gcp_actuals",
+    "use_case_dashboard_objects",
 })
 
 
@@ -1492,6 +1496,17 @@ _MV_WRITE_LOCK = threading.Lock()
 _MV_LOCK_PATH = "/tmp/cost-obs-mv-refresh.lock"
 
 
+def _open_mv_lock_file():
+    # Serverless job retries can run as a different OS user than the attempt
+    # that created the shared lock file, which leaves it unwritable.
+    try:
+        return open(_MV_LOCK_PATH, "w")
+    except PermissionError:
+        fallback = os.path.join(tempfile.gettempdir(), f"cost-obs-mv-refresh-{os.getuid()}.lock")
+        logger.warning("MV lock %s not writable; using %s", _MV_LOCK_PATH, fallback)
+        return open(fallback, "w")
+
+
 # Tables too large to INSERT OVERWRITE on every refresh. dbsql_cost_per_query is
 # per-query granular (tens of millions of rows) and isn't a dashboard aggregate.
 _DEDUP_SKIP: frozenset[str] = frozenset({"dbsql_cost_per_query"})
@@ -1546,7 +1561,7 @@ def _mv_write_guard():
     auto-releases if the holding process dies.
     """
     with _MV_WRITE_LOCK:
-        lf = open(_MV_LOCK_PATH, "w")
+        lf = _open_mv_lock_file()
         try:
             fcntl.flock(lf, fcntl.LOCK_EX)
             yield

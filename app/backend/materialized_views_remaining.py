@@ -473,9 +473,9 @@ cluster_scale_events AS (
   HAVING MAX(cluster_count) >= 2
 ),
 max_concurrency AS (
-  SELECT compute.warehouse_id AS warehouse_id, MAX(concurrent_queries) AS max_concurrent
+  SELECT warehouse_id, MAX(concurrent_queries) AS max_concurrent
   FROM (
-    SELECT compute.warehouse_id, DATE_TRUNC('minute', start_time) AS minute_bucket, COUNT(*) AS concurrent_queries
+    SELECT compute.warehouse_id AS warehouse_id, DATE_TRUNC('minute', start_time) AS minute_bucket, COUNT(*) AS concurrent_queries
     FROM system.query.history
     WHERE start_time >= NOW() - INTERVAL 30 DAY
       AND compute.warehouse_id IN (SELECT warehouse_id FROM cluster_scale_events)
