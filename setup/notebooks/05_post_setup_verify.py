@@ -18,7 +18,7 @@ from shared_setup_lib import verify
 
 # COMMAND ----------
 
-for _k in ["ENDPOINT_NAME", "DATABRICKS_WAREHOUSE_ID", "COST_OBS_CATALOG", "COST_OBS_SCHEMA"]:
+for _k in ["ENDPOINT_NAME", "DATABRICKS_WAREHOUSE_ID", "COST_OBS_CATALOG", "COST_OBS_SCHEMA", "APP_NAME"]:
     try:
         _v = dbutils.widgets.get(_k)
         if _v:

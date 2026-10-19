@@ -223,8 +223,16 @@ setup job:
   ```
 
 Lakebase project and branch resources are `replace_existing=false` by
-default. `bundle destroy` will drop them; a repeat `bundle deploy` on the
-old SHA leaves them in place and unused (no ongoing cost when idle).
+default. `bundle destroy` only **soft-deletes** the Lakebase project. The
+name (for example `cost-obs-db`) stays reserved for about 7 days, so the
+next `bundle deploy` fails with "A soft-deleted project currently has this
+resource name." Purge it before redeploying:
+
+```bash
+databricks postgres delete-project projects/cost-obs-db --purge
+```
+
+Use the Lakebase project name from the target (`lakebase_project_name`).
 
 ---
 

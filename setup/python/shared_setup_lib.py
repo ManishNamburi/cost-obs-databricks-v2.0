@@ -345,6 +345,7 @@ def build_gold(*, _create_mvs=None, _sync_all=None) -> None:
         print(f"[build_gold] lakebase_sync (full): {sync_summary}")
     else:
         print(f"[build_gold] lakebase_sync: {sync_summary}")
+    _require_successful_lakebase_sync(sync_summary)
 
     with pg_conn() as conn:
         _mark_step_done(conn, "build_gold", {
@@ -387,6 +388,94 @@ def _get_app_sp_uuid() -> str:
     """OAuth role name the app actually logs in as (SP client UUID)."""
     client_id, _scim_id = _get_app_sp_identities()
     return client_id
+
+
+def _warehouse_query(statement: str, *, wait_timeout: str = "30s"):
+    """Run a SQL warehouse statement as the setup identity and return data_array."""
+    from databricks.sdk.service.sql import StatementState
+
+    w = _get_workspace_client()
+    wh_id = os.environ["DATABRICKS_WAREHOUSE_ID"]
+    stmt = w.statement_execution.execute_statement(
+        warehouse_id=wh_id,
+        statement=statement,
+        wait_timeout=wait_timeout,
+    )
+    for _ in range(30):
+        state = getattr(stmt.status, "state", None) if stmt.status else None
+        if state in (
+            StatementState.SUCCEEDED,
+            StatementState.FAILED,
+            StatementState.CANCELED,
+            StatementState.CLOSED,
+        ):
+            break
+        time.sleep(2)
+        stmt = w.statement_execution.get_statement(stmt.statement_id)
+    state = getattr(stmt.status, "state", None) if stmt.status else None
+    if state != StatementState.SUCCEEDED:
+        err = getattr(stmt.status, "error", None) if stmt.status else None
+        raise RuntimeError(f"Warehouse statement failed ({state}): {err or statement}")
+    return (stmt.result.data_array or []) if stmt.result else []
+
+
+def _grant_app_sp_uc_privileges() -> None:
+    """Grant the app service principal the UC rights the dashboard needs.
+
+    The setup job runs as the installing user, who owns the gold catalog/schema.
+    The app queries as its service principal, so those grants must be issued here.
+    """
+    catalog = os.environ["COST_OBS_CATALOG"]
+    schema = os.environ["COST_OBS_SCHEMA"]
+    sp_uuid = _get_app_sp_uuid()
+    _warehouse_query(f"CREATE SCHEMA IF NOT EXISTS `{catalog}`.`{schema}`")
+    grants = (
+        f"GRANT USE CATALOG ON CATALOG `{catalog}` TO `{sp_uuid}`",
+        f"GRANT USE SCHEMA ON SCHEMA `{catalog}`.`{schema}` TO `{sp_uuid}`",
+        (
+            f"GRANT SELECT, MODIFY, CREATE TABLE ON SCHEMA `{catalog}`.`{schema}` "
+            f"TO `{sp_uuid}`"
+        ),
+    )
+    for sql in grants:
+        _warehouse_query(sql)
+        print(f"[bootstrap_lakebase] {sql}")
+
+
+def _require_successful_lakebase_sync(summary: object) -> None:
+    """Fail setup when gold did not actually land in Lakebase."""
+    if not isinstance(summary, dict) or summary.get("skipped"):
+        reason = summary.get("reason") if isinstance(summary, dict) else summary
+        raise RuntimeError(
+            f"Lakebase gold copy was skipped ({reason}). "
+            "The dashboard cannot serve spend until Lakebase sync succeeds."
+        )
+    ok = int(summary.get("ok") or 0)
+    total = int(summary.get("total") or 0)
+    tables = summary.get("tables") or {}
+    required_errors: list[str] = []
+    if isinstance(tables, dict) and tables:
+        optional = set()
+        try:
+            from backend.materialized_views import OPTIONAL_GOLD_TABLES
+            optional = set(OPTIONAL_GOLD_TABLES)
+        except Exception:
+            optional = {"daily_cloud_actuals", "daily_azure_actuals", "daily_gcp_actuals", "use_case_dashboard_objects"}
+        optional.add("dbsql_cost_per_query")
+        for name, rec in tables.items():
+            if name in optional:
+                continue
+            if isinstance(rec, dict) and rec.get("error"):
+                required_errors.append(f"{name}: {rec['error']}")
+        usage = tables.get("daily_usage_summary")
+        if not isinstance(usage, dict) or usage.get("error"):
+            required_errors.append("daily_usage_summary did not copy")
+    elif ok < total or ok == 0:
+        required_errors.append(f"synced {ok}/{total} tables")
+    if required_errors:
+        raise RuntimeError(
+            "Lakebase gold copy incomplete: " + "; ".join(required_errors)
+        )
 
 
 def _run_migration_file(conn: psycopg.Connection, path: str) -> None:
@@ -439,6 +528,7 @@ def bootstrap_lakebase() -> None:
     schema = os.environ["COST_OBS_SCHEMA"]
     catalog = os.environ["COST_OBS_CATALOG"]
     _ensure_endpoint_scale_to_zero()
+    _grant_app_sp_uc_privileges()
 
     with pg_conn() as conn:
         # 1. Create working schema FIRST — the connection string sets search_path
@@ -839,57 +929,73 @@ def setup_usage_policy() -> None:
         _mark_step_done(conn, "usage_policy")
 
 
+def _verify_sp_can_read_gold(catalog: str, schema: str) -> None:
+    sp_uuid = _get_app_sp_uuid()
+    catalog_rows = _warehouse_query(
+        "SELECT privilege_type FROM system.information_schema.catalog_privileges "
+        f"WHERE catalog_name = '{catalog}' AND grantee = '{sp_uuid}'"
+    )
+    schema_rows = _warehouse_query(
+        "SELECT privilege_type FROM system.information_schema.schema_privileges "
+        f"WHERE catalog_name = '{catalog}' AND schema_name = '{schema}' "
+        f"AND grantee = '{sp_uuid}'"
+    )
+    found = {
+        str(row[0]).upper().replace("_", " ").strip()
+        for row in list(catalog_rows) + list(schema_rows)
+        if row
+    }
+    missing = sorted({"USE CATALOG", "USE SCHEMA", "SELECT"} - found)
+    if missing:
+        raise RuntimeError(
+            f"App service principal {sp_uuid} is missing {missing} on "
+            f"{catalog}.{schema}. Setup grants failed or were not applied."
+        )
+    print(f"[verify] App service principal {sp_uuid} can use {catalog}.{schema}.")
+
+
+def _verify_lakebase_has_gold() -> None:
+    gold_schema = os.environ.get("COST_OBS_PG_GOLD_SCHEMA", "cost_obs_gold")
+    with pg_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                f'SELECT COUNT(*) FROM "{gold_schema}"."daily_usage_summary"'
+            )
+            row = cur.fetchone()
+    count = int(row[0]) if row else 0
+    if count <= 0:
+        raise RuntimeError(
+            f'Lakebase "{gold_schema}"."daily_usage_summary" has no rows. '
+            "Gold copy did not run."
+        )
+    print(f"[verify] Lakebase gold daily_usage_summary has {count} rows.")
+
+
 def verify() -> None:
     """Run smoke checks and write the final setup_complete marker."""
     catalog = os.environ["COST_OBS_CATALOG"]
     schema = os.environ["COST_OBS_SCHEMA"]
 
-    # Smoke check: system.billing.usage is queryable
-    w = _get_workspace_client()
-    wh_id = os.environ["DATABRICKS_WAREHOUSE_ID"]
-    try:
-        from databricks.sdk.service.sql import StatementState
-        stmt = w.statement_execution.execute_statement(
-            statement=f"SELECT COUNT(*) FROM system.billing.usage LIMIT 1",
-            warehouse_id=wh_id,
-        )
-        # Poll until done (timeout 60s)
-        for _ in range(30):
-            if stmt.status.state in (StatementState.SUCCEEDED, StatementState.FAILED,
-                                     StatementState.CANCELED, StatementState.CLOSED):
-                break
-            time.sleep(2)
-            stmt = w.statement_execution.get_statement(stmt.statement_id)
-        if stmt.status.state != StatementState.SUCCEEDED:
-            raise RuntimeError(f"Billing usage query failed: {stmt.status.error}")
-        print(f"[verify] system.billing.usage is queryable.")
-    except Exception as e:
-        print(f"[verify] WARNING: billing usage check failed: {e}")
+    _warehouse_query("SELECT COUNT(*) FROM system.billing.usage LIMIT 1")
+    print("[verify] system.billing.usage is queryable.")
 
-    try:
-        gold_stmt = w.statement_execution.execute_statement(
-            warehouse_id=wh_id,
-            statement=(
-                f"SELECT COUNT(*) FROM system.information_schema.tables "
-                f"WHERE table_catalog = '{catalog}' "
-                f"AND table_schema = '{schema}' "
-                f"AND table_name = 'daily_usage_summary'"
-            ),
-            wait_timeout="30s",
+    gold_rows = _warehouse_query(
+        "SELECT COUNT(*) FROM system.information_schema.tables "
+        f"WHERE table_catalog = '{catalog}' "
+        f"AND table_schema = '{schema}' "
+        f"AND table_name = 'daily_usage_summary'"
+    )
+    gold_ok = bool(gold_rows) and int(gold_rows[0][0]) > 0
+    if not gold_ok:
+        raise RuntimeError(
+            f"{catalog}.{schema}.daily_usage_summary is missing. "
+            "Re-run cost_obs_setup."
         )
-        gold_rows = (gold_stmt.result.data_array or []) if gold_stmt.result else []
-        gold_ok = bool(gold_rows) and int(gold_rows[0][0]) > 0
-        if gold_ok:
-            print(f"[verify] Gold table {catalog}.{schema}.daily_usage_summary is present.")
-        else:
-            print(
-                f"[verify] WARNING: {catalog}.{schema}.daily_usage_summary is missing. "
-                "Re-run cost_obs_setup or rebuild from Settings."
-            )
-    except Exception as e:
-        print(f"[verify] WARNING: gold table check failed: {e}")
+    print(f"[verify] Gold table {catalog}.{schema}.daily_usage_summary is present.")
 
-    # Smoke check: Lakebase setup_state is populated
+    _verify_lakebase_has_gold()
+    _verify_sp_can_read_gold(catalog, schema)
+
     with pg_conn() as conn:
         with conn.cursor() as cur:
             cur.execute("SELECT step, completed_at FROM public.setup_state ORDER BY completed_at")

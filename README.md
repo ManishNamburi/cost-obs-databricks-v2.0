@@ -42,6 +42,8 @@ Ports the v1 1.1 field-hardening pass into v2's `app/backend/` + `app/frontend/`
 
 Redeploy the bundle: `databricks bundle deploy -t <target>` then `databricks bundle run cost_obs_setup -t <target>` if you want the setup job to verify. Setup is idempotent — each task checks `setup_state` before executing, so re-running is safe. The two new materialized views (`daily_apps_summary`, `daily_tag_summary`) auto-build on first startup when the app detects data older than 26 hours; the raw-scan fallbacks keep the Apps and Tagging tabs working the whole time. No back-fill, no manual SQL, no config change.
 
+If you ran `databricks bundle destroy` first, the Lakebase project is only soft-deleted and keeps its name for about 7 days. Redeploy fails until you purge it, for example `databricks postgres delete-project projects/cost-obs-db --purge` using the target's Lakebase project name.
+
 If your app used `COST_OBS_WORKSPACES` or any other setting from 2.0, that's preserved — 2.1 introduces no new required env vars or bundle variables.
 
 ### At-a-glance changelog

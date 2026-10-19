@@ -119,6 +119,7 @@ resources:
               COST_OBS_CATALOG: ${var.catalog}
               COST_OBS_SCHEMA: ${var.schema}
               DEPLOYMENT_MODE: ${var.deployment_mode}
+              APP_NAME: ${var.app_name}
           environment_key: default
 
       environments:
@@ -130,3 +131,4 @@ resources:
               - psycopg_pool
               - databricks-sql-connector==3.7.4
               - cachetools==7.0.0
+              - databricks-sdk==0.81.0
