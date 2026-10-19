@@ -11,6 +11,7 @@ from shared_setup_lib import (  # noqa: E402
     _gold_hard_errors,
     _gold_lookback_days,
     _grant_app_sp_uc_privileges,
+    _grant_pg_schema_to_role,
     _require_successful_lakebase_sync,
     _verify_lakebase_has_gold,
     _verify_sp_can_read_gold,
@@ -177,14 +178,14 @@ def test_verify_fails_when_lakebase_gold_is_empty(monkeypatch):
 
 
 def test_verify_fails_when_sp_lacks_catalog_access(monkeypatch):
-    monkeypatch.setattr("shared_setup_lib._get_app_sp_uuid", lambda: "sp-uuid")
+    monkeypatch.setattr("shared_setup_lib._get_app_sp_identities", lambda: ("sp-uuid", "123"))
     monkeypatch.setattr("shared_setup_lib._warehouse_query", lambda *_a, **_k: [])
     with pytest.raises(RuntimeError, match="missing"):
         _verify_sp_can_read_gold("acme_catalog", "cost_obs")
 
 
 def test_verify_passes_when_sp_has_required_privileges(monkeypatch):
-    monkeypatch.setattr("shared_setup_lib._get_app_sp_uuid", lambda: "sp-uuid")
+    monkeypatch.setattr("shared_setup_lib._get_app_sp_identities", lambda: ("sp-uuid", "123"))
 
     def query(sql, **_k):
         if "catalog_privileges" in sql:
@@ -193,6 +194,23 @@ def test_verify_passes_when_sp_has_required_privileges(monkeypatch):
 
     monkeypatch.setattr("shared_setup_lib._warehouse_query", query)
     _verify_sp_can_read_gold("acme_catalog", "cost_obs")
+
+
+def test_build_gold_reruns_when_marker_set_but_lakebase_empty(gold_env, monkeypatch):
+    monkeypatch.setenv("DEPLOYMENT_MODE", "fresh")
+    monkeypatch.setattr("shared_setup_lib._is_step_done", lambda *_a, **_k: True)
+    monkeypatch.setattr(
+        "shared_setup_lib._verify_lakebase_has_gold",
+        lambda: (_ for _ in ()).throw(RuntimeError("no rows")),
+    )
+    seen = {}
+
+    def create_mvs(**kwargs):
+        seen["ran"] = True
+        return {"daily_usage_summary": "created", "lakebase_sync": {"ok": 8, "total": 8}}
+
+    build_gold(_create_mvs=create_mvs, _sync_all=lambda *_a, **_k: {"ok": 8, "total": 8})
+    assert seen.get("ran") is True
 
 
 def test_uc_grants_cover_catalog_schema_and_table_write(monkeypatch):
@@ -206,3 +224,27 @@ def test_uc_grants_cover_catalog_schema_and_table_write(monkeypatch):
     assert "GRANT USE CATALOG ON CATALOG `acme_catalog` TO `sp-uuid`" in joined
     assert "GRANT USE SCHEMA ON SCHEMA `acme_catalog`.`cost_obs` TO `sp-uuid`" in joined
     assert "GRANT SELECT, MODIFY, CREATE TABLE ON SCHEMA `acme_catalog`.`cost_obs`" in joined
+
+
+def test_lakebase_gold_schema_grants_cover_app_role():
+    seen = []
+
+    class _Cur:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+        def execute(self, sql):
+            seen.append(sql)
+
+    class _Conn:
+        def cursor(self):
+            return _Cur()
+
+    _grant_pg_schema_to_role(_Conn(), "cost_obs_gold", "sp-uuid", "installer")
+    joined = "\n".join(seen)
+    assert 'GRANT USAGE, CREATE ON SCHEMA "cost_obs_gold" TO "sp-uuid"' in joined
+    assert 'ON ALL TABLES IN SCHEMA "cost_obs_gold"' in joined
+    assert 'IN SCHEMA "cost_obs_gold"' in joined

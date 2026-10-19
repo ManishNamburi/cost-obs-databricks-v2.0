@@ -1754,10 +1754,8 @@ try:
 
         @classmethod
         def connect(cls, conninfo: str = "", **kwargs):  # type: ignore[override]
-            w = get_workspace_client()
             endpoint = os.environ.get("ENDPOINT_NAME", "")
-            cred = w.postgres.generate_database_credential(endpoint=endpoint)
-            kwargs["password"] = cred.token
+            kwargs["password"] = mint_lakebase_token(endpoint)
             return super().connect(conninfo, **kwargs)
 except ImportError:
     _PSYCOPG_AVAILABLE = False
@@ -1767,7 +1765,60 @@ _lakebase_pool: "psycopg_pool.ConnectionPool | None" = None
 _lakebase_pool_lock = __import__("threading").Lock()
 
 
+def mint_lakebase_token(endpoint: str) -> str:
+    """Mint a Lakebase OAuth password for the current identity.
+
+    Prefers ``WorkspaceClient.postgres.generate_database_credential`` (SDK
+    0.28+). Job environments that still ship an older SDK fall back to the
+    raw credentials API the setup job already uses.
+    """
+    if not endpoint:
+        raise RuntimeError("ENDPOINT_NAME is required to mint a Lakebase credential")
+    w = get_workspace_client()
+    postgres = getattr(w, "postgres", None)
+    generate = getattr(postgres, "generate_database_credential", None) if postgres is not None else None
+    if callable(generate):
+        cred = generate(endpoint=endpoint)
+        token = getattr(cred, "token", None) or (cred.get("token") if isinstance(cred, dict) else None)
+        if token:
+            return str(token)
+    resp = w.api_client.do(
+        "POST", "/api/2.0/postgres/credentials", body={"endpoint": endpoint}
+    )
+    token = (resp or {}).get("token", "")
+    if not token:
+        raise RuntimeError("Lakebase credential API returned no token")
+    return str(token)
+
+
+def _resolve_lakebase_runtime_env() -> None:
+    """Fill PGHOST/PGUSER when the Apps binding is absent (setup job path)."""
+    if os.environ.get("PGHOST"):
+        return
+    endpoint = os.environ.get("ENDPOINT_NAME", "")
+    if not endpoint:
+        return
+    w = get_workspace_client()
+    try:
+        ep = w.api_client.do("GET", f"/api/2.0/postgres/{endpoint}")
+        host = ((ep or {}).get("status") or {}).get("hosts", {}).get("host", "")
+        if host:
+            os.environ["PGHOST"] = host
+    except Exception as e:
+        logger.warning("Could not resolve PGHOST from %s: %s", endpoint, e)
+    os.environ.setdefault("PGDATABASE", "databricks_postgres")
+    if os.environ.get("PGUSER"):
+        return
+    try:
+        me = w.current_user.me()
+        if me.user_name:
+            os.environ["PGUSER"] = me.user_name
+    except Exception as e:
+        logger.warning("Could not resolve PGUSER: %s", e)
+
+
 def _lakebase_conninfo() -> str:
+    _resolve_lakebase_runtime_env()
     host = os.environ.get("PGHOST", "")
     if not host:
         return ""

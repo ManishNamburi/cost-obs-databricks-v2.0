@@ -27,7 +27,7 @@ def test_setup_job_environment_installs_gold_build_python_deps():
     deps = jobs["resources"]["jobs"]["cost_obs_setup"]["environments"][0]["spec"]["dependencies"]
     assert any(d.startswith("databricks-sql-connector") for d in deps)
     assert any(d.startswith("cachetools") for d in deps)
-    assert any(d.startswith("databricks-sdk") for d in deps)
+    assert "databricks-sdk==0.81.0" in deps
 
 
 def test_mv_lock_falls_back_to_a_per_user_path_when_shared_file_is_unwritable(tmp_path, monkeypatch):

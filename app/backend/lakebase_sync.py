@@ -293,26 +293,70 @@ def _ensure_pg_table(conn, table: str, specs: list[dict[str, Any]], pk: list[str
     PK changes are NOT applied to an existing table — a breaking key change is a
     versioned cutover (§9), not an in-place mutation.
     """
-    with conn.cursor() as cur:
-        cur.execute(build_create_table_sql(table, specs, pk))
-        # Additive evolution: add columns that appeared in the build since create.
-        cur.execute(
-            "SELECT column_name FROM information_schema.columns "
-            "WHERE table_name = %s AND table_schema = current_schema()",
-            (table,),
+    def _create() -> None:
+        with conn.cursor() as cur:
+            cur.execute(build_create_table_sql(table, specs, pk))
+            # Additive evolution: add columns that appeared in the build since create.
+            cur.execute(
+                "SELECT column_name FROM information_schema.columns "
+                "WHERE table_name = %s AND table_schema = current_schema()",
+                (table,),
+            )
+            existing = {row[0] for row in cur.fetchall()}
+            for s in specs:
+                if s["name"] not in existing:
+                    logger.info("lakebase_sync: adding column %s.%s", table, s["name"])
+                    cur.execute(build_add_column_sql(table, s))
+
+    try:
+        _create()
+    except Exception as e:
+        if not _is_not_owner_error(e):
+            raise
+        logger.warning(
+            "lakebase_sync: %s is owned by another identity — dropping so this role can recreate it",
+            table,
         )
-        existing = {row[0] for row in cur.fetchall()}
-        for s in specs:
-            if s["name"] not in existing:
-                logger.info("lakebase_sync: adding column %s.%s", table, s["name"])
-                cur.execute(build_add_column_sql(table, s))
+        _reclaim_table(conn, table)
+        _create()
+
+
+def _is_not_owner_error(exc: BaseException) -> bool:
+    return "must be owner" in str(exc).lower()
+
+
+def _reclaim_table(conn, table: str) -> None:
+    """Drop a leftover table owned by another Lakebase identity so this role can recreate it."""
+    conn.rollback()
+    with conn.cursor() as cur:
+        cur.execute(f'DROP TABLE IF EXISTS "{table}" CASCADE')
 
 
 def _ensure_sync_state_table(conn) -> None:
     with conn.cursor() as cur:
         cur.execute(_SYNC_STATE_DDL)
-        # Additive: pre-existing watermark tables (from before backfill tracking) need the column.
-        cur.execute(f'ALTER TABLE {_SYNC_STATE_TABLE} ADD COLUMN IF NOT EXISTS backfilled_at timestamptz')
+        cur.execute(
+            "SELECT 1 FROM information_schema.columns "
+            "WHERE table_name = %s AND column_name = 'backfilled_at' "
+            "AND table_schema = current_schema()",
+            (_SYNC_STATE_TABLE,),
+        )
+        if cur.fetchone() is not None:
+            return
+        try:
+            cur.execute(
+                f"ALTER TABLE {_SYNC_STATE_TABLE} ADD COLUMN IF NOT EXISTS backfilled_at timestamptz"
+            )
+        except Exception as e:
+            if not _is_not_owner_error(e):
+                raise
+            conn.rollback()
+            # Table belongs to the other Lakebase identity (app vs setup job).
+            # Gold copy can continue; incremental watermarks may be incomplete.
+            logger.warning(
+                "lakebase_sync: cannot ALTER %s (%s) — continuing without adding backfilled_at",
+                _SYNC_STATE_TABLE, e,
+            )
 
 
 def _write_sync_state(
@@ -330,8 +374,9 @@ def _write_sync_state(
     # later incremental syncs (COALESCE) — it is the durable "a full backfill has
     # completed" signal that decides full-vs-incremental, so a partial backfill that
     # left the table non-empty can't get stuck doing incremental-only forever.
-    with conn.cursor() as cur:
-        cur.execute(
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
             f"""
             INSERT INTO {_SYNC_STATE_TABLE}
                 (table_name, last_synced_at, mode, window_start, rows_synced,
@@ -349,6 +394,11 @@ def _write_sync_state(
             (table, mode, window_start, rows_synced, max_source_date, duration_ms,
              _dt.datetime.now(_dt.timezone.utc) if mark_backfilled else None),
         )
+    except Exception as e:
+        if not _is_not_owner_error(e) and "permission denied" not in str(e).lower():
+            raise
+        conn.rollback()
+        logger.warning("lakebase_sync: skipping watermark write for %s (%s)", table, e)
 
 
 def sync_one_aggregate(
@@ -436,8 +486,19 @@ def sync_one_aggregate(
         range_start = max(compute_reprocess_start(reprocess_days, overlap_days), mn)
     else:
         range_start = mn
-        with get_pg_conn() as conn, conn.cursor() as cur:  # clear before full load
-            cur.execute(f'TRUNCATE TABLE "{table}"')
+        with get_pg_conn() as conn:  # clear before full load
+            try:
+                with conn.cursor() as cur:
+                    cur.execute(f'TRUNCATE TABLE "{table}"')
+            except Exception as e:
+                if not _is_not_owner_error(e):
+                    raise
+                logger.warning(
+                    "lakebase_sync: %s is owned by another identity — dropping so this role can recreate it",
+                    table,
+                )
+                _reclaim_table(conn, table)
+                _ensure_pg_table(conn, table, specs, pk)
 
     total = 0
     for cs, ce in iter_date_chunks(range_start, mx, _CHUNK_DAYS):

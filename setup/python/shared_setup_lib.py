@@ -223,6 +223,13 @@ def validate() -> None:
 
     # Verify warehouse is reachable via SDK
     w = _get_workspace_client()
+    try:
+        import databricks.sdk as _sdk
+        sdk_ver = getattr(_sdk, "__version__", "unknown")
+    except Exception:
+        sdk_ver = "unknown"
+    has_postgres = hasattr(w, "postgres")
+    print(f"[validate] databricks-sdk={sdk_ver} hasattr(w.postgres)={has_postgres}")
     wh_id = os.environ["DATABRICKS_WAREHOUSE_ID"]
     wh = w.warehouses.get(wh_id)
     print(f"[validate] Warehouse '{wh.name}' ({wh_id}) — state: {wh.state}")
@@ -299,8 +306,12 @@ def build_gold(*, _create_mvs=None, _sync_all=None) -> None:
 
     with pg_conn() as conn:
         if _is_step_done(conn, "build_gold"):
-            print("[build_gold] Already complete — skipping.")
-            return
+            try:
+                _verify_lakebase_has_gold()
+                print("[build_gold] Already complete — skipping.")
+                return
+            except RuntimeError as exc:
+                print(f"[build_gold] Marker present but gold copy is missing ({exc}) — re-running.")
 
     print(
         f"[build_gold] mode={mode} catalog={catalog} schema={schema} "
@@ -478,6 +489,29 @@ def _require_successful_lakebase_sync(summary: object) -> None:
         )
 
 
+def _grant_pg_schema_to_role(
+    conn: psycopg.Connection, schema_name: str, role: str, current_role: str
+) -> None:
+    """Give the app identity access to a Postgres schema the installer owns."""
+    quoted = f'"{schema_name}"'
+    with conn.cursor() as cur:
+        cur.execute(f'GRANT USAGE, CREATE ON SCHEMA {quoted} TO "{role}"')
+        cur.execute(
+            f'GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA {quoted} TO "{role}"'
+        )
+        cur.execute(
+            f'GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA {quoted} TO "{role}"'
+        )
+        cur.execute(
+            f'ALTER DEFAULT PRIVILEGES FOR ROLE "{current_role}" IN SCHEMA {quoted} '
+            f'GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO "{role}"'
+        )
+        cur.execute(
+            f'ALTER DEFAULT PRIVILEGES FOR ROLE "{current_role}" IN SCHEMA {quoted} '
+            f'GRANT USAGE, SELECT ON SEQUENCES TO "{role}"'
+        )
+
+
 def _run_migration_file(conn: psycopg.Connection, path: str) -> None:
     """Execute a SQL migration file as a single transaction."""
     with open(path) as f:
@@ -544,6 +578,13 @@ def bootstrap_lakebase() -> None:
         # OAuth login is the client UUID. Also grant the SCIM id in case a
         # workspace maps that way; duplicates are harmless.
         grant_roles = list(dict.fromkeys([oauth_role, scim_id]))
+        gold_schema = os.environ.get("COST_OBS_PG_GOLD_SCHEMA", "cost_obs_gold")
+        with conn.cursor() as cur:
+            cur.execute(f'CREATE SCHEMA IF NOT EXISTS "{gold_schema}"')
+        with conn.cursor() as cur:
+            cur.execute("SELECT current_role")
+            current_role_row = cur.fetchone()
+        current_role = current_role_row[0] if current_role_row else "current_user"
         for sp_uuid in grant_roles:
             with conn.cursor() as cur:
                 cur.execute("SAVEPOINT create_role")
@@ -556,37 +597,17 @@ def bootstrap_lakebase() -> None:
                         print(f"[bootstrap_lakebase] OAuth role {sp_uuid} already exists")
                     else:
                         raise
-            with conn.cursor() as cur:
-                cur.execute(f'GRANT USAGE, CREATE ON SCHEMA {schema} TO "{sp_uuid}"')
-                cur.execute(
-                    f'GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA {schema} TO "{sp_uuid}"'
-                )
-                cur.execute(
-                    f'GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA {schema} TO "{sp_uuid}"'
-                )
-            print(f"[bootstrap_lakebase] Grants applied for {sp_uuid} on schema {schema}")
+            _grant_pg_schema_to_role(conn, schema, sp_uuid, current_role)
+            _grant_pg_schema_to_role(conn, gold_schema, sp_uuid, current_role)
+            print(
+                f"[bootstrap_lakebase] Grants applied for {sp_uuid} on "
+                f"schemas {schema} and {gold_schema}"
+            )
         sp_uuid = oauth_role
 
         if _is_step_done(conn, "bootstrap_lakebase"):
             print("[bootstrap_lakebase] Already complete — grants refreshed, skipping remaining steps.")
             return
-
-        # 4. ALTER DEFAULT PRIVILEGES — future tables inherit access automatically
-        current_role_row = None
-        with conn.cursor() as cur:
-            cur.execute("SELECT current_role")
-            current_role_row = cur.fetchone()
-        current_role = current_role_row[0] if current_role_row else "current_user"
-        with conn.cursor() as cur:
-            cur.execute(
-                f'ALTER DEFAULT PRIVILEGES FOR ROLE "{current_role}" IN SCHEMA {schema} '
-                f'GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO "{sp_uuid}"'
-            )
-            cur.execute(
-                f'ALTER DEFAULT PRIVILEGES FOR ROLE "{current_role}" IN SCHEMA {schema} '
-                f'GRANT USAGE, SELECT ON SEQUENCES TO "{sp_uuid}"'
-            )
-        print(f"[bootstrap_lakebase] ALTER DEFAULT PRIVILEGES set for role {current_role}")
 
         # 5. Run schema migration 001 (creates all application tables)
         _ensure_setup_state(conn)
@@ -930,15 +951,16 @@ def setup_usage_policy() -> None:
 
 
 def _verify_sp_can_read_gold(catalog: str, schema: str) -> None:
-    sp_uuid = _get_app_sp_uuid()
+    sp_uuid, scim_id = _get_app_sp_identities()
+    grantees = "', '".join(dict.fromkeys([sp_uuid, scim_id]))
     catalog_rows = _warehouse_query(
         "SELECT privilege_type FROM system.information_schema.catalog_privileges "
-        f"WHERE catalog_name = '{catalog}' AND grantee = '{sp_uuid}'"
+        f"WHERE catalog_name = '{catalog}' AND grantee IN ('{grantees}')"
     )
     schema_rows = _warehouse_query(
         "SELECT privilege_type FROM system.information_schema.schema_privileges "
         f"WHERE catalog_name = '{catalog}' AND schema_name = '{schema}' "
-        f"AND grantee = '{sp_uuid}'"
+        f"AND grantee IN ('{grantees}')"
     )
     found = {
         str(row[0]).upper().replace("_", " ").strip()
@@ -980,18 +1002,15 @@ def verify() -> None:
     print("[verify] system.billing.usage is queryable.")
 
     gold_rows = _warehouse_query(
-        "SELECT COUNT(*) FROM system.information_schema.tables "
-        f"WHERE table_catalog = '{catalog}' "
-        f"AND table_schema = '{schema}' "
-        f"AND table_name = 'daily_usage_summary'"
+        f"SELECT COUNT(*) FROM `{catalog}`.`{schema}`.`daily_usage_summary`"
     )
-    gold_ok = bool(gold_rows) and int(gold_rows[0][0]) > 0
-    if not gold_ok:
+    gold_count = int(gold_rows[0][0]) if gold_rows else 0
+    if gold_count <= 0:
         raise RuntimeError(
-            f"{catalog}.{schema}.daily_usage_summary is missing. "
+            f"{catalog}.{schema}.daily_usage_summary is missing or empty. "
             "Re-run cost_obs_setup."
         )
-    print(f"[verify] Gold table {catalog}.{schema}.daily_usage_summary is present.")
+    print(f"[verify] Gold table {catalog}.{schema}.daily_usage_summary has {gold_count} rows.")
 
     _verify_lakebase_has_gold()
     _verify_sp_can_read_gold(catalog, schema)

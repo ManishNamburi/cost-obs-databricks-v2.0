@@ -12,6 +12,7 @@ import datetime as dt
 from backend.lakebase_sync import (
     GENERIC_KEY_SENTINEL,
     WORKSPACE_ID_SENTINEL,
+    _is_not_owner_error,
     build_add_column_sql,
     build_column_spec,
     build_create_table_sql,
@@ -225,3 +226,8 @@ def test_rows_to_tuples_projects_in_order_with_missing_as_none():
         (dt.date(2026, 7, 1), "123", 9.5),
         (dt.date(2026, 7, 2), "456", None),
     ]
+
+
+def test_not_owner_error_is_detected():
+    assert _is_not_owner_error(Exception('must be owner of table agg_sync_state_v2'))
+    assert not _is_not_owner_error(Exception("permission denied for schema cost_obs_gold"))
