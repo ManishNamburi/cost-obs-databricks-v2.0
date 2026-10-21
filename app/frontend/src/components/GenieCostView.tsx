@@ -354,9 +354,13 @@ type SubTab = "overview" | "workspaces" | "spaces" | "diagnostics";
 interface GenieCostViewProps {
   data: GenieCostDashboardBundle | undefined;
   isLoading: boolean;
+  startDate?: string;
+  endDate?: string;
+  workspaceIds?: string[];
+  workspaceNameMap?: Record<string, string>;
 }
 
-export function GenieCostView({ data, isLoading }: GenieCostViewProps) {
+export function GenieCostView({ data, isLoading, startDate, endDate, workspaceIds, workspaceNameMap }: GenieCostViewProps) {
   const [subTab, setSubTab] = useState<SubTab>("overview");
   const [infoMinimized, setInfoMinimized] = useState(false);
 
@@ -406,25 +410,29 @@ export function GenieCostView({ data, isLoading }: GenieCostViewProps) {
           </svg>
         }
         title="Genie"
-        subtitle={summary ? `${summary.start_date} → ${summary.end_date} · ${summary.workspace_count} workspace${summary.workspace_count === 1 ? "" : "s"} with Genie spend` : undefined}
+        subtitle={summary ? `${summary.start_date} → ${summary.end_date} · ${summary.workspace_count} workspace${summary.workspace_count === 1 ? "" : "s"} with Genie spend` : "Genie spend by surface and workspace"}
+        dateRange={{ startDate, endDate }}
+        workspaceScope={workspaceIds && workspaceIds.length > 0
+          ? workspaceIds.length === 1
+            ? (workspaceNameMap?.[workspaceIds[0]] || workspaceIds[0])
+            : `${workspaceIds.length} workspaces`
+          : undefined}
       />
 
       {/* Sub-tab strip */}
-      <div className="flex gap-1 border-b border-gray-200">
-        {SUB_TABS.map((t) => (
-          <button
-            key={t.id}
-            onClick={() => setSubTab(t.id)}
-            className={`px-3 py-2 text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-gray-400 ${
-              subTab === t.id
-                ? "border-b-2 text-gray-900"
-                : "text-gray-500 hover:text-gray-700"
-            }`}
-            style={subTab === t.id ? { borderColor: C.lava } : undefined}
-          >
-            {t.label}
-          </button>
-        ))}
+      <div className="flex">
+        <div className="flex rounded-lg border border-gray-200 overflow-hidden text-xs font-medium">
+          {SUB_TABS.map((t) => (
+            <button
+              key={t.id}
+              onClick={() => setSubTab(t.id)}
+              className={`px-3 py-1.5 transition-colors ${subTab === t.id ? "text-white" : "text-gray-600 hover:bg-gray-50"}`}
+              style={subTab === t.id ? { backgroundColor: C.navy } : {}}
+            >
+              {t.label}
+            </button>
+          ))}
+        </div>
       </div>
 
       {subTab === "overview" && (

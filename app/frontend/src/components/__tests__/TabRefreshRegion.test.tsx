@@ -16,6 +16,6 @@ describe("TabRefreshRegion", () => {
       </TabRefreshRegion>,
     );
     expect(screen.getByRole("button", { name: "Refresh this tab" })).toBeVisible();
-    expect(container.querySelector(".pr-14")).toBeTruthy();
+    expect(container.querySelector(".pr-16")).toBeTruthy();
   });
 });

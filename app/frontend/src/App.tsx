@@ -1579,6 +1579,10 @@ function Dashboard() {
           <GenieCostView
             data={genieCostData}
             isLoading={genieCostLoading}
+            startDate={dateRange.startDate}
+            endDate={dateRange.endDate}
+            workspaceIds={_wsIds}
+            workspaceNameMap={workspaceNameMap}
           />
           </TabErrorBoundary>
         ) : activeTab === "apps" ? (
