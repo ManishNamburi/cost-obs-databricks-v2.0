@@ -15,6 +15,7 @@ import type {
 import { formatCurrency } from "@/utils/formatters";
 import { AIMLCostCenter } from "@/components/AIMLCostCenter";
 import { PageHero, InfoPanel } from "@/components/brand";
+import { KPICard } from "@/components/ui/KPICard";
 import { C } from "@/theme";
 
 // ── Number formatting helpers ─────────────────────────────────────────────────
@@ -40,13 +41,7 @@ function fmtLatency(ms: number): string {
 // ── KPI card ──────────────────────────────────────────────────────────────────
 
 function KpiCard({ label, value, sub }: { label: string; value: string; sub?: string }) {
-  return (
-    <div className="rounded-lg bg-white border p-4" style={{ borderColor: "#E5E5E5" }}>
-      <p className="text-xs font-medium text-gray-500 uppercase tracking-wider">{label}</p>
-      <p className="mt-1 text-2xl font-bold text-gray-900">{value}</p>
-      {sub && <p className="mt-0.5 text-xs text-gray-500">{sub}</p>}
-    </div>
-  );
+  return <KPICard title={label} value={value} subtitle={sub} />;
 }
 
 // ── Not-configured banner ─────────────────────────────────────────────────────
@@ -398,53 +393,58 @@ export function AIGatewayView({
     { id: "services", label: `Catalog${serviceCount ? ` (${serviceCount})` : ""}` },
   ];
 
+  // Shared header: methodology panel, standard PageHero (date + workspace
+  // chips) and the pill sub-tab strip. Used by every sub-tab and state.
+  const header = (subtitle: string) => (
+    <div className="space-y-4">
+      <InfoPanel
+        title="Unity Gateway tab methodology"
+        minimized={infoMinimized}
+        onToggle={setInfoMinimized}
+      >
+        <ul className="list-inside list-disc space-y-1">
+          <li><strong>Cost</strong>: AI/ML product spend from billing (serving, clusters, agents)</li>
+          <li><strong>Overview / Models / Services / Users</strong>: Request, token, and requester traffic from Unity Gateway usage</li>
+          <li><strong>Catalog</strong>: Model and MCP services listed through the Unity Gateway SDK</li>
+        </ul>
+      </InfoPanel>
+      <PageHero
+        icon={
+          <svg fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
+          </svg>
+        }
+        title="Unity Gateway"
+        subtitle={subtitle}
+        dateRange={{ startDate, endDate }}
+        workspaceScope={workspaceIds && workspaceIds.length > 0
+          ? workspaceIds.length === 1
+            ? (workspaceNameMap?.[workspaceIds[0]] || workspaceIds[0])
+            : `${workspaceIds.length} workspaces`
+          : undefined}
+      />
+      <div className="flex">
+        <div className="flex rounded-lg border border-gray-200 overflow-hidden text-xs font-medium">
+          {SUB_TABS.map(tab => (
+            <button
+              key={tab.id}
+              onClick={() => setSubTab(tab.id)}
+              className={`px-3 py-1.5 transition-colors ${subTab === tab.id ? "text-white" : "text-gray-600 hover:bg-gray-50"}`}
+              style={subTab === tab.id ? { backgroundColor: C.navy } : {}}
+            >
+              {tab.label}
+            </button>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+
   // Cost sub-tab: render AIMLCostCenter with the previously-standalone props.
-  // This is the entire former AI/ML tab surface, now living under AI Gateway.
   if (subTab === "cost") {
     return (
       <div className="animate-fade-in space-y-5">
-        <div className="space-y-4">
-          <InfoPanel
-            title="Unity Gateway tab methodology"
-            minimized={infoMinimized}
-            onToggle={setInfoMinimized}
-          >
-            <ul className="list-inside list-disc space-y-1">
-              <li><strong>Cost</strong>: AI/ML product spend from billing (serving, clusters, agents)</li>
-              <li><strong>Overview / Models / Services / Users</strong>: Request, token, and requester traffic from Unity Gateway usage</li>
-              <li><strong>Catalog</strong>: Model and MCP services listed through the Unity Gateway SDK</li>
-            </ul>
-          </InfoPanel>
-          <div>
-            <PageHero
-              icon={
-                <svg fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
-                </svg>
-              }
-              title="Unity Gateway"
-              subtitle="AI/ML product cost + governed Unity Gateway traffic"
-              dateRange={{ startDate, endDate }}
-              workspaceScope={workspaceIds && workspaceIds.length > 0
-                ? workspaceIds.length === 1
-                  ? (workspaceNameMap?.[workspaceIds[0]] || workspaceIds[0])
-                  : `${workspaceIds.length} workspaces`
-                : undefined}
-            />
-          </div>
-          <div className="flex rounded-lg border border-gray-200 overflow-hidden text-xs font-medium">
-            {SUB_TABS.map(tab => (
-              <button
-                key={tab.id}
-                onClick={() => setSubTab(tab.id)}
-                className={`px-3 py-1.5 transition-colors ${subTab === tab.id ? "text-white" : "text-gray-600 hover:bg-gray-50"}`}
-                style={subTab === tab.id ? { backgroundColor: C.navy } : {}}
-              >
-                {tab.label}
-              </button>
-            ))}
-          </div>
-        </div>
+        {header("AI/ML product cost + governed Unity Gateway traffic")}
         <AIMLCostCenter
           data={aimlData}
           isLoading={aimlLoading}
@@ -465,20 +465,7 @@ export function AIGatewayView({
   if (isLoading) {
     return (
       <div className="animate-fade-in space-y-5">
-        <div className="flex items-center justify-between gap-3 pr-12">
-          <div>
-            <h2 className="text-xl font-bold text-gray-900">Unity Gateway</h2>
-            <p className="text-sm text-gray-500">Governed model traffic</p>
-          </div>
-          <div className="flex rounded-lg border border-gray-200 overflow-hidden text-xs font-medium">
-            {SUB_TABS.map(tab => (
-              <button key={tab.id} onClick={() => setSubTab(tab.id)}
-                className={`px-3 py-1.5 transition-colors ${subTab === tab.id ? "text-white" : "text-gray-600 hover:bg-gray-50"}`}
-                style={subTab === tab.id ? { backgroundColor: C.navy } : {}}
-              >{tab.label}</button>
-            ))}
-          </div>
-        </div>
+        {header("Governed model traffic")}
         <div className="rounded-lg bg-white p-8 border flex items-center justify-center gap-3" style={{ borderColor: "#E5E5E5" }}>
           <div className="h-10 w-10 animate-spin rounded-full border-4 border-gray-200" style={{ borderTopColor: "#FF3621" }} />
           <p className="text-sm text-gray-500">Loading Unity Gateway data…</p>
@@ -490,20 +477,7 @@ export function AIGatewayView({
   if (!gatewayConfigured) {
     return (
       <div className="animate-fade-in space-y-5">
-        <div className="flex items-center justify-between gap-3 pr-12">
-          <div>
-            <h2 className="text-xl font-bold text-gray-900">Unity Gateway</h2>
-            <p className="text-sm text-gray-500">Governed model traffic</p>
-          </div>
-          <div className="flex rounded-lg border border-gray-200 overflow-hidden text-xs font-medium">
-            {SUB_TABS.map(tab => (
-              <button key={tab.id} onClick={() => setSubTab(tab.id)}
-                className={`px-3 py-1.5 transition-colors ${subTab === tab.id ? "text-white" : "text-gray-600 hover:bg-gray-50"}`}
-                style={subTab === tab.id ? { backgroundColor: C.navy } : {}}
-              >{tab.label}</button>
-            ))}
-          </div>
-        </div>
+        {header("Governed model traffic")}
         {subTab === "services" ? (
           <CatalogPanel inventory={inventory} />
         ) : (
@@ -522,31 +496,7 @@ export function AIGatewayView({
 
   return (
     <div className="animate-fade-in space-y-5">
-      {/* Header */}
-      <div className="flex items-center justify-between gap-3 pr-12">
-        <div>
-          <h2 className="text-xl font-bold text-gray-900">Unity Gateway</h2>
-          <p className="text-sm text-gray-500">
-            Request volume, token consumption, and cost attribution
-            {d.table && (
-              <span className="ml-2 text-xs text-gray-500">← {d.table}</span>
-            )}
-          </p>
-        </div>
-        {/* Sub-tab toggle */}
-        <div className="flex rounded-lg border border-gray-200 overflow-hidden text-xs font-medium">
-          {SUB_TABS.map(tab => (
-            <button
-              key={tab.id}
-              onClick={() => setSubTab(tab.id)}
-              className={`px-3 py-1.5 transition-colors ${subTab === tab.id ? "text-white" : "text-gray-600 hover:bg-gray-50"}`}
-              style={subTab === tab.id ? { backgroundColor: "#1B3139" } : {}}
-            >
-              {tab.label}
-            </button>
-          ))}
-        </div>
-      </div>
+      {header(`Request volume, token consumption, and cost attribution${d.table ? ` ← ${d.table}` : ""}`)}
 
       {/* KPI cards */}
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 lg:grid-cols-6">

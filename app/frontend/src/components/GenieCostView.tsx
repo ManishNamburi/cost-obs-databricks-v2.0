@@ -13,6 +13,7 @@ import type {
 } from "@/types/billing";
 import { formatCurrency } from "@/utils/formatters";
 import { PageHero, InfoPanel } from "@/components/brand";
+import { KPICard } from "@/components/ui/KPICard";
 import { C } from "@/theme";
 import { useGenieCostDiagnostics } from "@/hooks/useBillingData";
 
@@ -31,13 +32,7 @@ function fmtDateShort(iso?: string | null): string {
 // ── KPI card ──────────────────────────────────────────────────────────────────
 
 function KpiCard({ label, value, sub }: { label: string; value: string; sub?: string }) {
-  return (
-    <div className="rounded-lg bg-white border p-4" style={{ borderColor: "#E5E5E5" }}>
-      <p className="text-xs font-medium text-gray-500 uppercase tracking-wider">{label}</p>
-      <p className="mt-1 text-2xl font-bold text-gray-900">{value}</p>
-      {sub && <p className="mt-0.5 text-xs text-gray-500">{sub}</p>}
-    </div>
-  );
+  return <KPICard title={label} value={value} subtitle={sub} />;
 }
 
 // ── Empty banner ─────────────────────────────────────────────────────────────
