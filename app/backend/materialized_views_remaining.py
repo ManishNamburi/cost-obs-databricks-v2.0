@@ -528,45 +528,68 @@ UNION ALL SELECT CURRENT_DATE() AS snapshot_date, * FROM over_scaled
 UNION ALL SELECT CURRENT_DATE() AS snapshot_date, * FROM oversized
 """
 
-CREATE_DAILY_AI_GATEWAY = """
+# Gold grain names stay route_name/model_name/client_user so Lakebase copies
+# keep working. Source expressions are Unity Gateway columns; remaining_tables()
+# rewrites them when the derived table is still on the legacy schema.
+_CREATE_DAILY_AI_GATEWAY_TMPL = """
 CREATE OR REPLACE TABLE `{catalog}`.`{schema}`.`daily_ai_gateway` CLUSTER BY (usage_date, workspace_id) AS
 SELECT
-  CAST(timestamp AS DATE) AS usage_date,
+  CAST({event_ts} AS DATE) AS usage_date,
   workspace_id,
-  COALESCE(route_name, '__na__') AS route_name,
-  COALESCE(model_name, '__na__') AS model_name,
-  COALESCE(client_user, '(unknown)') AS client_user,
+  COALESCE(CAST({service} AS STRING), '__na__') AS route_name,
+  COALESCE(CAST({model} AS STRING), '__na__') AS model_name,
+  COALESCE(CAST({requester} AS STRING), '(unknown)') AS client_user,
   COUNT(*) AS request_count,
-  SUM(input_token_count) AS input_tokens,
-  SUM(output_token_count) AS output_tokens,
-  SUM(total_token_count) AS total_tokens,
-  AVG(request_duration_ms) AS avg_latency_ms,
-  SUM(CASE WHEN http_status_code >= 400 THEN 1 ELSE 0 END) AS error_count,
-  SUM(CASE WHEN http_status_code < 400 THEN 1 ELSE 0 END) AS success_count
+  SUM(CAST({input_tokens} AS BIGINT)) AS input_tokens,
+  SUM(CAST({output_tokens} AS BIGINT)) AS output_tokens,
+  SUM(CAST({total_tokens} AS BIGINT)) AS total_tokens,
+  AVG(CAST({latency} AS DOUBLE)) AS avg_latency_ms,
+  SUM(CASE WHEN CAST({status_code} AS INT) >= 400 THEN 1 ELSE 0 END) AS error_count,
+  SUM(CASE WHEN CAST({status_code} AS INT) < 400 THEN 1 ELSE 0 END) AS success_count
 FROM {ai_gateway_table}
-WHERE CAST(timestamp AS DATE) >= DATE_SUB(CURRENT_DATE(), {billing_lookback_days})
+WHERE CAST({event_ts} AS DATE) >= DATE_SUB(CURRENT_DATE(), {billing_lookback_days})
 GROUP BY 1, 2, 3, 4, 5
 """
 
-MERGE_DAILY_AI_GATEWAY = """
+_UNITY_GATEWAY_SQL_DEFAULTS = {
+    "event_ts": "event_time",
+    "service": "COALESCE(service_name, endpoint_name)",
+    "model": "destination_model",
+    "requester": "requester",
+    "input_tokens": "COALESCE(input_tokens, 0)",
+    "output_tokens": "COALESCE(output_tokens, 0)",
+    "total_tokens": "COALESCE(total_tokens, COALESCE(input_tokens, 0) + COALESCE(output_tokens, 0))",
+    "latency": "CAST(NULL AS DOUBLE)",
+    "status_code": "COALESCE(status_code, 0)",
+}
+
+CREATE_DAILY_AI_GATEWAY = _CREATE_DAILY_AI_GATEWAY_TMPL.format(
+    catalog="{catalog}",
+    schema="{schema}",
+    billing_lookback_days="{billing_lookback_days}",
+    ai_gateway_table="{ai_gateway_table}",
+    **_UNITY_GATEWAY_SQL_DEFAULTS,
+)
+
+_MERGE_DAILY_AI_GATEWAY_TMPL = """
 MERGE INTO `{catalog}`.`{schema}`.`daily_ai_gateway` AS tgt
 USING (
   SELECT
-    CAST(timestamp AS DATE) AS usage_date,
+    CAST({event_ts} AS DATE) AS usage_date,
     workspace_id,
-    COALESCE(route_name, '__na__') AS route_name,
-    COALESCE(model_name, '__na__') AS model_name,
-    COALESCE(client_user, '(unknown)') AS client_user,
+    COALESCE(CAST({service} AS STRING), '__na__') AS route_name,
+    COALESCE(CAST({model} AS STRING), '__na__') AS model_name,
+    COALESCE(CAST({requester} AS STRING), '(unknown)') AS client_user,
     COUNT(*) AS request_count,
-    SUM(input_token_count) AS input_tokens,
-    SUM(output_token_count) AS output_tokens,
-    SUM(total_token_count) AS total_tokens,
-    AVG(request_duration_ms) AS avg_latency_ms,
-    SUM(CASE WHEN http_status_code >= 400 THEN 1 ELSE 0 END) AS error_count,
-    SUM(CASE WHEN http_status_code < 400 THEN 1 ELSE 0 END) AS success_count
+    SUM(CAST({input_tokens} AS BIGINT)) AS input_tokens,
+    SUM(CAST({output_tokens} AS BIGINT)) AS output_tokens,
+    SUM(CAST({total_tokens} AS BIGINT)) AS total_tokens,
+    AVG(CAST({latency} AS DOUBLE)) AS avg_latency_ms,
+    SUM(CASE WHEN CAST({status_code} AS INT) >= 400 THEN 1 ELSE 0 END) AS error_count,
+    SUM(CASE WHEN CAST({status_code} AS INT) < 400 THEN 1 ELSE 0 END) AS success_count
   FROM {ai_gateway_table}
-  WHERE CAST(timestamp AS DATE) >= DATE('{reprocess_start}')
-    AND CAST(timestamp AS DATE) <= CURRENT_DATE()
+  WHERE CAST({event_ts} AS DATE) >= DATE('{reprocess_start}')
+    AND CAST({event_ts} AS DATE) <= CURRENT_DATE()
   GROUP BY 1, 2, 3, 4, 5
 ) AS src
 ON tgt.usage_date = src.usage_date
@@ -577,6 +600,14 @@ ON tgt.usage_date = src.usage_date
 WHEN MATCHED THEN UPDATE SET *
 WHEN NOT MATCHED BY TARGET THEN INSERT *
 """
+
+MERGE_DAILY_AI_GATEWAY = _MERGE_DAILY_AI_GATEWAY_TMPL.format(
+    catalog="{catalog}",
+    schema="{schema}",
+    reprocess_start="{reprocess_start}",
+    ai_gateway_table="{ai_gateway_table}",
+    **_UNITY_GATEWAY_SQL_DEFAULTS,
+)
 
 REMAINING_TABLE_REFRESH = {
     "daily_user_spend": {
@@ -667,7 +698,7 @@ REMAINING_MERGE = {
 
 
 def remaining_tables() -> tuple[dict, dict, dict]:
-    """Include AI Gateway gold only when the shared usage table is configured."""
+    """Include Unity Gateway gold only when the shared usage table is configured."""
     from backend.materialized_views_viewer import viewer_tables
     _v_create, _v_merge, _v_refresh = viewer_tables()
     create = dict(REMAINING_CREATE)
@@ -678,8 +709,26 @@ def remaining_tables() -> tuple[dict, dict, dict]:
     refresh.update(_v_refresh)
     tbl = os.environ.get("AI_GATEWAY_USAGE_TABLE", "").strip()
     if tbl:
-        create["daily_ai_gateway"] = CREATE_DAILY_AI_GATEWAY.replace("{ai_gateway_table}", tbl)
-        merge["daily_ai_gateway"] = MERGE_DAILY_AI_GATEWAY.replace("{ai_gateway_table}", tbl)
+        aliases = dict(_UNITY_GATEWAY_SQL_DEFAULTS)
+        try:
+            from backend.unity_gateway import pick_usage_columns
+            aliases.update(pick_usage_columns(tbl))
+        except Exception:
+            pass
+        create["daily_ai_gateway"] = _CREATE_DAILY_AI_GATEWAY_TMPL.format(
+            catalog="{catalog}",
+            schema="{schema}",
+            billing_lookback_days="{billing_lookback_days}",
+            ai_gateway_table=tbl,
+            **aliases,
+        )
+        merge["daily_ai_gateway"] = _MERGE_DAILY_AI_GATEWAY_TMPL.format(
+            catalog="{catalog}",
+            schema="{schema}",
+            reprocess_start="{reprocess_start}",
+            ai_gateway_table=tbl,
+            **aliases,
+        )
         refresh["daily_ai_gateway"] = {
             "reprocess_days": 7,
             "pk": ["usage_date", "workspace_id", "route_name", "model_name", "client_user"],

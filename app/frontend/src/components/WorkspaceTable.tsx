@@ -28,7 +28,7 @@ const PRODUCT_LABELS: Record<string, string> = {
   INTERACTIVE: "Notebooks",
   VECTOR_SEARCH: "AI Search",
   AI_RUNTIME: "AI Runtime",
-  AI_GATEWAY: "AI Gateway",
+  AI_GATEWAY: "Unity Gateway",
   AI_FUNCTIONS: "AI Functions",
   AGENT_EVALUATION: "Agent Eval",
   AGENT_BRICKS: "Agent Bricks",

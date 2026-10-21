@@ -3,7 +3,7 @@ import type { TabVisibility } from "../SettingsDialog";
 const TAB_LABELS: Record<keyof TabVisibility, { label: string; color: string }> = {
   dbu: { label: "$DBU Spend", color: "#FF3621" },
   sql: { label: "SQL", color: "#FF3621" },
-  "ai-gateway": { label: "AI Gateway", color: "#FF3621" },
+  "ai-gateway": { label: "Unity Gateway", color: "#FF3621" },
   genie: { label: "Genie", color: "#FF3621" },
   apps: { label: "Apps", color: "#FF3621" },
   tagging: { label: "Tagging", color: "#FF3621" },

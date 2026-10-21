@@ -251,7 +251,7 @@ def test_ai_gateway_bundle_unsupported_only_for_ai_gateway_gold():
 
     assert result["available"] is False
     assert result["reason"] == "shared_scope_unsupported"
-    assert "AI Gateway" in result["reason_detail"]
+    assert "Unity Gateway" in result["reason_detail"]
     assert result["by_model"] == []
 
 

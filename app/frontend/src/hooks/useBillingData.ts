@@ -494,7 +494,7 @@ export function useAIMLDashboardBundle(dateRange?: DateRange, workspaceIds?: str
 }
 
 /**
- * AI Gateway dashboard bundle
+ * Unity Gateway dashboard bundle
  */
 export function useAIGatewayDashboardBundle(dateRange?: DateRange, workspaceIds?: string[], enabled: boolean = true) {
   return useQuery<AIGatewayDashboardBundle>({

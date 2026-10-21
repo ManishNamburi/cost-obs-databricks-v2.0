@@ -87,7 +87,7 @@ export function getRequiredExportTabs(
 const tabLabels: Record<keyof TabVisibility, string> = {
   dbu: "$DBU Spend",
   sql: "SQL",
-  "ai-gateway": "AI Gateway",
+  "ai-gateway": "Unity Gateway",
   genie: "Genie",
   apps: "Apps",
   tagging: "Tagging",

@@ -34,6 +34,8 @@ from typing import Any
 
 from fastapi import APIRouter, Query
 
+from backend import cache_ttls
+from backend import workspace_filter as wf
 from backend.db import (
     apply_mv_overrides,
     bundle_cache_key,
@@ -45,11 +47,20 @@ from backend.db import (
     source_label_filter_clause,
     source_scope_unavailable,
 )
-from backend import cache_ttls
-from backend import workspace_filter as wf
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
+
+
+def _with_genie_inventory(payload: dict[str, Any]) -> dict[str, Any]:
+    try:
+        from backend.routers.conversational import configured_space_id
+        from backend.unity_gateway import list_genie_space_inventory
+        payload["inventory"] = list_genie_space_inventory(configured_space_id())
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("Genie space inventory failed: %s", exc)
+        payload["inventory"] = {"available": False, "error": str(exc), "spaces": [], "space_count": 0}
+    return payload
 
 
 # ---------------------------------------------------------------------------
@@ -305,16 +316,16 @@ async def get_genie_dashboard_bundle(
         "The selected shared source does not publish Genie cost detail.",
     )
     if blocked:
-        return {
+        return _with_genie_inventory({
             **blocked,
             "summary": {},
             "workspaces": [],
             "timeseries": [],
             "surface_breakdown": [],
-        }
+        })
     dkey = bundle_cache_key("genie:dashboard-bundle", sd, ed, id_list)
     if (cached := delta_cache_get(dkey)) is not None:
-        return cached
+        return _with_genie_inventory(cached)
 
     params = {"start_date": sd, "end_date": ed}
     ws_clause_u = wf.build_ws_filter_clause(col="u.workspace_id", id_list=id_list)
@@ -534,12 +545,12 @@ async def get_genie_dashboard_bundle(
         for r in ts_rows
     ]
 
-    payload = {
+    payload = _with_genie_inventory({
         "summary": summary,
         "workspaces": sorted(workspaces, key=lambda w: w["total_usd"], reverse=True),
         "timeseries": timeseries,
         "surface_breakdown": surface_breakdown,
-    }
+    })
     try:
         delta_cache_put(dkey, "genie:dashboard-bundle", payload, ttl_seconds=cache_ttls.AIML_BUNDLE)
     except Exception as e:

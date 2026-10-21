@@ -10,10 +10,11 @@ import type {
   AIGatewayRouteRow,
   AIGatewayTimeseriesRow,
   AIMLDashboardBundle,
+  UnityGatewayInventory,
 } from "@/types/billing";
 import { formatCurrency } from "@/utils/formatters";
 import { AIMLCostCenter } from "@/components/AIMLCostCenter";
-import { PageHero } from "@/components/brand";
+import { PageHero, InfoPanel } from "@/components/brand";
 import { C } from "@/theme";
 
 // ── Number formatting helpers ─────────────────────────────────────────────────
@@ -58,7 +59,7 @@ function NotConfiguredBanner({ message }: { message?: string }) {
           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
         </svg>
       </div>
-      <h3 className="text-base font-semibold text-gray-900">AI Gateway data not configured</h3>
+      <h3 className="text-base font-semibold text-gray-900">Unity Gateway data not configured</h3>
       <p className="max-w-md text-sm text-gray-500">
         {message ?? (
           <>
@@ -68,7 +69,7 @@ function NotConfiguredBanner({ message }: { message?: string }) {
         )}
       </p>
       <a
-        href="https://docs.databricks.com/en/admin/system-tables/ai-gateway.html"
+        href="https://docs.databricks.com/aws/en/admin/system-tables/ai-gateway"
         target="_blank"
         rel="noopener noreferrer"
         className="mt-1 text-xs font-medium hover:underline"
@@ -150,13 +151,66 @@ function ModelTable({ rows }: { rows: AIGatewayModelRow[] }) {
 
 // ── Route table ───────────────────────────────────────────────────────────────
 
+function CatalogPanel({ inventory }: { inventory?: UnityGatewayInventory }) {
+  const models = inventory?.model_services ?? [];
+  const mcps = inventory?.mcp_services ?? [];
+  if (inventory && inventory.available === false) {
+    return (
+      <div className="rounded-lg bg-white border p-5 text-sm text-gray-500" style={{ borderColor: "#E5E5E5" }}>
+        Unity Gateway catalog is unavailable{inventory.error ? `: ${inventory.error}` : "."}
+      </div>
+    );
+  }
+  if (models.length === 0 && mcps.length === 0) {
+    return (
+      <div className="rounded-lg bg-white border p-5 text-sm text-gray-500" style={{ borderColor: "#E5E5E5" }}>
+        No model or MCP services were visible to this app identity. Grant EXECUTE on the services you want listed.
+      </div>
+    );
+  }
+  const rows = [
+    ...models.map((s) => ({ ...s, kindLabel: "Model service" })),
+    ...mcps.map((s) => ({ ...s, kindLabel: "MCP service" })),
+  ];
+  return (
+    <div className="rounded-lg bg-white border p-5" style={{ borderColor: "#E5E5E5" }}>
+      <h3 className="mb-3 text-sm font-semibold text-gray-700">Unity Gateway catalog</h3>
+      <div className="overflow-x-auto">
+        <table className="min-w-full">
+          <thead className="bg-gray-50">
+            <tr className="border-b border-gray-200">
+              <th className="px-3 py-2.5 text-left text-xs font-medium uppercase tracking-wider text-gray-500">Name</th>
+              <th className="px-3 py-2.5 text-left text-xs font-medium uppercase tracking-wider text-gray-500">Kind</th>
+              <th className="px-3 py-2.5 text-left text-xs font-medium uppercase tracking-wider text-gray-500">Destinations</th>
+              <th className="px-3 py-2.5 text-left text-xs font-medium uppercase tracking-wider text-gray-500">Owner</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((s) => (
+              <tr key={`${s.kind}-${s.name}`} className="border-b border-gray-100 last:border-0">
+                <td className="px-3 py-2.5">
+                  <div className="text-sm font-medium text-gray-900">{s.name}</div>
+                  {s.comment && <div className="text-xs text-gray-500">{s.comment}</div>}
+                </td>
+                <td className="px-3 py-2.5 text-sm text-gray-700">{s.kindLabel}</td>
+                <td className="px-3 py-2.5 text-xs text-gray-600">{s.destinations.join(", ") || "—"}</td>
+                <td className="px-3 py-2.5 text-xs text-gray-500">{s.owner || "—"}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
 function RouteTable({ rows }: { rows: AIGatewayRouteRow[] }) {
   return (
     <div className="overflow-x-auto">
       <table className="min-w-full">
         <thead className="bg-gray-50">
           <tr className="border-b border-gray-200">
-            <th className="px-3 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500">Route</th>
+            <th className="px-3 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500">Service</th>
             <th className="px-3 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500">Model</th>
             <th className="px-3 py-3 text-right text-xs font-medium uppercase tracking-wider text-gray-500">Requests</th>
             <th className="px-3 py-3 text-right text-xs font-medium uppercase tracking-wider text-gray-500">Tokens</th>
@@ -290,7 +344,7 @@ function TopUsersTable({ rows }: { rows: Array<{ client_user: string; request_co
 // default sub-tab and shows the former AI/ML tab surface via AIMLCostCenter;
 // the AI Gateway analytics sub-tabs (overview/models/routes/users) require
 // AI_GATEWAY_USAGE_TABLE to be configured and gracefully degrade otherwise.
-type SubTab = "cost" | "overview" | "models" | "routes" | "users";
+type SubTab = "cost" | "overview" | "models" | "routes" | "users" | "services";
 
 interface AIGatewayViewProps {
   data: AIGatewayDashboardBundle | undefined;
@@ -318,6 +372,7 @@ export function AIGatewayView({
 }: AIGatewayViewProps) {
   const [subTab, setSubTab] = useState<SubTab>("cost");
   const [gatewaySearch, setGatewaySearch] = useState("");
+  const [infoMinimized, setInfoMinimized] = useState(false);
 
   // The AI/ML "cost" sub-tab (default) doesn't need the AI Gateway derived
   // table to be configured — it reads system.billing.usage directly. So
@@ -332,12 +387,15 @@ export function AIGatewayView({
   const users = data?.top_users ?? [];
   const timeseries: AIGatewayTimeseriesRow[] = data?.timeseries ?? [];
 
+  const inventory = data?.inventory;
+  const serviceCount = (inventory?.model_services.length ?? 0) + (inventory?.mcp_services.length ?? 0);
   const SUB_TABS: { id: SubTab; label: string }[] = [
     { id: "cost",     label: "Cost" },
     { id: "overview", label: "Gateway Overview" },
     { id: "models",   label: `Models${gatewayConfigured ? ` (${models.length})` : ""}` },
-    { id: "routes",   label: `Routes${gatewayConfigured ? ` (${routes.length})` : ""}` },
+    { id: "routes",   label: `Services${gatewayConfigured ? ` (${routes.length})` : ""}` },
     { id: "users",    label: "Top Users" },
+    { id: "services", label: `Catalog${serviceCount ? ` (${serviceCount})` : ""}` },
   ];
 
   // Cost sub-tab: render AIMLCostCenter with the previously-standalone props.
@@ -346,6 +404,17 @@ export function AIGatewayView({
     return (
       <div className="animate-fade-in space-y-5">
         <div className="space-y-4">
+          <InfoPanel
+            title="Unity Gateway tab methodology"
+            minimized={infoMinimized}
+            onToggle={setInfoMinimized}
+          >
+            <ul className="list-inside list-disc space-y-1">
+              <li><strong>Cost</strong>: AI/ML product spend from billing (serving, clusters, agents)</li>
+              <li><strong>Overview / Models / Services / Users</strong>: Request, token, and requester traffic from Unity Gateway usage</li>
+              <li><strong>Catalog</strong>: Model and MCP services listed through the Unity Gateway SDK</li>
+            </ul>
+          </InfoPanel>
           <div>
             <PageHero
               icon={
@@ -353,8 +422,8 @@ export function AIGatewayView({
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
                 </svg>
               }
-              title="AI Gateway"
-              subtitle="AI/ML product cost + governed model traffic"
+              title="Unity Gateway"
+              subtitle="AI/ML product cost + governed Unity Gateway traffic"
               dateRange={{ startDate, endDate }}
               workspaceScope={workspaceIds && workspaceIds.length > 0
                 ? workspaceIds.length === 1
@@ -398,7 +467,7 @@ export function AIGatewayView({
       <div className="animate-fade-in space-y-5">
         <div className="flex items-center justify-between gap-3 pr-12">
           <div>
-            <h2 className="text-xl font-bold text-gray-900">AI Gateway</h2>
+            <h2 className="text-xl font-bold text-gray-900">Unity Gateway</h2>
             <p className="text-sm text-gray-500">Governed model traffic</p>
           </div>
           <div className="flex rounded-lg border border-gray-200 overflow-hidden text-xs font-medium">
@@ -412,7 +481,7 @@ export function AIGatewayView({
         </div>
         <div className="rounded-lg bg-white p-8 border flex items-center justify-center gap-3" style={{ borderColor: "#E5E5E5" }}>
           <div className="h-10 w-10 animate-spin rounded-full border-4 border-gray-200" style={{ borderTopColor: "#FF3621" }} />
-          <p className="text-sm text-gray-500">Loading AI Gateway data…</p>
+          <p className="text-sm text-gray-500">Loading Unity Gateway data…</p>
         </div>
       </div>
     );
@@ -423,7 +492,7 @@ export function AIGatewayView({
       <div className="animate-fade-in space-y-5">
         <div className="flex items-center justify-between gap-3 pr-12">
           <div>
-            <h2 className="text-xl font-bold text-gray-900">AI Gateway</h2>
+            <h2 className="text-xl font-bold text-gray-900">Unity Gateway</h2>
             <p className="text-sm text-gray-500">Governed model traffic</p>
           </div>
           <div className="flex rounded-lg border border-gray-200 overflow-hidden text-xs font-medium">
@@ -435,7 +504,11 @@ export function AIGatewayView({
             ))}
           </div>
         </div>
-        <NotConfiguredBanner message={data?.message} />
+        {subTab === "services" ? (
+          <CatalogPanel inventory={inventory} />
+        ) : (
+          <NotConfiguredBanner message={data?.message} />
+        )}
       </div>
     );
   }
@@ -452,7 +525,7 @@ export function AIGatewayView({
       {/* Header */}
       <div className="flex items-center justify-between gap-3 pr-12">
         <div>
-          <h2 className="text-xl font-bold text-gray-900">AI Gateway</h2>
+          <h2 className="text-xl font-bold text-gray-900">Unity Gateway</h2>
           <p className="text-sm text-gray-500">
             Request volume, token consumption, and cost attribution
             {d.table && (
@@ -480,7 +553,7 @@ export function AIGatewayView({
         <KpiCard label="Total Requests" value={fmtRequests(gs.total_requests)} />
         <KpiCard label="Total Tokens" value={fmtTokens(gs.total_tokens)} sub={`${fmtTokens(gs.total_input_tokens)} in / ${fmtTokens(gs.total_output_tokens)} out`} />
         <KpiCard label="Models" value={String(gs.model_count)} />
-        <KpiCard label="Routes" value={String(gs.route_count)} />
+        <KpiCard label="Services" value={String(gs.route_count)} />
         <KpiCard label="Avg Latency" value={fmtLatency(gs.avg_latency_ms)} />
         <KpiCard
           label="Error Rate"
@@ -545,12 +618,14 @@ export function AIGatewayView({
       {subTab === "routes" && (
         <div className="rounded-lg bg-white border p-5" style={{ borderColor: "#E5E5E5" }}>
           <div className="mb-3 flex items-center justify-between">
-            <h3 className="text-sm font-semibold text-gray-700">By Route</h3>
-            <p className="text-xs text-gray-500">AI Gateway routes with their backing models</p>
+            <h3 className="text-sm font-semibold text-gray-700">By Service</h3>
+            <p className="text-xs text-gray-500">Unity Gateway services with their backing models</p>
           </div>
           <RouteTable rows={routes} />
         </div>
       )}
+
+      {subTab === "services" && <CatalogPanel inventory={inventory} />}
 
       {subTab === "users" && (
         <div className="rounded-lg bg-white border p-5" style={{ borderColor: "#E5E5E5" }}>

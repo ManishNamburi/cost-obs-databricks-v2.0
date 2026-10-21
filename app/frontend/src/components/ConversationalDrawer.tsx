@@ -148,7 +148,7 @@ export function ConversationalDrawer({ open, onClose }: ConversationalDrawerProp
 const STARTERS = [
   "What did we spend on SQL warehouses last month?",
   "Top 5 workspaces by DBU cost, last 30 days",
-  "Show me AI Gateway usage broken down by model",
+  "Show me Unity Gateway usage broken down by model",
   "Which jobs cost the most in the last 7 days?",
 ];
 

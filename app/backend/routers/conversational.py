@@ -1,10 +1,10 @@
 """
 Conversational surface — Genie-backed chat for the whole app.
 
-Thin wrapper over the Databricks Genie REST API. Every user prompt is sent
-to the configured Genie space (`GENIE_SPACE_ID`). The response is returned
-with the generated SQL, the row set, and a short natural-language summary.
-No LLM routing, no narrative synthesis — just the space.
+Thin wrapper over the Databricks Genie SDK (`WorkspaceClient.genie`). Every
+user prompt is sent to the configured Genie space (`GENIE_SPACE_ID`). The
+response is returned with the generated SQL, the row set, and a short
+natural-language summary.
 
 Endpoints:
 
@@ -28,7 +28,7 @@ from __future__ import annotations
 
 import logging
 import os
-import time
+from datetime import timedelta
 from typing import Any
 
 from fastapi import APIRouter, HTTPException
@@ -39,12 +39,7 @@ from backend.db import get_user_workspace_client, lb_get_config
 router = APIRouter()
 logger = logging.getLogger(__name__)
 
-
-_POLL_INTERVAL_S = 1.0
-_MAX_POLL_S = 90.0
-# Terminal message states. Genie completes into COMPLETED (or
-# QUERY_RESULT_EXPIRED when the answer is ready but the cached result set has
-# aged out); FAILED / CANCELLED are hard failures.
+_WAIT = timedelta(seconds=90)
 _TERMINAL_OK = {"COMPLETED", "QUERY_RESULT_EXPIRED"}
 _TERMINAL_FAIL = {"FAILED", "CANCELLED"}
 
@@ -85,55 +80,67 @@ def _space_id() -> str:
     return sid
 
 
-def _poll_until_ready(w: Any, space_id: str, conv_id: str, msg_id: str) -> dict[str, Any]:
-    """Block on Genie until the message finishes or we hit the max wait.
+def _as_dict(obj: Any) -> dict[str, Any]:
+    if obj is None:
+        return {}
+    if isinstance(obj, dict):
+        return obj
+    as_dict = getattr(obj, "as_dict", None)
+    if callable(as_dict):
+        try:
+            data = as_dict()
+            return data if isinstance(data, dict) else {}
+        except Exception:  # noqa: BLE001
+            return {}
+    return {}
 
-    Safe to call from a sync path operation — FastAPI runs it in a worker
-    thread, so ``time.sleep`` here does not stall the event loop.
-    """
-    deadline = time.monotonic() + _MAX_POLL_S
-    while True:
-        msg = w.api_client.do(
-            "GET",
-            f"/api/2.0/genie/spaces/{space_id}/conversations/{conv_id}/messages/{msg_id}",
+
+def _status_value(status: Any) -> str:
+    if status is None:
+        return ""
+    return str(getattr(status, "value", status) or "").upper()
+
+
+def _raise_if_failed(message: Any) -> None:
+    status = _status_value(getattr(message, "status", None) or _as_dict(message).get("status"))
+    if status in _TERMINAL_FAIL:
+        error = getattr(message, "error", None)
+        err_dict = _as_dict(error)
+        raise HTTPException(
+            status_code=502,
+            detail=(err_dict.get("error") or err_dict.get("message") or f"Genie call finished in state {status}"),
         )
-        status = (msg.get("status") or "").upper()
-        if status in _TERMINAL_FAIL:
-            error = msg.get("error") or {}
-            raise HTTPException(
-                status_code=502,
-                detail=(error.get("error") or f"Genie call finished in state {status}"),
-            )
-        if status in _TERMINAL_OK:
-            return msg
-        if time.monotonic() > deadline:
-            raise HTTPException(status_code=504, detail="Genie response timed out after 90 s")
-        time.sleep(_POLL_INTERVAL_S)
 
 
 def _fetch_query_result(
     w: Any, space_id: str, conv_id: str, msg_id: str, attachment_id: str | None
 ) -> tuple[list[str], list[list[Any]]]:
-    """Fetch the executed query's rows + column names for a completed message.
-
-    Genie does NOT inline result rows into the message object — they must be
-    pulled from a dedicated query-result endpoint that returns a SQL
-    ``statement_response``. Prefer the per-attachment endpoint (current API);
-    fall back to the message-level endpoint for older workspaces.
-    """
-    base = f"/api/2.0/genie/spaces/{space_id}/conversations/{conv_id}/messages/{msg_id}"
-    paths = []
+    genie = w.genie
+    attempts: list[tuple[str, Any]] = []
     if attachment_id:
-        paths.append(f"{base}/attachments/{attachment_id}/query-result")
-    paths.append(f"{base}/query-result")
+        attempts.append(
+            (
+                "attachment",
+                lambda: genie.get_message_attachment_query_result(
+                    space_id, conv_id, msg_id, attachment_id
+                ),
+            )
+        )
+        by_attach = getattr(genie, "get_message_query_result_by_attachment", None)
+        if callable(by_attach):
+            attempts.append(("by_attachment", lambda: by_attach(space_id, conv_id, msg_id, attachment_id)))
+    attempts.append(("message", lambda: genie.get_message_query_result(space_id, conv_id, msg_id)))
 
-    for path in paths:
+    for label, fetch in attempts:
         try:
-            resp = w.api_client.do("GET", path)
-        except Exception as exc:  # noqa: BLE001 — try the next candidate path
-            logger.debug("[conversational] query-result GET %s failed: %s", path, exc)
+            resp = fetch()
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("[conversational] query-result %s failed: %s", label, exc)
             continue
-        stmt = (resp or {}).get("statement_response") or {}
+        data = _as_dict(resp)
+        stmt = data.get("statement_response") or {}
+        if not stmt and getattr(resp, "statement_response", None) is not None:
+            stmt = _as_dict(resp.statement_response)
         manifest = stmt.get("manifest") or {}
         schema = manifest.get("schema") or {}
         columns = [str(c.get("name") or "") for c in (schema.get("columns") or [])]
@@ -145,33 +152,38 @@ def _fetch_query_result(
     return [], []
 
 
-def _build_response(
-    w: Any, space_id: str, conv_id: str, msg_id: str, message: dict[str, Any]
-) -> dict[str, Any]:
+def _build_response(w: Any, space_id: str, conv_id: str, msg_id: str, message: Any) -> dict[str, Any]:
     """Assemble {text, sql, columns, rows} from a completed Genie message."""
     text = ""
     sql = ""
     attachment_id: str | None = None
+    data = _as_dict(message)
+    attachments = getattr(message, "attachments", None) or data.get("attachments") or []
 
-    for attach in message.get("attachments", []) or []:
-        text_block = attach.get("text") or {}
-        query_block = attach.get("query") or {}
+    for attach in attachments:
+        attach_data = _as_dict(attach)
+        text_block = attach_data.get("text") or _as_dict(getattr(attach, "text", None))
+        query_block = attach_data.get("query") or _as_dict(getattr(attach, "query", None))
         if isinstance(text_block, dict) and text_block.get("content"):
             text = (text_block.get("content") or "").strip()
         if isinstance(query_block, dict) and (query_block.get("query") or "").strip():
             sql = (query_block.get("query") or "").strip()
-            attachment_id = attach.get("attachment_id") or attachment_id
+            attachment_id = (
+                attach_data.get("attachment_id")
+                or getattr(attach, "attachment_id", None)
+                or query_block.get("id")
+                or attachment_id
+            )
             if not text:
-                text = (query_block.get("description") or "").strip()
+                text = (query_block.get("description") or query_block.get("title") or "").strip()
 
     if not text:
-        text = (message.get("content") or "").strip()
+        text = (data.get("content") or getattr(message, "content", None) or "").strip()
 
     columns: list[str] = []
     rows: list[list[Any]] = []
-    # Only a query attachment produces a result set. A message that terminated
-    # with an expired result set keeps its text/SQL but has no rows to fetch.
-    if sql and (message.get("status") or "").upper() != "QUERY_RESULT_EXPIRED":
+    status = _status_value(getattr(message, "status", None) or data.get("status"))
+    if sql and status != "QUERY_RESULT_EXPIRED":
         columns, rows = _fetch_query_result(w, space_id, conv_id, msg_id, attachment_id)
 
     return {"text": text, "sql": sql, "columns": columns, "rows": rows}
@@ -189,8 +201,9 @@ def get_status() -> dict[str, Any]:
 
     try:
         w = get_user_workspace_client()
-        w.api_client.do("GET", f"/api/2.0/genie/spaces/{space_id}")
-        return {"configured": True, "space_id": space_id}
+        space = w.genie.get_space(space_id)
+        title = getattr(space, "title", None) or _as_dict(space).get("title")
+        return {"configured": True, "space_id": space_id, "title": title}
     except Exception as exc:  # noqa: BLE001 — surface reason to UI
         logger.warning("[conversational] Genie space probe failed: %s", exc)
         return {"configured": False, "reason": str(exc)}
@@ -201,17 +214,18 @@ def start_conversation(req: MessageRequest) -> dict[str, Any]:
     """Open a new Genie conversation with the user's first message."""
     space_id = _space_id()
     w = get_user_workspace_client()
-    started = w.api_client.do(
-        "POST",
-        f"/api/2.0/genie/spaces/{space_id}/start-conversation",
-        body={"content": req.message},
-    )
-    conv_id = (started.get("conversation") or {}).get("id") or started.get("conversation_id")
-    msg_id = (started.get("message") or {}).get("id") or started.get("message_id")
+    try:
+        msg = w.genie.start_conversation_and_wait(space_id, req.message, timeout=_WAIT)
+    except HTTPException:
+        raise
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("[conversational] start_conversation failed: %s", exc)
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    _raise_if_failed(msg)
+    conv_id = str(getattr(msg, "conversation_id", None) or _as_dict(msg).get("conversation_id") or "")
+    msg_id = str(getattr(msg, "message_id", None) or getattr(msg, "id", None) or _as_dict(msg).get("message_id") or "")
     if not conv_id or not msg_id:
         raise HTTPException(status_code=502, detail="Genie did not return conversation/message IDs")
-
-    msg = _poll_until_ready(w, space_id, conv_id, msg_id)
     return {
         "conversation_id": conv_id,
         "message_id": msg_id,
@@ -224,16 +238,19 @@ def reply_to_conversation(req: ReplyRequest) -> dict[str, Any]:
     """Send a follow-up message to an existing Genie conversation."""
     space_id = _space_id()
     w = get_user_workspace_client()
-    started = w.api_client.do(
-        "POST",
-        f"/api/2.0/genie/spaces/{space_id}/conversations/{req.conversation_id}/messages",
-        body={"content": req.message},
-    )
-    msg_id = (started.get("message") or {}).get("id") or started.get("id")
+    try:
+        msg = w.genie.create_message_and_wait(
+            space_id, req.conversation_id, req.message, timeout=_WAIT
+        )
+    except HTTPException:
+        raise
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("[conversational] create_message failed: %s", exc)
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    _raise_if_failed(msg)
+    msg_id = str(getattr(msg, "message_id", None) or getattr(msg, "id", None) or _as_dict(msg).get("message_id") or "")
     if not msg_id:
         raise HTTPException(status_code=502, detail="Genie did not return a message ID")
-
-    msg = _poll_until_ready(w, space_id, req.conversation_id, msg_id)
     return {
         "conversation_id": req.conversation_id,
         "message_id": msg_id,

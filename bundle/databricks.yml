@@ -41,7 +41,7 @@ variables:
     default: ""
   ai_gateway_usage_table:
     description: >
-      Admin-managed derived table for AI Gateway usage data.
+      Admin-managed derived table for Unity Gateway usage data.
       Must be created by an account admin from system.ai_gateway.usage and refreshed
       by a scheduled job.  Format: catalog.schema.table_name
       Example: main.cost_obs.ai_gateway_usage_shared

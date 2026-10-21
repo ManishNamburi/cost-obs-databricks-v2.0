@@ -116,7 +116,7 @@ function useKeepAlive() {
   }, []);
 }
 
-// AI/ML content is now under the AI Gateway tab as the default "Cost" sub-tab
+// AI/ML content is now under the Unity Gateway tab as the default "Cost" sub-tab
 // (V2.1_SPEC §4.3). "aiml" is no longer a top-level tab value.
 type ViewTab = "dbu" | "sql" | "infra" | "optimizer" | "kpis" | "ai-gateway" | "genie" | "apps" | "tagging" | "use-cases" | "users-groups";
 
@@ -133,7 +133,7 @@ const DASHBOARD_TABS: Array<{ id: ViewTab; label: string; icon: React.ReactNode 
   },
   {
     id: "ai-gateway",
-    label: "AI Gateway",
+    label: "Unity Gateway",
     icon: <svg className="mr-2 -mt-0.5 inline h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 9l3 3-3 3m5 0h3M5 20h14a2 2 0 002-2V6a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" /></svg>,
   },
   {
@@ -179,8 +179,8 @@ const TAB_LOADING_SECTIONS: Record<ViewTab, string[]> = {
   infra: ["Infrastructure Costs", "Cluster Costs", "Usage by Instance Family", "Cluster Cost Breakdown"],
   optimizer: ["Idle Time Analysis", "Rightsizing Recommendations"],
   kpis: ["Platform KPIs", "Data Activity", "Compute Activity", "Spend Changes and Trends"],
-  "ai-gateway": ["AI Gateway Spend", "Routes", "Models", "Users"],
-  genie: ["Genie Spend", "Spend by Surface", "Workspaces"],
+  "ai-gateway": ["Unity Gateway Spend", "Services", "Models", "Users", "Catalog"],
+  genie: ["Genie Spend", "Spend by Surface", "Workspaces", "Spaces"],
   apps: ["Apps Spend Over Time", "Apps by Spend", "Connected Resources"],
   tagging: ["Total Tag Coverage", "Tag Coverage Over Time", "Top Tags", "Spend by Key", "Untagged Resources"],
   "users-groups": ["Top Users by Spend", "User Spend by Product", "User Activity", "Service Principal Activity"],
@@ -1145,7 +1145,7 @@ function Dashboard() {
     infra: infraBundleError ? "Cloud costs failed to load" : undefined,
     optimizer: (optimizeRightsizingError || optimizeIdleError) ? "Optimize data failed to load" : undefined,
     kpis: kpisBundleError ? "KPI data failed to load" : undefined,
-    "ai-gateway": aiGatewayError ? "AI Gateway data failed to load" : undefined,
+    "ai-gateway": aiGatewayError ? "Unity Gateway data failed to load" : undefined,
     apps: appsError ? "Apps data failed to load" : undefined,
     tagging: taggingError ? "Tagging data failed to load" : undefined,
     "users-groups": usersGroupsError ? "User data failed to load" : undefined,
@@ -1561,7 +1561,7 @@ function Dashboard() {
           />
           </TabErrorBoundary>
         ) : activeTab === "ai-gateway" ? (
-          <TabErrorBoundary tabName="AI Gateway">
+          <TabErrorBoundary tabName="Unity Gateway">
           <AIGatewayView
             data={aiGatewayData}
             isLoading={aiGatewayLoading}

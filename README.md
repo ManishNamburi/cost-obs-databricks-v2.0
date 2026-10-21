@@ -18,7 +18,7 @@ Built on FastAPI + React, deployed as a [Databricks App](https://docs.databricks
 
 ## What's new in 2.1 (2026-07-03)
 
-Ports the v1 1.1 field-hardening pass into v2's `app/backend/` + `app/frontend/` package layout while retaining v2's bundle-based deployment, Lakebase state store, and AI Gateway feature set.
+Ports the v1 1.1 field-hardening pass into v2's `app/backend/` + `app/frontend/` package layout while retaining v2's bundle-based deployment, Lakebase state store, and Unity Gateway feature set.
 
 **Apps bundle materialized view.** New `daily_apps_summary` pre-aggregation at (usage_date, workspace_id, app_id, sku_name) grain filtered to `billing_origin_product = 'APPS'`. Powers all six APPS query slots (summary, per-app breakdown, timeseries, filtered averages, avg-cost-per-app, sku breakdown) via an MV fast path with automatic fallback to raw scans when the MV is unavailable.
 

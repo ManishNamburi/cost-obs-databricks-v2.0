@@ -183,7 +183,7 @@ Pass the live v1 catalog, schema, and warehouse id. Setup then:
 - App state moves from DBFS to Lakebase. The v2 app reads state only from
   Lakebase, so once the migration completes, the DBFS copy is no longer
   authoritative.
-- The AI/ML tab is now a sub-tab under **AI Gateway** (V2.1_SPEC §4.3).
+- The AI/ML tab is now a sub-tab under **Unity Gateway** (V2.1_SPEC §4.3).
   The saved-tab-visibility setting for `aiml` is silently dropped.
 - The dedicated Genie tab appears (V2.1_SPEC §4.4).
 
@@ -250,6 +250,6 @@ Then open the app and confirm:
 
 - **DBU Spend** tab renders (gold is built during `cost_obs_setup`; a
   first load should not need a Settings rebuild).
-- **AI Gateway** tab shows the "Cost" sub-tab as its default view.
+- **Unity Gateway** tab shows the "Cost" sub-tab as its default view.
 - **Genie** tab (new in 2.1) is present.
 - Settings → Tab visibility no longer shows an "AI/ML" entry.

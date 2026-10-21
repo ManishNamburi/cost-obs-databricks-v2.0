@@ -9,6 +9,7 @@ import type {
   GenieCostSurfaceRow,
   GenieCostTimeseriesRow,
   GenieCostWorkspaceRow,
+  GenieSpaceInventory,
 } from "@/types/billing";
 import { formatCurrency } from "@/utils/formatters";
 import { PageHero, InfoPanel } from "@/components/brand";
@@ -142,6 +143,62 @@ function GenieTimeseriesChart({ rows }: { rows: GenieCostTimeseriesRow[] }) {
 }
 
 // ── Workspace table ──────────────────────────────────────────────────────────
+
+function GenieSpacesPanel({ inventory }: { inventory?: GenieSpaceInventory }) {
+  if (!inventory || inventory.available === false) {
+    return (
+      <div className="rounded-lg bg-white border p-5 text-sm text-gray-500" style={{ borderColor: "#E5E5E5" }}>
+        Genie space list is unavailable{inventory?.error ? `: ${inventory.error}` : "."}
+      </div>
+    );
+  }
+  if (inventory.spaces.length === 0) {
+    return (
+      <div className="rounded-lg bg-white border p-5 text-sm text-gray-500" style={{ borderColor: "#E5E5E5" }}>
+        No Genie spaces were visible to this app identity.
+      </div>
+    );
+  }
+  return (
+    <div className="rounded-lg bg-white border p-5" style={{ borderColor: "#E5E5E5" }}>
+      <div className="mb-3 flex items-center justify-between">
+        <h3 className="text-sm font-semibold text-gray-700">Genie spaces</h3>
+        {inventory.configured_conversation_count ? (
+          <p className="text-xs text-gray-500">
+            {inventory.configured_conversation_count} conversation{inventory.configured_conversation_count === 1 ? "" : "s"} on the app space
+          </p>
+        ) : null}
+      </div>
+      <div className="overflow-x-auto">
+        <table className="min-w-full">
+          <thead className="bg-gray-50">
+            <tr className="border-b border-gray-200">
+              <th className="px-3 py-2.5 text-left text-xs font-medium uppercase tracking-wider text-gray-500">Title</th>
+              <th className="px-3 py-2.5 text-left text-xs font-medium uppercase tracking-wider text-gray-500">Space ID</th>
+              <th className="px-3 py-2.5 text-left text-xs font-medium uppercase tracking-wider text-gray-500">Warehouse</th>
+            </tr>
+          </thead>
+          <tbody>
+            {inventory.spaces.map((s) => (
+              <tr key={s.space_id} className="border-b border-gray-100 last:border-0">
+                <td className="px-3 py-2.5 text-sm font-medium text-gray-900">
+                  {s.title || "(untitled)"}
+                  {s.configured && (
+                    <span className="ml-2 inline-flex rounded-full border border-green-200 bg-green-50 px-1.5 py-0.5 text-[10px] font-medium text-green-700">
+                      Ask Genie
+                    </span>
+                  )}
+                </td>
+                <td className="px-3 py-2.5 font-mono text-xs text-gray-600">{s.space_id}</td>
+                <td className="px-3 py-2.5 text-xs text-gray-500">{s.warehouse_id || "—"}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
 
 function WorkspaceTable({ rows }: { rows: GenieCostWorkspaceRow[] }) {
   const [search, setSearch] = useState("");
@@ -292,7 +349,7 @@ function DiagnosticsPanel({ open }: { open: boolean }) {
 
 // ── Main component ────────────────────────────────────────────────────────────
 
-type SubTab = "overview" | "workspaces" | "diagnostics";
+type SubTab = "overview" | "workspaces" | "spaces" | "diagnostics";
 
 interface GenieCostViewProps {
   data: GenieCostDashboardBundle | undefined;
@@ -316,11 +373,13 @@ export function GenieCostView({ data, isLoading }: GenieCostViewProps) {
   const workspaces = data?.workspaces ?? [];
   const timeseries = data?.timeseries ?? [];
   const surfaceRows = data?.surface_breakdown ?? [];
+  const inventory = data?.inventory;
   const hasData = summary != null && summary.total_usd > 0;
 
   const SUB_TABS: { id: SubTab; label: string }[] = [
     { id: "overview",    label: "Overview" },
     { id: "workspaces",  label: `Workspaces (${workspaces.length})` },
+    { id: "spaces",      label: `Spaces${inventory?.space_count ? ` (${inventory.space_count})` : ""}` },
     { id: "diagnostics", label: "Diagnostics" },
   ];
 
@@ -336,6 +395,7 @@ export function GenieCostView({ data, isLoading }: GenieCostViewProps) {
           <li><strong>By Surface</strong>: Split across Genie Code, Genie One, Agents, and other surfaces</li>
           <li><strong>Workspaces</strong>: Which workspaces drive Genie spend</li>
           <li><strong>Diagnostics</strong>: Raw billing SKUs that mapped to Genie so you can check coverage</li>
+          <li><strong>Spaces</strong>: Genie spaces this workspace can see, via the Genie SDK. Ask Genie still uses the space created on deploy.</li>
         </ul>
       </InfoPanel>
 
@@ -446,6 +506,8 @@ export function GenieCostView({ data, isLoading }: GenieCostViewProps) {
       )}
 
       {subTab === "workspaces" && <WorkspaceTable rows={workspaces} />}
+
+      {subTab === "spaces" && <GenieSpacesPanel inventory={inventory} />}
 
       {subTab === "diagnostics" && <DiagnosticsPanel open={subTab === "diagnostics"} />}
     </div>

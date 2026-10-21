@@ -454,7 +454,7 @@ export interface AIMLDashboardBundle {
   end_date: string;
 }
 
-// AI Gateway Types
+// Unity Gateway Types
 export interface AIGatewaySummary {
   total_requests: number;
   success_count: number;
@@ -485,6 +485,7 @@ export interface AIGatewayModelRow {
 export interface AIGatewayRouteRow {
   route_name: string;
   model_name: string;
+  service_type?: string | null;
   request_count: number;
   input_tokens: number;
   output_tokens: number;
@@ -517,6 +518,23 @@ export interface AIGatewayTimeseriesRow {
   cost_source: "billing" | "token_estimate" | "unavailable";
 }
 
+export interface UnityGatewayServiceRow {
+  name: string;
+  comment: string;
+  owner: string;
+  destinations: string[];
+  kind: "model_service" | "mcp_service" | string;
+  parent?: string;
+}
+
+export interface UnityGatewayInventory {
+  available: boolean;
+  sdk?: boolean;
+  model_services: UnityGatewayServiceRow[];
+  mcp_services: UnityGatewayServiceRow[];
+  error?: string | null;
+}
+
 export interface AIGatewayDashboardBundle {
   configured: boolean;
   table?: string;
@@ -528,6 +546,8 @@ export interface AIGatewayDashboardBundle {
   by_route?: AIGatewayRouteRow[];
   top_users?: AIGatewayUserRow[];
   timeseries?: AIGatewayTimeseriesRow[];
+  inventory?: UnityGatewayInventory;
+  usage_schema?: "unity" | "legacy" | string;
 }
 
 // Genie Cost Tab Types
@@ -618,11 +638,29 @@ export interface GenieCostTimeseriesRow {
   genie_agents_usd: number;
 }
 
+export interface GenieSpaceInventoryRow {
+  space_id: string;
+  title: string;
+  description: string;
+  warehouse_id: string;
+  configured?: boolean;
+}
+
+export interface GenieSpaceInventory {
+  available: boolean;
+  spaces: GenieSpaceInventoryRow[];
+  space_count: number;
+  configured_space_id?: string | null;
+  configured_conversation_count?: number;
+  error?: string | null;
+}
+
 export interface GenieCostDashboardBundle {
   summary: GenieCostSummary;
   workspaces: GenieCostWorkspaceRow[];
   timeseries: GenieCostTimeseriesRow[];
   surface_breakdown: GenieCostSurfaceRow[];
+  inventory?: GenieSpaceInventory;
 }
 
 export interface GenieCostDiagnosticsRow {

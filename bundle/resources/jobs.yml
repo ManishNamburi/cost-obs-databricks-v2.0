@@ -131,4 +131,4 @@ resources:
               - psycopg_pool
               - databricks-sql-connector==3.7.4
               - cachetools==7.0.0
-              - databricks-sdk==0.81.0
+              - databricks-sdk==0.155.0

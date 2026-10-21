@@ -1,11 +1,11 @@
 """
-AI Gateway Cost Intelligence Router
+Unity Gateway Cost Intelligence Router
 
 system.ai_gateway.usage is account-admin only — the app SP cannot query it directly.
 An account admin must create and refresh a derived table:
 
     CREATE OR REPLACE TABLE <catalog>.<schema>.ai_gateway_usage_shared
-    CLUSTER BY (CAST(timestamp AS DATE))
+    CLUSTER BY (CAST(event_time AS DATE))
     AS SELECT * FROM system.ai_gateway.usage
     WHERE workspace_id IN (...);   -- optional workspace filter
 
@@ -14,6 +14,9 @@ Then grant the app SP SELECT on it:
 
 Set the env var:
     AI_GATEWAY_USAGE_TABLE=<catalog>.<schema>.ai_gateway_usage_shared
+
+The table name is unchanged (`system.ai_gateway.usage`). Column names follow the
+Unity Gateway schema, with a fallback to the legacy Mosaic AI Gateway names.
 
 Cost model:
 - 1P models (Databricks-hosted): correlated with system.billing.usage via workspace_id + date
@@ -24,7 +27,6 @@ Cost model:
 
 from __future__ import annotations
 
-import asyncio
 import logging
 import os
 from datetime import date, timedelta
@@ -32,16 +34,15 @@ from typing import Any
 
 from fastapi import APIRouter, Query
 
+from backend import cache_ttls
 from backend.db import (
-    execute_query,
-    execute_queries_parallel,
     bundle_cache_key,
     delta_cache_get,
     delta_cache_put,
-    get_catalog_schema,
+    execute_queries_parallel,
+    execute_query,
     source_scope_unavailable,
 )
-from backend import cache_ttls
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -75,7 +76,7 @@ _BUNDLE_TTL = cache_ttls.AIML_BUNDLE
 
 
 def _get_usage_table() -> str:
-    """Return the fully-qualified AI Gateway derived table path from env."""
+    """Return the fully-qualified Unity Gateway derived table path from env."""
     tbl = os.environ.get("AI_GATEWAY_USAGE_TABLE", "").strip()
     return tbl
 
@@ -103,10 +104,20 @@ def _model_price(model_name: str) -> dict[str, float]:
 # SQL Templates
 # ---------------------------------------------------------------------------
 
+def _usage_exprs(table: str) -> dict[str, str]:
+    from backend.unity_gateway import pick_usage_columns
+    return pick_usage_columns(table)
+
+
+def _render_usage_sql(template: str, table: str) -> str:
+    exprs = _usage_exprs(table)
+    return template.format(table=table, **exprs)
+
+
 _AI_GW_STATUS_SQL = """
 SELECT
-    MIN(CAST(timestamp AS DATE)) AS earliest_date,
-    MAX(CAST(timestamp AS DATE)) AS latest_date,
+    MIN(CAST({event_ts} AS DATE)) AS earliest_date,
+    MAX(CAST({event_ts} AS DATE)) AS latest_date,
     COUNT(*)                      AS total_rows,
     COUNT(DISTINCT workspace_id)  AS workspace_count
 FROM {table}
@@ -115,85 +126,86 @@ FROM {table}
 _AI_GW_SUMMARY_SQL = """
 SELECT
     COUNT(*)                                         AS total_requests,
-    COUNT(DISTINCT route_name)                       AS route_count,
-    COUNT(DISTINCT model_name)                       AS model_count,
-    COUNT(DISTINCT client_user)                      AS user_count,
-    SUM(input_token_count)                           AS total_input_tokens,
-    SUM(output_token_count)                          AS total_output_tokens,
-    SUM(total_token_count)                           AS total_tokens,
-    AVG(request_duration_ms)                         AS avg_latency_ms,
-    SUM(CASE WHEN http_status_code >= 400 THEN 1 ELSE 0 END)  AS error_count,
-    SUM(CASE WHEN http_status_code < 400 THEN 1 ELSE 0 END)   AS success_count
+    COUNT(DISTINCT {service})                       AS route_count,
+    COUNT(DISTINCT {model})                       AS model_count,
+    COUNT(DISTINCT {requester})                      AS user_count,
+    SUM({input_tokens})                           AS total_input_tokens,
+    SUM({output_tokens})                          AS total_output_tokens,
+    SUM({total_tokens})                           AS total_tokens,
+    AVG({latency})                         AS avg_latency_ms,
+    SUM(CASE WHEN CAST({status_code} AS INT) >= 400 THEN 1 ELSE 0 END)  AS error_count,
+    SUM(CASE WHEN CAST({status_code} AS INT) < 400 THEN 1 ELSE 0 END)   AS success_count
 FROM {table}
-WHERE CAST(timestamp AS DATE) BETWEEN :start_date AND :end_date
-  {workspace_filter}
+WHERE CAST({event_ts} AS DATE) BETWEEN :start_date AND :end_date
+  {{workspace_filter}}
 """
 
 _AI_GW_BY_MODEL_SQL = """
 SELECT
-    model_name,
+    {model} AS model_name,
     COUNT(*)                 AS request_count,
-    SUM(input_token_count)   AS input_tokens,
-    SUM(output_token_count)  AS output_tokens,
-    SUM(total_token_count)   AS total_tokens,
-    AVG(request_duration_ms) AS avg_latency_ms,
-    SUM(CASE WHEN http_status_code >= 400 THEN 1 ELSE 0 END) AS error_count
+    SUM({input_tokens})   AS input_tokens,
+    SUM({output_tokens})  AS output_tokens,
+    SUM({total_tokens})   AS total_tokens,
+    AVG({latency}) AS avg_latency_ms,
+    SUM(CASE WHEN CAST({status_code} AS INT) >= 400 THEN 1 ELSE 0 END) AS error_count
 FROM {table}
-WHERE CAST(timestamp AS DATE) BETWEEN :start_date AND :end_date
-  {workspace_filter}
-GROUP BY model_name
+WHERE CAST({event_ts} AS DATE) BETWEEN :start_date AND :end_date
+  {{workspace_filter}}
+GROUP BY {model}
 ORDER BY request_count DESC
 LIMIT 50
 """
 
 _AI_GW_BY_ROUTE_SQL = """
 SELECT
-    route_name,
-    model_name,
+    {service} AS route_name,
+    {model} AS model_name,
+    {service_type} AS service_type,
     COUNT(*)                 AS request_count,
-    SUM(input_token_count)   AS input_tokens,
-    SUM(output_token_count)  AS output_tokens,
-    SUM(total_token_count)   AS total_tokens,
-    AVG(request_duration_ms) AS avg_latency_ms,
-    SUM(CASE WHEN http_status_code >= 400 THEN 1 ELSE 0 END) AS error_count
+    SUM({input_tokens})   AS input_tokens,
+    SUM({output_tokens})  AS output_tokens,
+    SUM({total_tokens})   AS total_tokens,
+    AVG({latency}) AS avg_latency_ms,
+    SUM(CASE WHEN CAST({status_code} AS INT) >= 400 THEN 1 ELSE 0 END) AS error_count
 FROM {table}
-WHERE CAST(timestamp AS DATE) BETWEEN :start_date AND :end_date
-  {workspace_filter}
-GROUP BY route_name, model_name
+WHERE CAST({event_ts} AS DATE) BETWEEN :start_date AND :end_date
+  {{workspace_filter}}
+GROUP BY {service}, {model}, {service_type}
 ORDER BY request_count DESC
 LIMIT 100
 """
 
 _AI_GW_BY_USER_SQL = """
 SELECT
-    COALESCE(client_user, '(unknown)')  AS client_user,
+    COALESCE({requester}, '(unknown)')  AS client_user,
     COUNT(*)                            AS request_count,
-    COUNT(DISTINCT route_name)          AS routes_used,
-    SUM(input_token_count)              AS input_tokens,
-    SUM(output_token_count)             AS output_tokens,
-    SUM(total_token_count)              AS total_tokens,
-    AVG(request_duration_ms)            AS avg_latency_ms
+    COUNT(DISTINCT {service})          AS routes_used,
+    SUM({input_tokens})              AS input_tokens,
+    SUM({output_tokens})             AS output_tokens,
+    SUM({total_tokens})              AS total_tokens,
+    AVG({latency})            AS avg_latency_ms
 FROM {table}
-WHERE CAST(timestamp AS DATE) BETWEEN :start_date AND :end_date
-  {workspace_filter}
-GROUP BY client_user
+WHERE CAST({event_ts} AS DATE) BETWEEN :start_date AND :end_date
+  {{workspace_filter}}
+GROUP BY {requester}
 ORDER BY request_count DESC
 LIMIT 100
 """
 
 _AI_GW_TIMESERIES_SQL = """
 SELECT
-    CAST(timestamp AS DATE)  AS usage_date,
-    model_name,
+    CAST({event_ts} AS DATE)  AS usage_date,
+    {model} AS model_name,
     COUNT(*)                 AS request_count,
-    SUM(input_token_count)   AS input_tokens,
-    SUM(output_token_count)  AS output_tokens,
-    SUM(total_token_count)   AS total_tokens,
-    AVG(request_duration_ms) AS avg_latency_ms
+    SUM({input_tokens})   AS input_tokens,
+    SUM({output_tokens})  AS output_tokens,
+    SUM({total_tokens})   AS total_tokens,
+    AVG({latency}) AS avg_latency_ms
 FROM {table}
-WHERE CAST(timestamp AS DATE) BETWEEN :start_date AND :end_date
-  {workspace_filter}
-GROUP BY CAST(timestamp AS DATE), model_name
+WHERE CAST({event_ts} AS DATE) BETWEEN :start_date AND :end_date
+  {{workspace_filter}}
+GROUP BY CAST({event_ts} AS DATE), {model}
 ORDER BY usage_date, model_name
 """
 
@@ -222,6 +234,20 @@ WHERE u.usage_date BETWEEN :start_date AND :end_date
 GROUP BY u.usage_date, u.workspace_id
 ORDER BY u.usage_date
 """
+
+
+def _with_inventory(bundle: dict[str, Any], tbl: str | None) -> dict[str, Any]:
+    from backend.unity_gateway import list_unity_gateway_inventory, usage_schema_label
+    try:
+        bundle["inventory"] = list_unity_gateway_inventory()
+        bundle["usage_schema"] = usage_schema_label(tbl) if tbl else "unity"
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("Unity Gateway inventory failed: %s", exc)
+        bundle.setdefault(
+            "inventory",
+            {"available": False, "error": str(exc), "model_services": [], "mcp_services": []},
+        )
+    return bundle
 
 
 def _apply_workspace_filter(sql: str, workspace_ids: list[str] | None, table_alias: str = "") -> tuple[str, dict]:
@@ -356,7 +382,7 @@ def _enrich_model_costs(rows: list[dict]) -> list[dict]:
 
 @router.get("/status")
 async def get_ai_gateway_status() -> dict[str, Any]:
-    """Check whether the AI Gateway usage table is configured and accessible."""
+    """Check whether the Unity Gateway usage table is configured and accessible."""
     tbl = _get_usage_table()
     if not tbl:
         return {
@@ -373,7 +399,7 @@ async def get_ai_gateway_status() -> dict[str, Any]:
     def _probe():
         try:
             rows = execute_query(
-                _AI_GW_STATUS_SQL.format(table=tbl),
+                _render_usage_sql(_AI_GW_STATUS_SQL, tbl),
                 no_cache=True,
             )
             if rows:
@@ -417,7 +443,7 @@ async def get_ai_gateway_summary(
     start_date, end_date = _defaults(start_date, end_date)
     params: dict[str, Any] = {"start_date": start_date, "end_date": end_date}
 
-    sql, ws_params = _apply_workspace_filter(_AI_GW_SUMMARY_SQL.format(table=tbl), workspace_ids)
+    sql, ws_params = _apply_workspace_filter(_render_usage_sql(_AI_GW_SUMMARY_SQL, tbl), workspace_ids)
     params.update(ws_params)
 
     import asyncio
@@ -464,7 +490,7 @@ async def get_ai_gateway_by_model(
 
     start_date, end_date = _defaults(start_date, end_date)
     params: dict[str, Any] = {"start_date": start_date, "end_date": end_date}
-    sql, ws_params = _apply_workspace_filter(_AI_GW_BY_MODEL_SQL.format(table=tbl), workspace_ids)
+    sql, ws_params = _apply_workspace_filter(_render_usage_sql(_AI_GW_BY_MODEL_SQL, tbl), workspace_ids)
     params.update(ws_params)
 
     import asyncio
@@ -483,14 +509,14 @@ async def get_ai_gateway_by_route(
     end_date: str | None = Query(None),
     workspace_ids: list[str] | None = Query(None, alias="workspace_id"),
 ) -> list[dict[str, Any]]:
-    """Token consumption and request counts broken down by AI Gateway route."""
+    """Token consumption and request counts broken down by Unity Gateway service."""
     tbl = _get_usage_table()
     if not tbl:
         return []
 
     start_date, end_date = _defaults(start_date, end_date)
     params: dict[str, Any] = {"start_date": start_date, "end_date": end_date}
-    sql, ws_params = _apply_workspace_filter(_AI_GW_BY_ROUTE_SQL.format(table=tbl), workspace_ids)
+    sql, ws_params = _apply_workspace_filter(_render_usage_sql(_AI_GW_BY_ROUTE_SQL, tbl), workspace_ids)
     params.update(ws_params)
 
     import asyncio
@@ -516,7 +542,7 @@ async def get_ai_gateway_by_user(
 
     start_date, end_date = _defaults(start_date, end_date)
     params: dict[str, Any] = {"start_date": start_date, "end_date": end_date}
-    sql, ws_params = _apply_workspace_filter(_AI_GW_BY_USER_SQL.format(table=tbl), workspace_ids)
+    sql, ws_params = _apply_workspace_filter(_render_usage_sql(_AI_GW_BY_USER_SQL, tbl), workspace_ids)
     params.update(ws_params)
 
     import asyncio
@@ -537,7 +563,7 @@ async def get_ai_gateway_timeseries(
 
     start_date, end_date = _defaults(start_date, end_date)
     params: dict[str, Any] = {"start_date": start_date, "end_date": end_date}
-    sql, ws_params = _apply_workspace_filter(_AI_GW_TIMESERIES_SQL.format(table=tbl), workspace_ids)
+    sql, ws_params = _apply_workspace_filter(_render_usage_sql(_AI_GW_TIMESERIES_SQL, tbl), workspace_ids)
     params.update(ws_params)
 
     billing_sql, billing_ws = _apply_workspace_filter(
@@ -571,29 +597,29 @@ async def get_ai_gateway_dashboard_bundle(
     end_date: str | None = Query(None),
     workspace_ids: list[str] | None = Query(None, alias="workspace_id"),
 ) -> dict[str, Any]:
-    """All AI Gateway data in one call for the dashboard tab.
+    """All Unity Gateway data in one call for the dashboard tab.
 
-    Returns: status, summary, by_model, by_route, top_users, timeseries.
+    Returns: status, summary, by_model, by_route, top_users, timeseries, inventory.
     """
     tbl = _get_usage_table()
     if not tbl:
-        return {
+        return _with_inventory({
             "configured": False,
             "message": (
                 "AI_GATEWAY_USAGE_TABLE not configured. "
                 "Set this env var in your Databricks App to the admin-managed derived table."
             ),
-        }
+        }, None)
 
     start_date, end_date = _defaults(start_date, end_date)
     # AI Gateway gold is daily_ai_gateway. Missing AIML grain is not a reason
     # to mark this tab unsupported.
     blocked = source_scope_unavailable(
         {"daily_ai_gateway"},
-        "The selected shared source does not publish AI Gateway detail.",
+        "The selected shared source does not publish Unity Gateway detail.",
     )
     if blocked:
-        return {
+        return _with_inventory({
             **blocked,
             "configured": True,
             "table": tbl,
@@ -604,7 +630,7 @@ async def get_ai_gateway_dashboard_bundle(
             "by_route": [],
             "top_users": [],
             "timeseries": [],
-        }
+        }, tbl)
 
     # Delta cache check
     ws_list = sorted(workspace_ids) if workspace_ids else []
@@ -612,7 +638,7 @@ async def get_ai_gateway_dashboard_bundle(
     cached = delta_cache_get(cache_key)
     if cached is not None:
         logger.info("ai-gateway-bundle: Delta cache hit")
-        return cached
+        return _with_inventory(cached, tbl)
 
     params: dict[str, Any] = {"start_date": start_date, "end_date": end_date}
     ws_clause = ""
@@ -637,22 +663,6 @@ async def get_ai_gateway_dashboard_bundle(
             return bundle
         return None
 
-    def _make_sql(template: str) -> tuple[str, dict]:
-        sql, ws_p = _apply_workspace_filter(template.format(table=tbl), workspace_ids)
-        p = {**params, **ws_p}
-        return sql, p
-
-    summary_sql, summary_p = _make_sql(_AI_GW_SUMMARY_SQL)
-    model_sql, model_p = _make_sql(_AI_GW_BY_MODEL_SQL)
-    route_sql, route_p = _make_sql(_AI_GW_BY_ROUTE_SQL)
-    user_sql, user_p = _make_sql(_AI_GW_BY_USER_SQL)
-    ts_sql, ts_p = _make_sql(_AI_GW_TIMESERIES_SQL)
-
-    billing_sql, billing_ws = _apply_workspace_filter(
-        _AI_GW_BILLING_CORRELATE_SQL, workspace_ids, table_alias="u"
-    )
-    billing_p: dict[str, Any] = {"start_date": start_date, "end_date": end_date, **billing_ws}
-
     import asyncio
     loop = asyncio.get_running_loop()
 
@@ -670,6 +680,21 @@ async def get_ai_gateway_dashboard_bundle(
                 "end_date": end_date,
                 **empty,
             }
+
+        def _make_sql(template: str) -> tuple[str, dict]:
+            sql, ws_p = _apply_workspace_filter(_render_usage_sql(template, tbl), workspace_ids)
+            return sql, {**params, **ws_p}
+
+        summary_sql, summary_p = _make_sql(_AI_GW_SUMMARY_SQL)
+        model_sql, model_p = _make_sql(_AI_GW_BY_MODEL_SQL)
+        route_sql, route_p = _make_sql(_AI_GW_BY_ROUTE_SQL)
+        user_sql, user_p = _make_sql(_AI_GW_BY_USER_SQL)
+        ts_sql, ts_p = _make_sql(_AI_GW_TIMESERIES_SQL)
+        billing_sql, billing_ws = _apply_workspace_filter(
+            _AI_GW_BILLING_CORRELATE_SQL, workspace_ids, table_alias="u"
+        )
+        billing_p: dict[str, Any] = {"start_date": start_date, "end_date": end_date, **billing_ws}
+
         results = execute_queries_parallel([
             ("summary",  lambda: execute_query(summary_sql, summary_p)),
             ("by_model", lambda: execute_query(model_sql, model_p)),
@@ -723,4 +748,4 @@ async def get_ai_gateway_dashboard_bundle(
         delta_cache_put(cache_key, "ai-gateway-bundle", bundle, ttl_seconds=_BUNDLE_TTL)
         return bundle
 
-    return await loop.run_in_executor(None, _run)
+    return _with_inventory(await loop.run_in_executor(None, _run), tbl)

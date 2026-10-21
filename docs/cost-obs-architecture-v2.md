@@ -33,7 +33,7 @@ Browser / React               FastAPI application                 Serving + comp
 | Databricks system tables | Account-level billing, query, compute, Lakeflow, serving, and workspace metadata — warehouse-only at refresh time |
 | App-managed gold sync | After each gold build, the app copies computed gold into Lakebase. No managed synced tables, no Unity Catalog catalog over Postgres |
 | Genie space | Optional curated space for Ask Genie. Seeded by the setup job; not bound as an app resource |
-| AI Gateway | Parent AI surface in the product. AI/ML cost views render inside this tab |
+| Unity Gateway | Parent AI surface in the product. AI/ML cost views render inside this tab |
 
 ## Request & data flow
 
@@ -109,13 +109,13 @@ Administrators can add additional gold sources — typically Delta-shared catalo
 
 Source-share configuration itself is stored in Lakebase.
 
-## Genie, Ask Genie, and AI Gateway
+## Genie, Ask Genie, and Unity Gateway
 
 **Genie tab** — static cost reporting (not chat). Charged vs free-tier Genie spend, workspace grain, and Code / One / Agents / Other surface splits. Served from Lakebase gold built from billing usage and list prices.
 
-**Ask Genie** — a slide-out conversational drawer, separate from the Genie tab. Status / message / reply wrap the Genie conversation API. Calls run as the signed-in user so Unity Catalog and space permissions apply. The space is curated over billing usage, list prices, optional account prices, and workspace names. Unsupported questions are rejected rather than guessed. Cloud invoice actuals and query-level warehouse cost are not in the curated space.
+**Ask Genie** — a slide-out conversational drawer, separate from the Genie tab. Status / message / reply use the Genie SDK (`WorkspaceClient.genie`). Calls run as the signed-in user so Unity Catalog and space permissions apply. The space is curated over billing usage, list prices, optional account prices, and workspace names. Unsupported questions are rejected rather than guessed. Cloud invoice actuals and query-level warehouse cost are not in the curated space.
 
-**AI Gateway tab** — the parent AI surface. AI/ML cost views (serving endpoints, ML clusters, agents, models) render inside this tab; there is no standalone AI/ML tab. Optional AI Gateway token/route analytics require an account-admin–managed derived table over `system.ai_gateway.usage`. The setup job does not create that table. When the table is present, gold `daily_ai_gateway` is built and synced to Lakebase.
+**Unity Gateway tab** — the parent AI surface. AI/ML cost views (serving endpoints, ML clusters, agents, models) render inside this tab; there is no standalone AI/ML tab. Optional Unity Gateway token/service analytics require an account-admin–managed derived table over `system.ai_gateway.usage`. The setup job does not create that table. When the table is present, gold `daily_ai_gateway` is built and synced to Lakebase. The Catalog sub-tab lists model and MCP services through the Unity Gateway SDK.
 
 ## Cloud costs: estimates only
 
@@ -127,7 +127,7 @@ The Cloud Costs view’s default path is a **computed VM / cluster infrastructur
 |---|---|---|
 | $DBU Spend | Account spend, product / SKU, jobs & pipelines, interactive compute | `daily_usage_summary`, `daily_product_breakdown`, `daily_workspace_breakdown`, `daily_sku_breakdown`, `daily_job_pipeline_spend`, `daily_interactive_spend` |
 | SQL | SQL vs Genie attribution, warehouse and source breakdowns | `sql_tool_attribution`, `daily_dbsql_source`, `daily_query_stats`, `daily_dbsql_warehouse_type`, `daily_dbsql_top` |
-| AI Gateway | AI Gateway plus AI/ML cost views | `daily_ai_gateway` (when configured), `daily_aiml_endpoints`, `daily_aiml_models`, `daily_aiml_ml_clusters`, `daily_aiml_agents` |
+| Unity Gateway | Unity Gateway plus AI/ML cost views | `daily_ai_gateway` (when configured), `daily_aiml_endpoints`, `daily_aiml_models`, `daily_aiml_ml_clusters`, `daily_aiml_agents` |
 | Genie | Static Genie charged / free-tier / surface split | `daily_sku_breakdown` (Genie surfaces and charge class) |
 | Apps | Databricks Apps spend | `daily_apps_summary` |
 | Tagging | Tag pairs and coverage | `daily_tag_summary`, `daily_tag_coverage`, `daily_untagged_objects` |
@@ -206,7 +206,7 @@ Billing system tables can lag by minutes to a few hours. The product does not cl
 
 **Core analytic system tables:** `system.billing.usage`, `system.billing.list_prices`, `system.query.history`, `system.compute.clusters`, `system.compute.warehouses`, `system.compute.warehouse_events`, `system.lakeflow.jobs`, `system.lakeflow.pipelines`, `system.lakeflow.job_run_timeline`, `system.serving.served_entities`, `system.access.workspaces_latest`
 
-**Optional:** `system.billing.account_prices` when account pricing is enabled. `system.ai_gateway.usage` is not queried by the app; an administrator-managed derived table is required if AI Gateway token analytics are enabled.
+**Optional:** `system.billing.account_prices` when account pricing is enabled. `system.ai_gateway.usage` is not queried by the app; an administrator-managed derived table is required if Unity Gateway token analytics are enabled.
 
 **Permission probe only:** `system.access.audit` — readiness reporting, never an analytic input.
 

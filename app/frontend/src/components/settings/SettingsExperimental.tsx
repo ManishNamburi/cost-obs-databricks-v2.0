@@ -244,28 +244,17 @@ export function SettingsExperimental({ localSettings, updateSetting, saveStatus 
             </div>
           </div>
 
-          {/* Unity AI Gateway — coming soon */}
-          <div className="rounded-lg border border-gray-100 bg-gray-50 p-4 space-y-3 opacity-50 cursor-not-allowed select-none">
+          <div className="rounded-lg border border-gray-100 bg-white p-4 space-y-2">
             <div className="flex items-center gap-2">
-              <svg className="h-4 w-4 text-gray-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <svg className="h-4 w-4 text-gray-700" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17H3a2 2 0 01-2-2V5a2 2 0 012-2h14a2 2 0 012 2v10a2 2 0 01-2 2h-2" />
               </svg>
-              <span className="text-sm font-medium text-gray-500">Unity AI Gateway</span>
-              <div className="inline-flex items-center gap-1 rounded-full bg-gray-100 px-2 py-0.5 text-[10px] font-medium text-gray-500 border border-gray-200">
-                Coming Soon
-              </div>
+              <span className="text-sm font-medium text-gray-900">Unity Gateway</span>
             </div>
-            <div className="flex items-center justify-between rounded-lg border border-gray-100 bg-white px-3 py-2.5">
-              <div>
-                <p className="text-xs font-medium text-gray-500">Enable Unity AI Gateway insights</p>
-                <p className="text-xs text-gray-500 mt-0.5">
-                  Surface token consumption, cost-per-model, top requesters, and cache efficiency from <code className="rounded bg-gray-100 px-0.5">system.ai_gateway.usage</code> in the AI/ML tab. Requires AI Gateway endpoints to be enabled.
-                </p>
-              </div>
-              <div className="relative inline-flex h-5 w-9 shrink-0 rounded-full bg-gray-200 cursor-not-allowed">
-                <span className="pointer-events-none inline-block h-4 w-4 rounded-full bg-white shadow transform translate-x-0" />
-              </div>
-            </div>
+            <p className="text-xs text-gray-500">
+              Token traffic, requesters, and the service catalog live on the Unity Gateway tab.
+              Usage still comes from <code className="rounded bg-gray-100 px-0.5">system.ai_gateway.usage</code> through the admin-shared table.
+            </p>
           </div>
 
         </div>
