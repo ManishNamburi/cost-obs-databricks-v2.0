@@ -7,7 +7,7 @@ import { KPICard as UiKPICard } from "@/components/ui/KPICard";
 import { formatNumber, formatBytesNoDecimal, formatRowCount, formatDurationSeconds } from "@/utils/formatters";
 import { useFeatureAvailability } from "@/hooks/useFeatureAvailability";
 import { C } from "@/theme";
-import { PageHero, TabInfoBanner } from "@/components/brand";
+import { PageHero, InfoPanel } from "@/components/brand";
 
 interface PlatformKPIsViewProps {
   data: PlatformKPIsResponse | undefined;
@@ -163,6 +163,19 @@ export function PlatformKPIsView({ data, isLoading, isFetching, spendAnomalies, 
 
   return (
     <div className="animate-fade-in space-y-6">
+      <InfoPanel
+        title="KPIs & Trends tab methodology"
+        minimized={infoMinimized}
+        onToggle={handleMinimizeToggle}
+      >
+        <ul className="list-inside list-disc space-y-1">
+          <li><strong>Query and Data Processing</strong>: SQL execution, data scanned, and compute time across all warehouses</li>
+          <li><strong>Jobs and Workflows</strong>: Automated job executions, success rates, and notebook usage</li>
+          <li><strong>Platform Utilization</strong>: Active workspaces, model serving endpoints, user adoption, and usage stickiness (DAU/MAU)</li>
+          <li>Use each metric card's See trend button to view historical trends and patterns</li>
+        </ul>
+      </InfoPanel>
+
       {/* Header */}
       <PageHero
         icon={
@@ -185,18 +198,6 @@ export function PlatformKPIsView({ data, isLoading, isFetching, spendAnomalies, 
           Showing cached data — live query returned no results. Values reflect the last successful load.
         </div>
       )}
-
-      <TabInfoBanner
-        title="Platform KPIs — What's on this tab"
-        minimized={infoMinimized}
-        onToggle={handleMinimizeToggle}
-        items={[
-          { label: "Query & Data Processing", text: "SQL query execution, data scanned, and compute time across warehouses" },
-          { label: "Jobs & Workflows", text: "Automated job runs, success rates, and notebook usage" },
-          { label: "Platform Utilization", text: "Active workspaces, endpoints, users, and DAU/MAU stickiness" },
-          { label: "Metric Trends", text: "Click any card to see the daily trend for that KPI" },
-        ]}
-      />
 
       {/* Query & Data Processing Metrics */}
       <div>

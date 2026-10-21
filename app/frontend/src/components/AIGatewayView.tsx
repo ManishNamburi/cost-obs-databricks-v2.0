@@ -345,7 +345,7 @@ export function AIGatewayView({
   if (subTab === "cost") {
     return (
       <div className="animate-fade-in space-y-5">
-        <div className="flex items-center justify-between gap-3 pr-12">
+        <div className="space-y-4">
           <div>
             <PageHero
               icon={

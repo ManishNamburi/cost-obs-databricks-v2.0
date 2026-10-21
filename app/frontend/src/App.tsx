@@ -18,7 +18,7 @@ import { PricingProvider, usePricing } from "@/context/PricingContext";
 import { SpNameMapContext } from "@/utils/identity";
 import { Footer } from "@/components/Footer";
 import { C } from "@/theme";
-import { CostObsLockup, VersionPill, PageHero } from "@/components/brand";
+import { CostObsLockup, VersionPill, PageHero, InfoPanel } from "@/components/brand";
 import { Spinner } from "@/components/Spinner";
 import { UserMenu } from "@/components/UserMenu";
 import { DeploymentBadgeFromApi } from "@/components/DeploymentBadge";
@@ -33,7 +33,7 @@ import {
   type WarehouseHealth,
 } from "@/utils/warehouseGuidance";
 import { downloadArchitecturePdf } from "@/utils/architectureDownload";
-import { Bot, Check, Copy, Settings } from "lucide-react";
+import { Bot, Check, Copy, Database, Settings } from "lucide-react";
 
 // Retry a dynamic import once on failure (handles cold-start chunk load errors)
 function lazyWithRetry<T>(factory: () => Promise<T>): Promise<T> {
@@ -425,6 +425,28 @@ function CopyableRailBadge({
   );
 }
 
+function DBUMethodologyPanel() {
+  const minimizeKey = "cost-obs-minimize-dbu-info";
+  const [minimized, setMinimized] = useState(() => (
+    typeof window !== "undefined" ? localStorage.getItem(minimizeKey) === "true" : false
+  ));
+  const handleToggle = (value: boolean) => {
+    setMinimized(value);
+    if (value) localStorage.setItem(minimizeKey, "true");
+    else localStorage.removeItem(minimizeKey);
+  };
+
+  return (
+    <InfoPanel title="$DBU Spend tab methodology" minimized={minimized} onToggle={handleToggle}>
+      <ul className="list-inside list-disc space-y-1">
+        <li><strong>DBUs</strong> are Databricks Units reported as usage quantity in <code className="rounded bg-white/60 px-1">system.billing.usage</code>.</li>
+        <li><strong>Spend</strong> multiplies DBUs by the effective SKU price: account pricing when enabled and available, otherwise current list pricing.</li>
+        <li>Date and workspace filters apply throughout this tab; cloud infrastructure charges are reported separately under Cloud Costs.</li>
+      </ul>
+    </InfoPanel>
+  );
+}
+
 function AccountPricingBanner() {
   const { useAccountPrices, discountPercent, skuCount, available } = usePricing();
   if (!useAccountPrices) return null;
@@ -714,6 +736,22 @@ function Dashboard() {
   });
   const warehouseReady = warehouseStatus?.status === "warm";
 
+  const { data: lakebaseStatus } = useQuery<{
+    status: "warm" | "warming_up" | "unavailable";
+    instance_name?: string | null;
+    page_url?: string | null;
+  }>({
+    queryKey: ["health", "lakebase"],
+    queryFn: async () => {
+      const response = await fetch("/api/health/lakebase");
+      if (!response.ok) throw new Error("Lakebase health check failed");
+      return response.json();
+    },
+    retry: 1,
+    staleTime: 15_000,
+    refetchInterval: 30_000,
+  });
+
   // Tab data is served from Lakebase; do not wait on the warehouse to preload chunks.
   useEffect(() => {
     if ("requestIdleCallback" in window) {
@@ -913,6 +951,9 @@ function Dashboard() {
     }),
     [wsListData?.workspaces, workspaceNameMap],
   );
+  const workspaceScopeCount = wsListData
+    ? wsFilterList.filter((workspace) => !workspace.historical).length
+    : undefined;
 
   // Service-principal display-name map — refetches after 10 min so if the first
   // SCIM call missed (e.g. permission granted later, backend was in cold-start),
@@ -1283,6 +1324,16 @@ function Dashboard() {
                   </RailBadgeTooltip>
                 )
               )}
+              {lakebaseStatus?.instance_name && (
+                <CopyableRailBadge
+                  value={lakebaseStatus.instance_name}
+                  text={lakebaseStatus.instance_name}
+                  label="Lakebase instance"
+                  entity="Lakebase"
+                  icon={<Database className="h-2.5 w-2.5 opacity-70" aria-label="Lakebase" />}
+                  status={lakebaseStatus.status === "warm" ? "warm" : lakebaseStatus.status === "warming_up" ? "warming_up" : "unavailable"}
+                />
+              )}
               <UserMenu
                 name={user.name}
                 email={user.email}
@@ -1405,6 +1456,7 @@ function Dashboard() {
           ) : (
           <TabErrorBoundary tabName="$DBU Spend">
           <div className="space-y-6">
+            <DBUMethodologyPanel />
             {/* Header */}
             <PageHero
               icon={
@@ -1431,6 +1483,7 @@ function Dashboard() {
               startDate={dateRange.startDate}
               endDate={dateRange.endDate}
               workspaceIds={_wsIds}
+              workspaceScopeCount={workspaceScopeCount}
             />
 
             <SpendChart data={timeseries} isLoading={bundleLoading} />

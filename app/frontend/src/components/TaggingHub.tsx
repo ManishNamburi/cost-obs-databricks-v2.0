@@ -20,7 +20,7 @@ import { KPITrendModal } from "./KPITrendModal";
 import { KPICard } from "@/components/ui/KPICard";
 import { VirtualizedList } from "./VirtualizedList";
 import { C } from "@/theme";
-import { PageHero, TabInfoBanner } from "@/components/brand";
+import { PageHero, InfoPanel } from "@/components/brand";
 
 interface TagObject {
   object_id?: string | null;
@@ -360,6 +360,19 @@ export function TaggingHub({ data, isLoading, host, startDate, endDate, workspac
 
   return (
     <div className="space-y-6">
+      <InfoPanel
+        title="Tagging tab methodology"
+        minimized={infoMinimized}
+        onToggle={handleMinimizeToggle}
+      >
+        <ul className="list-inside list-disc space-y-1">
+          <li>Add <strong>custom_tags</strong> to clusters, jobs, and endpoints for cost attribution</li>
+          <li>Use consistent tag keys like <code>Owner</code>, <code>Team</code>, <code>Project</code>, <code>CostCenter</code></li>
+          <li>Tags propagate to billing usage records for chargeback and reporting</li>
+          <li>Higher tag coverage improves cost visibility and accountability</li>
+        </ul>
+      </InfoPanel>
+
       {/* Header */}
       <PageHero
         icon={
@@ -375,18 +388,6 @@ export function TaggingHub({ data, isLoading, host, startDate, endDate, workspac
             ? (workspaceNameMap?.[workspaceIds[0]] || workspaceIds[0])
             : `${workspaceIds.length} workspaces`
           : undefined}
-      />
-
-      <TabInfoBanner
-        title="Tagging — What's on this tab"
-        minimized={infoMinimized}
-        onToggle={handleMinimizeToggle}
-        items={[
-          { label: "Tag Coverage", text: "Share of spend with custom tags for chargeback" },
-          { label: "Tag Keys", text: "Owner, Team, Project, CostCenter and other keys in use" },
-          { label: "Untagged Resources", text: "Clusters, jobs, and endpoints missing tags" },
-          { label: "Suggested Tags", text: "Recommended keys for this environment" },
-        ]}
       />
 
       {/* Summary Cards */}

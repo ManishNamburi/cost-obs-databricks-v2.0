@@ -36,7 +36,7 @@ import { AWSActualView } from "./AWSActualView";
 import { CloudIntegrationWizard } from "./CloudIntegrationWizard";
 import type { CloudIntegration } from "./CloudIntegrationWizard";
 import { C } from "@/theme";
-import { PageHero, TabInfoBanner } from "@/components/brand";
+import { PageHero, InfoPanel } from "@/components/brand";
 
 type CostMode = "estimated" | "actual";
 
@@ -453,39 +453,38 @@ export function CloudCostsView({
     </div>
   ) : null;
 
-  const EstimationInfoBox = data && (
-    <TabInfoBanner
-      title={`${cloudDisplayName} Cloud — What's on this tab`}
+  const EstimationInfoBox = (
+    <InfoPanel
+      title="Cloud Costs tab methodology"
       minimized={infoMinimized}
       onToggle={handleMinimizeToggle}
-      items={
-        isAzure
-          ? [
-              { label: "Estimated VM Spend", text: "Azure Pay-As-You-Go (East US, Linux) from cluster instance types and DBU hours" },
-              { label: "Cluster Table", text: "Per-cluster estimated cloud cost, instance types, and runtime" },
-              { label: "Not Included", text: "Managed Disk, outbound bandwidth, and subscription discounts" },
-              { label: "Cloud Invoices", text: "Optional Azure Cost Management export for actuals, when connected" },
-            ]
-          : isGCP
-            ? [
-                { label: "Estimated VM Spend", text: "Compute Engine On-Demand (us-central1, Linux) from cluster machine types and DBU hours" },
-                { label: "Cluster Table", text: "Per-cluster estimated cloud cost, machine types, and runtime" },
-                { label: "Not Included", text: "Persistent Disk, egress, GCS, and committed-use discounts" },
-                { label: "Cloud Invoices", text: "Optional GCP Billing export for actuals, when connected" },
-              ]
-            : [
-                { label: "Estimated VM Spend", text: "EC2 On-Demand (us-east-1, Linux) from cluster instance types and DBU hours" },
-                { label: "Cluster Table", text: "Per-cluster estimated cloud cost, instance types, and runtime" },
-                { label: "Not Included", text: "EBS, data transfer, Route 53, and organization discounts" },
-                { label: "Cloud Invoices", text: "Optional AWS CUR for actuals, when connected" },
-              ]
-      }
-      footer={
-        <span className="text-xs italic" style={{ color: C.slate }}>
-          For exact costs, integrate {isAzure ? "Azure Cost Management" : isGCP ? "GCP Billing Export" : "AWS CUR 2.0"} below ↓
-        </span>
-      }
-    />
+    >
+      {isAzure ? (
+        <ul className="list-inside list-disc space-y-1">
+          <li>Shows Databricks DBUs, {accountPricingApplied ? "account-price" : "list-price"} spend, active clusters, and Azure VM instance metadata</li>
+          <li>Databricks spend comes from billed DBU usage {accountPricingApplied ? "with the account pricing factor applied" : "joined to the applicable system list price"}</li>
+          <li>DBUs are not VM node-hours, so the app does not infer an Azure currency cost from them</li>
+          <li>Connect Azure Cost Management for authoritative VM, disk, and network costs</li>
+        </ul>
+      ) : isGCP ? (
+        <ul className="list-inside list-disc space-y-1">
+          <li>Shows Databricks DBUs, {accountPricingApplied ? "account-price" : "list-price"} spend, active clusters, and GCP machine-type metadata</li>
+          <li>Databricks spend comes from billed DBU usage {accountPricingApplied ? "with the account pricing factor applied" : "joined to the applicable system list price"}</li>
+          <li>DBUs are not VM node-hours, so the app does not infer a GCP currency cost from them</li>
+          <li>Connect GCP Billing Export for authoritative VM, disk, storage, and network costs</li>
+        </ul>
+      ) : (
+        <ul className="list-inside list-disc space-y-1">
+          <li>Shows Databricks DBUs, {accountPricingApplied ? "account-price" : "list-price"} spend, active clusters, and EC2 instance-type metadata</li>
+          <li>Databricks spend comes from billed DBU usage {accountPricingApplied ? "with the account pricing factor applied" : "joined to the applicable system list price"}</li>
+          <li>DBUs are not VM node-hours, so the app does not infer an AWS currency cost from them</li>
+          <li>Connect AWS CUR 2.0 for authoritative EC2, EBS, network, and discount-adjusted costs</li>
+        </ul>
+      )}
+      <p className="mt-3 text-xs italic" style={{ color: C.slate }}>
+        For exact costs, integrate {isAzure ? "Azure Cost Management" : isGCP ? "GCP Billing Export" : "AWS CUR 2.0"} below.
+      </p>
+    </InfoPanel>
   );
 
   const CurSetupBanner = !actualAvailable ? (
@@ -776,6 +775,7 @@ export function CloudCostsView({
 
   return (
     <div className="animate-fade-in space-y-6">
+      {EstimationInfoBox}
       <PageHero
         icon={
           <svg fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -807,7 +807,6 @@ export function CloudCostsView({
         </div>
       )}
 
-      {EstimationInfoBox}
       {ModeToggle}
       {CurSetupBanner}
 

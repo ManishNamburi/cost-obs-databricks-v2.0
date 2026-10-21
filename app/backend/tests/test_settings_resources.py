@@ -130,6 +130,7 @@ def test_resources_returns_other_sections_when_apps_api_times_out(monkeypatch):
     assert result["subsections"]["config"] == {"available": True}
     assert result["storage"]["catalog"] == "catalog"
     assert result["app"]["name"] == "cost-obs"
+    assert "lakebase" in result
 
 
 def test_resources_keeps_fast_inventory_when_one_sql_subsection_times_out(

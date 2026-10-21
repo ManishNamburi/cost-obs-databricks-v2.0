@@ -145,6 +145,22 @@ export function SettingsResources() {
             : "No warehouse resource is bound."}
           control={<MonoChip>{warehouse?.state || "NOT_CONFIGURED"}</MonoChip>}
         />
+        <Row
+          label="Lakebase instance"
+          helper={data.lakebase?.configured
+            ? `${data.lakebase.name || "Lakebase"} · ${data.lakebase.database || "database bound"}`
+            : "No Lakebase instance is bound."}
+          control={
+            <span className="inline-flex max-w-110 flex-wrap items-center justify-end gap-2">
+              <MonoChip>{data.lakebase?.configured ? (data.lakebase.name || "Configured") : "NOT_CONFIGURED"}</MonoChip>
+              {data.lakebase?.page_url && (
+                <LinkButton href={data.lakebase.page_url}>
+                  <span className="inline-flex items-center gap-1">Lakebase instance {externalIcon}</span>
+                </LinkButton>
+              )}
+            </span>
+          }
+        />
         <Row label="Catalog & schema" helper="Configured Unity Catalog location for app-managed data." control={<MonoChip>{configuredLocation}</MonoChip>} />
         <Row
           label="Deployment"

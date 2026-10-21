@@ -20,6 +20,21 @@ export function formatCurrency(value: number, decimals: number = 0): string {
 }
 
 /**
+ * Format USD compactly for KPI cards where horizontal space is constrained.
+ */
+export function formatKpiCurrency(value: number): string {
+  if (!Number.isFinite(value)) return formatCurrency(0);
+  if (Math.abs(value) < 1_000_000) return formatCurrency(value);
+  return new Intl.NumberFormat("en-US", {
+    style: "currency",
+    currency: "USD",
+    notation: "compact",
+    minimumFractionDigits: 0,
+    maximumFractionDigits: 2,
+  }).format(value);
+}
+
+/**
  * Format currency in compact form (e.g., "$1.2M", "$5K") for chart axes/labels.
  */
 export function formatCurrencyCompact(value: number): string {

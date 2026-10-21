@@ -37,6 +37,13 @@ const payload = {
     state: "RUNNING",
     source: "app_resource",
   },
+  lakebase: {
+    name: "cost-obs-db-v21",
+    endpoint: "projects/cost-obs-db-v21/branches/production/endpoints/primary",
+    configured: true,
+    database: "databricks-postgres",
+    page_url: "https://dbc.example.com/compute/database-instances/cost-obs-db-v21",
+  },
   storage: {
     catalog: "east1_serverless",
     schema: "cost_obs_schema",
@@ -148,6 +155,11 @@ describe("SettingsResources", () => {
     expect(screen.getByText("Managed data inventory")).toBeVisible();
     expect(screen.getByText("Data sources & scope")).toBeVisible();
     expect(screen.getByText("app-cost-obs")).toBeVisible();
+    expect(screen.getByText("cost-obs-db-v21")).toBeVisible();
+    expect(screen.getByRole("link", { name: /lakebase instance/i })).toHaveAttribute(
+      "href",
+      "https://dbc.example.com/compute/database-instances/cost-obs-db-v21",
+    );
     expect(screen.getByText("Aggregate tables (2)")).toBeVisible();
     expect(screen.getByText("Shared data sources (1)")).toBeVisible();
     expect(screen.getByText("Cloud-cost connections (1)")).toBeVisible();

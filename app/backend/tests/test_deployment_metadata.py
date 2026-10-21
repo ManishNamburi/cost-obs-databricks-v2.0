@@ -277,17 +277,15 @@ def test_gcp_legacy_runtime_resolves_app_name_from_service_principal(monkeypatch
     assert calls == ["cost-obs-gcp"]
 
 
-def test_endpoint_does_not_fabricate_deployed_at_in_local_runtime():
+def test_endpoint_labels_process_start_as_approximate_restart_in_local_runtime():
     result = asyncio.run(health.deployment_metadata())
 
-    assert result == {
-        "deployed_at": None,
-        "deployer": None,
-        "commit_sha": None,
-        "available": False,
-        "source": "unavailable",
-        "verified": False,
-    }
+    assert result["deployed_at"] == health._PROCESS_STARTED_AT
+    assert result["deployer"] is None
+    assert result["commit_sha"] is None
+    assert result["available"] is True
+    assert result["source"] == "process_start_approximate_restart"
+    assert result["verified"] is False
 
 
 def test_committed_release_metadata_is_last_safe_fallback(monkeypatch, tmp_path):
@@ -482,7 +480,7 @@ def test_timed_out_fetch_stays_single_flight_without_spawning_more_workers(monke
         results = asyncio.run(time_out_concurrently())
         assert started.is_set()
         assert calls == 1
-        assert all(result["deployed_at"] is None for result in results)
+        assert all(result["deployed_at"] == health._PROCESS_STARTED_AT for result in results)
         assert all(result["verified"] is False for result in results)
         with health._deployment_metadata_lock:
             assert len(health._deployment_metadata_inflight) == 1
@@ -495,3 +493,15 @@ def test_timed_out_fetch_stays_single_flight_without_spawning_more_workers(monke
                 break
         time.sleep(0.01)
     assert calls == 1
+
+
+def test_lakebase_instance_name_and_console_url(monkeypatch):
+    monkeypatch.setenv(
+        "ENDPOINT_NAME",
+        "projects/cost-obs-db-v21/branches/production/endpoints/primary",
+    )
+    monkeypatch.setenv("DATABRICKS_HOST", "https://dbc.example.com")
+    assert health.lakebase_instance_name() == "cost-obs-db-v21"
+    assert health.lakebase_page_url() == (
+        "https://dbc.example.com/compute/database-instances/cost-obs-db-v21"
+    )

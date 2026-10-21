@@ -99,6 +99,13 @@ export interface SettingsResourcesPayload {
     state: string;
     source: "app_resource" | "http_path" | "none";
   } | null;
+  lakebase?: {
+    name: string;
+    endpoint: string;
+    configured: boolean;
+    database: string;
+    page_url: string;
+  } | null;
   storage: {
     catalog: string;
     schema: string;

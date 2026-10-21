@@ -19,7 +19,7 @@ import { KPICard } from "@/components/ui/KPICard";
 import { VirtualizedList } from "./VirtualizedList";
 import { formatIdentity } from "@/utils/identity";
 import { C } from "@/theme";
-import { PageHero, Chip, TabInfoBanner } from "@/components/brand";
+import { PageHero, Chip, InfoPanel } from "@/components/brand";
 
 interface AppsCostCenterProps {
   data: AppsDashboardBundle | undefined;
@@ -637,6 +637,20 @@ export function AppsCostCenter({ data: initialData, isLoading: initialLoading, h
 
   return (
     <div className="animate-fade-in space-y-6">
+      <InfoPanel
+        title="Apps tab methodology"
+        minimized={infoMinimized}
+        onToggle={handleMinimizeToggle}
+      >
+        <ul className="list-inside list-disc space-y-1">
+          <li><strong>Databricks Apps</strong>: Custom web applications deployed and hosted on Databricks</li>
+          <li><strong>Active apps</strong>: Registered apps currently reported as running by Databricks</li>
+          <li><strong>Inactive apps</strong>: Registered apps not currently running; recent compute usage is used only when live status is unavailable</li>
+          <li><strong>Historical apps</strong>: Billing entries with no matching deployed app (deleted or from other workspaces)</li>
+          <li>Costs tracked per app from <code className="rounded bg-white/60 px-1">system.billing.usage</code></li>
+        </ul>
+      </InfoPanel>
+
       {/* Header */}
       <PageHero
         icon={
@@ -652,18 +666,6 @@ export function AppsCostCenter({ data: initialData, isLoading: initialLoading, h
             ? (workspaceNameMap?.[workspaceIds[0]] || workspaceIds[0])
             : `${workspaceIds.length} workspaces`
           : undefined}
-      />
-
-      <TabInfoBanner
-        title="Apps — What's on this tab"
-        minimized={infoMinimized}
-        onToggle={handleMinimizeToggle}
-        items={[
-          { label: "App Spend", text: "Compute cost for Databricks Apps in the selected range" },
-          { label: "Status Breakdown", text: "Active (used in the last 7 days), Inactive, and Historical (deleted or unregistered)" },
-          { label: "Spend Over Time", text: "Daily Apps spend across the date range" },
-          { label: "Per-App Table", text: "Drill into each app's spend, workspace, and status" },
-        ]}
       />
 
       {/* Summary Cards with click-to-trend */}

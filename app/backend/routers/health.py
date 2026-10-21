@@ -8,6 +8,7 @@ import re
 import threading
 import time
 from concurrent.futures import Future, ThreadPoolExecutor
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -35,6 +36,7 @@ _APP_NAME_PATTERN = re.compile(r"^[a-z0-9][a-z0-9-]{1,29}$")
 _COMMITTED_DEPLOYMENT_METADATA_PATH = (
     Path(__file__).resolve().parents[3] / "release-metadata.json"
 )
+_PROCESS_STARTED_AT = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
 
 
 def _metadata_text(value: Any) -> str | None:
@@ -161,14 +163,34 @@ def _deployment_metadata_from_committed_file() -> dict[str, Any]:
 
 
 def _deployment_metadata_from_process_start() -> dict[str, Any]:
-    """Last-resort availability only — never invent a deploy timestamp."""
+    """Last-resort date only; this is a restart approximation, not a deploy time."""
     return {
-        "deployed_at": None,
+        "deployed_at": _PROCESS_STARTED_AT,
         "deployer": None,
         "commit_sha": None,
-        "available": False,
+        "available": True,
         "source": "process_start_approximate_restart",
     }
+
+
+def lakebase_instance_name() -> str | None:
+    endpoint = _metadata_text(os.getenv("ENDPOINT_NAME"))
+    if not endpoint:
+        return None
+    parts = endpoint.strip("/").split("/")
+    if len(parts) >= 2 and parts[0] == "projects":
+        return parts[1]
+    return None
+
+
+def lakebase_page_url(workspace_host: str | None = None) -> str | None:
+    name = lakebase_instance_name()
+    host = _metadata_text(workspace_host) or _metadata_text(os.getenv("DATABRICKS_HOST"))
+    if not name or not host:
+        return None
+    if not host.startswith("http://") and not host.startswith("https://"):
+        host = f"https://{host}"
+    return f"{host.rstrip('/')}/compute/database-instances/{name}"
 
 
 def _merge_deployment_metadata(*sources: dict[str, Any]) -> dict[str, Any]:
@@ -377,6 +399,27 @@ def _classify_warehouse_type(wh: Any) -> str | None:
     if value in {"CLASSIC"}:
         return "CLASSIC"
     return None
+
+
+@router.get("/health/lakebase")
+async def get_lakebase_status() -> dict[str, Any]:
+    """Report Lakebase instance identity and a cheap connectivity status."""
+    check = await _check_lakebase()
+    raw = str(check.get("status") or "not_configured")
+    if raw == "healthy":
+        status = "warm"
+    elif raw == "degraded":
+        status = "warming_up"
+    else:
+        status = "unavailable"
+    return {
+        "status": status,
+        "state": raw,
+        "instance_name": lakebase_instance_name(),
+        "page_url": lakebase_page_url(),
+        "endpoint": _metadata_text(os.getenv("ENDPOINT_NAME")),
+        "configured": bool(os.getenv("PGHOST")),
+    }
 
 
 @router.get("/health/sql-warehouse")

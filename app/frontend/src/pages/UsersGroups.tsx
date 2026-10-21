@@ -35,7 +35,7 @@ import type { UserSpend } from "@/hooks/useBillingData";
 import type { DateRange } from "@/types/billing";
 import { formatIdentity, isServicePrincipal, useSpNameMap } from "@/utils/identity";
 import { C } from "@/theme";
-import { PageHero, TabInfoBanner } from "@/components/brand";
+import { PageHero, InfoPanel } from "@/components/brand";
 
 const COLORS = [C.s2, C.s5, C.s3, C.s3, C.s4, C.s5, C.s1, C.lava, C.slate, C.s5];
 
@@ -349,6 +349,21 @@ export default function UsersGroups({ startDate, endDate, dateRange, anonymizeUs
 
   return (
     <div className="space-y-6">
+      <InfoPanel
+        title="Users tab methodology"
+        minimized={infoMinimized}
+        onToggle={handleMinimizeToggle}
+        minimizeLabel="Don't show again"
+      >
+        <ul className="list-inside list-disc space-y-1">
+          <li><strong>Attribution model</strong>: Spend is attributed via <code>identity_metadata.run_as</code> in <code>system.billing.usage</code>, which identifies the user or service principal that triggered the workload.</li>
+          <li><strong>Service principals</strong>: Jobs and automated pipelines run as service principals. High automated spend is normal; focus on human spend for personal cost governance.</li>
+          <li><strong>Active users</strong>: Distinct identities with any DBU spend in the period, not just SQL query users.</li>
+          <li><strong>Cost governance</strong>: Set user spend alerts to notify individuals or managers when spend exceeds a threshold.</li>
+          <li><strong>Reducing costs</strong>: Review top spenders for long running interactive clusters, idle warehouses, or redundant notebook sessions.</li>
+        </ul>
+      </InfoPanel>
+
       {/* Header */}
       <PageHero
         icon={
@@ -364,18 +379,6 @@ export default function UsersGroups({ startDate, endDate, dateRange, anonymizeUs
             ? (workspaceNameMap?.[workspaceIds[0]] || workspaceIds[0])
             : `${workspaceIds.length} workspaces`
           : undefined}
-      />
-
-      <TabInfoBanner
-        title="Users — What's on this tab"
-        minimized={infoMinimized}
-        onToggle={handleMinimizeToggle}
-        items={[
-          { label: "User Spend", text: "Cost attributed to the identity that ran the workload" },
-          { label: "Top Consumers", text: "Highest-spend users and service principals" },
-          { label: "By Product", text: "How each user's spend splits across products" },
-          { label: "Service Principals", text: "Jobs and pipelines often run as SPs — expected, not personal waste" },
-        ]}
       />
 
       {<>

@@ -1833,6 +1833,24 @@ def _deployment_metadata_from_process_start() -> dict[str, Any]:
     return health_fallback()
 
 
+def _lakebase_resource_payload(app_link: str = "") -> dict[str, Any]:
+    from backend.routers.health import lakebase_instance_name, lakebase_page_url
+
+    host = ""
+    parsed = urlparse((app_link or "").strip())
+    if parsed.scheme == "https" and parsed.netloc:
+        host = f"{parsed.scheme}://{parsed.netloc}"
+    name = lakebase_instance_name()
+    page_url = _safe_resource_link(lakebase_page_url(host) or "")
+    return {
+        "name": name or "",
+        "endpoint": os.getenv("ENDPOINT_NAME") or "",
+        "configured": bool(os.getenv("PGHOST")),
+        "database": os.getenv("PGDATABASE") or "",
+        "page_url": page_url,
+    }
+
+
 @router.get("/resources")
 async def get_resources() -> dict[str, Any]:
     """Return partial safe metadata within a hard Settings deadline."""
@@ -1954,6 +1972,9 @@ async def get_resources() -> dict[str, Any]:
             "oauth_scope_source": auth_status.get("oauth_scope_source"),
         },
         "warehouse": config.get("warehouse"),
+        "lakebase": _lakebase_resource_payload(
+            (links.get("app_page_url") or links.get("app_url") or "")
+        ),
         "storage": {
             "catalog": storage.get("catalog") or "",
             "schema": storage.get("schema") or "",

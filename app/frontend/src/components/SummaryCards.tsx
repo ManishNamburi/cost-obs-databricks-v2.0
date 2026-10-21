@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import type { BillingSummary } from "@/types/billing";
-import { formatCurrency, formatNumber } from "@/utils/formatters";
+import { formatKpiCurrency, formatNumber } from "@/utils/formatters";
 import { KPITrendModal } from "./KPITrendModal";
 import { KPICard } from "@/components/ui/KPICard";
 
@@ -11,13 +11,14 @@ interface SummaryCardsProps {
   startDate?: string;
   endDate?: string;
   workspaceIds?: string[];
+  workspaceScopeCount?: number;
 }
 
 type KPIType = "total_spend" | "total_dbus" | "avg_daily_spend" | "workspace_count";
 
 const KPI_TREND_KEYS: KPIType[] = ["total_spend", "total_dbus", "avg_daily_spend", "workspace_count"];
 
-export function SummaryCards({ data, isLoading, startDate, endDate, workspaceIds }: SummaryCardsProps) {
+export function SummaryCards({ data, isLoading, startDate, endDate, workspaceIds, workspaceScopeCount }: SummaryCardsProps) {
   const queryClient = useQueryClient();
   const [selectedKPI, setSelectedKPI] = useState<{
     kpi: KPIType;
@@ -50,13 +51,17 @@ export function SummaryCards({ data, isLoading, startDate, endDate, workspaceIds
       setSelectedKPI({ kpi, label });
     }
   };
+  const workspaceScopeKnown = Boolean(workspaceIds?.length) || workspaceScopeCount != null;
+  const displayedWorkspaceCount = workspaceIds?.length
+    ? workspaceIds.length
+    : workspaceScopeCount;
 
   return (
     <>
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <KPICard
           title="Total Spend"
-          value={formatCurrency(data?.total_spend ?? 0)}
+          value={formatKpiCurrency(data?.total_spend ?? 0)}
           subtitle={data?.days_in_range != null ? `over ${data.days_in_range} days` : undefined}
           isLoading={isLoading}
           onActivate={canOpenTrend ? () => handleCardClick("total_spend", "Total Spend") : undefined}
@@ -80,8 +85,10 @@ export function SummaryCards({ data, isLoading, startDate, endDate, workspaceIds
         />
         <KPICard
           title="Average Daily Spend"
-          value={formatCurrency(data?.avg_daily_spend ?? 0)}
-          subtitle={data?.workspace_count != null ? `across ${data.workspace_count} workspaces` : "daily average"}
+          value={formatKpiCurrency(data?.avg_daily_spend ?? 0)}
+          subtitle={workspaceScopeKnown && displayedWorkspaceCount != null
+            ? `across ${displayedWorkspaceCount} ${displayedWorkspaceCount === 1 ? "workspace" : "workspaces"}`
+            : "daily average"}
           isLoading={isLoading}
           onActivate={canOpenTrend ? () => handleCardClick("avg_daily_spend", "Average Daily Spend") : undefined}
           icon={
@@ -92,9 +99,15 @@ export function SummaryCards({ data, isLoading, startDate, endDate, workspaceIds
         />
         <KPICard
           title="Workspaces"
-          value={String(data?.workspace_count ?? 0)}
-          subtitle="active workspaces"
-          infoText="Average number of distinct workspaces with billable usage per day in the selected period. Matches the daily trend average."
+          value={displayedWorkspaceCount == null ? "N/A" : formatNumber(displayedWorkspaceCount)}
+          subtitle={workspaceIds?.length
+            ? "selected workspaces"
+            : workspaceScopeCount != null
+              ? "workspaces in scope"
+              : "workspace scope unavailable"}
+          infoText={workspaceScopeKnown
+            ? "Number of workspaces in the active filter. The trend drilldown shows how many of those selected workspaces had billable usage each day."
+            : "The workspace picker population is unavailable. The app does not substitute latest-day activity because that is a different metric."}
           isLoading={isLoading}
           onActivate={canOpenTrend ? () => handleCardClick("workspace_count", "Daily Active Workspaces") : undefined}
           icon={

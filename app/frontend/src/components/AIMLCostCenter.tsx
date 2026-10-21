@@ -18,7 +18,7 @@ import { KPITrendModal } from "./KPITrendModal";
 import { KPICard } from "@/components/ui/KPICard";
 import { formatIdentity, useSpNameMap } from "@/utils/identity";
 import { C } from "@/theme";
-import { PageHero, TabInfoBanner } from "@/components/brand";
+import { PageHero, InfoPanel } from "@/components/brand";
 
 interface AIMLCostCenterProps {
   data: AIMLDashboardBundle | undefined;
@@ -389,6 +389,21 @@ export function AIMLCostCenter({ data, isLoading, startDate, endDate, host, work
 
   return (
     <div className="animate-fade-in space-y-6">
+      <InfoPanel
+        title="AI/ML tab methodology"
+        minimized={infoMinimized}
+        onToggle={handleMinimizeToggle}
+      >
+        <ul className="list-inside list-disc space-y-1">
+          <li><strong>Foundation Models</strong>: Token based usage via Databricks Model Serving (Anthropic, OpenAI, Gemini, Llama)</li>
+          <li><strong>Serverless Inference</strong>: Custom model and agent endpoints on Databricks managed infrastructure</li>
+          <li><strong>Batch Inference</strong>: Batch inference jobs for large scale offline predictions</li>
+          <li><strong>Fine Tuning</strong>: Model tuning runs using Databricks Mosaic AI</li>
+          <li><strong>AI Search</strong>: Databricks AI Search index compute costs</li>
+          <li><strong>Model Serving</strong>: Other model serving workloads not captured above</li>
+        </ul>
+      </InfoPanel>
+
       {/* Header — hidden when embedded (the AI Gateway view already shows the title) */}
       {!embedded && (
       <PageHero
@@ -407,20 +422,6 @@ export function AIMLCostCenter({ data, isLoading, startDate, endDate, host, work
           : undefined}
       />
       )}
-
-      <TabInfoBanner
-        title="AI/ML — What's on this tab"
-        minimized={infoMinimized}
-        onToggle={handleMinimizeToggle}
-        items={[
-          { label: "Spend & DBUs", text: "Total AI/ML spend and DBU volume for the selected range" },
-          { label: "Active Endpoints", text: "Serverless inference endpoints with usage in the period" },
-          { label: "Foundation Models", text: "Pay-per-token usage via Model Serving (Anthropic, OpenAI, Gemini, Llama)" },
-          { label: "ML Runtime Clusters", text: "Clusters running Databricks ML or GPU runtimes" },
-          { label: "Agent Bricks", text: "Databricks agents and their cost attribution" },
-          { label: "Top Models", text: "Highest-spend models and feature stores" },
-        ]}
-      />
 
       {/* Summary Cards */}
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">

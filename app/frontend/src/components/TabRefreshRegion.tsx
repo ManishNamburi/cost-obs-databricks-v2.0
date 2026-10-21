@@ -44,7 +44,7 @@ export function TabRefreshRegion({
           </span>
         </div>
       )}
-      <div className={isLoading ? "pr-14 pt-[54px]" : "pr-14"}>
+      <div className={isLoading ? "pr-16 pt-[54px]" : "pr-16"}>
         {isLoading ? <LoadingPanels sections={loadingSections} /> : children}
       </div>
     </div>

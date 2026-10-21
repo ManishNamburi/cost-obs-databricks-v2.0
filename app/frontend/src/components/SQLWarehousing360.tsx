@@ -21,7 +21,7 @@ import type { GranularBreakdownResponse, DBSQLDashboardBundle, QueryCostByWareho
 import { KPITrendModal } from "./KPITrendModal";
 import { VirtualizedList } from "./VirtualizedList";
 import { C } from "@/theme";
-import { PageHero, TabInfoBanner, SourceCapabilityNotice } from "@/components/brand";
+import { PageHero, InfoPanel, SourceCapabilityNotice } from "@/components/brand";
 
 interface SQLWarehousing360Props {
   sqlBreakdownData: GranularBreakdownResponse | undefined;
@@ -437,6 +437,18 @@ export function SQLWarehousing360({ sqlBreakdownData: _sqlBreakdownData, queryDa
 
   return (
     <div className="space-y-6">
+      <InfoPanel
+        title="SQL tab methodology"
+        minimized={infoMinimized}
+        onToggle={handleMinimizeToggle}
+      >
+        <ul className="grid grid-cols-1 gap-1 sm:grid-cols-2">
+          <li><strong style={{ color: C.ink }}>Spend by Source:</strong> Click any source (Genie, AI/BI, SQL Editor, Jobs, Notebooks) to drill into the top queries from that source</li>
+          <li><strong style={{ color: C.ink }}>Warehouse Spend:</strong> Breakdown by warehouse type and utilization patterns</li>
+          <li><strong style={{ color: C.ink }}>SKU Breakdown:</strong> Spend split across Serverless, Pro, Classic, and other SQL SKUs</li>
+          <li><strong style={{ color: C.ink }}>Top Users by Query Spend:</strong> Human users and service principals ranked by SQL query cost</li>
+        </ul>
+      </InfoPanel>
       {/* Region-scope banner — system.compute / system.query are region-scoped, so
           SQL/warehouse detail only covers workspaces in this metastore's region even
           though account-wide billing (spend totals) spans all regions. */}
@@ -489,18 +501,6 @@ export function SQLWarehousing360({ sqlBreakdownData: _sqlBreakdownData, queryDa
                 ? (workspaceNameMap?.[workspaceIds[0]] || workspaceIds[0])
                 : `${workspaceIds.length} workspaces`
               : undefined}
-          />
-
-          <TabInfoBanner
-            title="SQL Warehousing — What's on this tab"
-            minimized={infoMinimized}
-            onToggle={handleMinimizeToggle}
-            items={[
-              { label: "Spend by Source", text: "Click any source (Genie, AI/BI, SQL Editor, Jobs, Notebooks) to drill into the top queries from that source" },
-              { label: "Warehouse Spend", text: "Breakdown by warehouse type and utilization patterns" },
-              { label: "SKU Breakdown", text: "Spend split across Serverless, Pro, Classic, and other SQL SKUs" },
-              { label: "Top Users by Query Spend", text: "Human users and service principals ranked by SQL query cost" },
-            ]}
           />
 
           {/* Stale data warning — shown when MV exists but has no data in the selected range */}
@@ -1396,17 +1396,22 @@ export function OptimizeMethodologyPanel() {
     v ? localStorage.setItem(MINIMIZE_KEY, "true") : localStorage.removeItem(MINIMIZE_KEY);
   };
   return (
-    <TabInfoBanner
-      title="Optimize — What's on this tab"
-      minimized={minimized}
-      onToggle={toggle}
-      items={[
-        { label: "Idle Time", text: "Warehouse uptime minus query time; estimated idle spend is billed spend times that share. Serverless is excluded." },
-        { label: "Over-Scaled", text: "Extra auto-scale clusters that never ran concurrent work" },
-        { label: "Oversized", text: "Warehouse size larger than query complexity warrants" },
-        { label: "Sources", text: "warehouse_events and query.history over the selected range" },
-      ]}
-    />
+    <InfoPanel title="Optimize tab methodology" minimized={minimized} onToggle={toggle}>
+      <p className="mb-2 font-medium">Idle Time</p>
+      <ul className="list-inside list-disc space-y-1">
+        <li><strong>Uptime</strong>: For classic warehouses, derived from <code className="rounded bg-white/60 px-1 text-xs">system.compute.warehouse_events</code> using the time between START and STOP lifecycle events</li>
+        <li><strong>Active query time</strong>: Sum of query durations from <code className="rounded bg-white/60 px-1 text-xs">system.query.history</code> for the same warehouse and window</li>
+        <li><strong>Idle time</strong>: Uptime minus active query time, floored at zero</li>
+        <li><strong>Estimated idle spend</strong>: Classic single-cluster spend prorated by the idle share of uptime</li>
+        <li><strong>Serverless</strong>: Uptime, raw idle time, idle percentage, and idle spend are suppressed because wall-clock lifecycle time is not a valid waste measure. Use Warm Hold and auto-stop instead.</li>
+      </ul>
+      <p className="mb-2 mt-3 font-medium">Rightsizing</p>
+      <ul className="list-inside list-disc space-y-1">
+        <li><strong>Over scaled</strong>: Multiple clusters were available, but median concurrency never exceeded one</li>
+        <li><strong>Oversized</strong>: Query duration and data scanned suggest that a smaller warehouse may be sufficient</li>
+        <li>Recommendations use warehouse events and query history over the selected date range</li>
+      </ul>
+    </InfoPanel>
   );
 }
 

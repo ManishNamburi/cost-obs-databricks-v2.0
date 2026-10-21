@@ -77,8 +77,8 @@ export function PageHero({
     ? `${formatDate(dateRange.startDate)} to ${formatDate(dateRange.endDate)}`
     : null;
   return (
-    <div className="mb-6 flex items-start justify-between gap-4">
-      <div className="flex items-start gap-3">
+    <div className="mb-6 flex items-start justify-between gap-4 pr-11">
+      <div className="flex min-w-0 items-start gap-3">
         <div
           className="flex h-11 w-11 shrink-0 items-center justify-center"
           style={{
@@ -101,7 +101,7 @@ export function PageHero({
           )}
         </div>
       </div>
-      <div className="ml-auto flex shrink-0 items-start justify-end gap-2">
+      <div className="ml-auto flex min-w-0 flex-wrap items-start justify-end gap-2">
         {workspaceScope && (
           <Chip kind="workspace" label="Workspace(s)" wrapperClassName="min-w-[150px]">
             {workspaceScope}
@@ -120,6 +120,55 @@ export function PageHero({
           </Chip>
         )}
         {action}
+      </div>
+    </div>
+  );
+}
+
+export function InfoPanel({
+  title,
+  minimized,
+  onToggle,
+  children,
+  minimizeLabel = "Minimize from now on",
+}: {
+  title: string;
+  minimized: boolean;
+  onToggle: (minimized: boolean) => void;
+  children: ReactNode;
+  minimizeLabel?: string;
+}) {
+  return (
+    <div className="p-4" style={{ background: C.oatMed, borderRadius: 10 }}>
+      <div className="flex">
+        <div className="shrink-0" style={{ color: C.lava }}>
+          <svg className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
+            <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clipRule="evenodd" />
+          </svg>
+        </div>
+        <div className="ml-3 flex-1">
+          <button className="flex w-full items-center justify-between text-left" onClick={() => onToggle(!minimized)}>
+            <h3 className="text-sm font-semibold" style={{ color: C.ink }}>{title}</h3>
+            <svg className={cn("h-4 w-4 transition-transform", minimized ? "" : "rotate-180")} style={{ color: C.slate }} fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+            </svg>
+          </button>
+          {!minimized && (
+            <>
+              <div className="mt-2 text-sm" style={{ color: C.body }}>{children}</div>
+              <label className="mt-3 flex cursor-pointer items-center gap-2">
+                <input
+                  type="checkbox"
+                  checked={minimized}
+                  onChange={(event) => onToggle(event.target.checked)}
+                  className="h-3.5 w-3.5 rounded"
+                  style={{ accentColor: C.navy }}
+                />
+                <span className="text-xs" style={{ color: C.slate }}>{minimizeLabel}</span>
+              </label>
+            </>
+          )}
+        </div>
       </div>
     </div>
   );

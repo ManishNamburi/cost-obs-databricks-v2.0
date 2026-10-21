@@ -11,7 +11,7 @@ import type {
   GenieCostWorkspaceRow,
 } from "@/types/billing";
 import { formatCurrency } from "@/utils/formatters";
-import { PageHero, TabInfoBanner } from "@/components/brand";
+import { PageHero, InfoPanel } from "@/components/brand";
 import { C } from "@/theme";
 import { useGenieCostDiagnostics } from "@/hooks/useBillingData";
 
@@ -326,28 +326,27 @@ export function GenieCostView({ data, isLoading }: GenieCostViewProps) {
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-between pr-12">
-        <PageHero
-          icon={
-            <svg fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 5v-5z" />
-            </svg>
-          }
-          title="Genie"
-          subtitle={summary ? `${summary.start_date} → ${summary.end_date} · ${summary.workspace_count} workspace${summary.workspace_count === 1 ? "" : "s"} with Genie spend` : undefined}
-        />
-      </div>
-
-      <TabInfoBanner
-        title="Genie — What's on this tab"
+      <InfoPanel
+        title="Genie tab methodology"
         minimized={infoMinimized}
         onToggle={setInfoMinimized}
-        items={[
-          { label: "Genie Spend", text: "DBU cost for Genie, AI/BI, and related SKUs in the selected range" },
-          { label: "By Surface", text: "Split across Genie Code, Genie One, Agents, and other surfaces" },
-          { label: "Workspaces", text: "Which workspaces drive Genie spend" },
-          { label: "Diagnostics", text: "Raw billing SKUs that mapped to Genie so you can check coverage" },
-        ]}
+      >
+        <ul className="list-inside list-disc space-y-1">
+          <li><strong>Genie Spend</strong>: DBU cost for Genie, AI/BI, and related SKUs in the selected range</li>
+          <li><strong>By Surface</strong>: Split across Genie Code, Genie One, Agents, and other surfaces</li>
+          <li><strong>Workspaces</strong>: Which workspaces drive Genie spend</li>
+          <li><strong>Diagnostics</strong>: Raw billing SKUs that mapped to Genie so you can check coverage</li>
+        </ul>
+      </InfoPanel>
+
+      <PageHero
+        icon={
+          <svg fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 5v-5z" />
+          </svg>
+        }
+        title="Genie"
+        subtitle={summary ? `${summary.start_date} → ${summary.end_date} · ${summary.workspace_count} workspace${summary.workspace_count === 1 ? "" : "s"} with Genie spend` : undefined}
       />
 
       {/* Sub-tab strip */}
