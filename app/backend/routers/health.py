@@ -597,7 +597,7 @@ async def clear_cache(tab: str | None = None) -> dict[str, Any]:
 
     TAB_PATTERNS: dict[str, list[str]] = {
         "dbu":          ["dashboard-bundle-fast"],
-        "infra":        ["infra-bundle", "infra-costs", "aws-actual", "aws-costs"],
+        "infra":        ["infra-bundle", "infra-costs", "aws-actual", "aws-costs", "cloud-costs-bundle"],
         "kpis":         ["kpis-bundle", "spend-anomalies", "platform-kpis"],
         "aiml":         ["aiml"],
         "apps":         ["apps"],

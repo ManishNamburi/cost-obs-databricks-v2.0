@@ -61,6 +61,9 @@ interface CloudCostsViewProps {
   detectedCloud?: string;
   workspaceNameMap?: Record<string, string>;
   workspaceIds?: string[];
+  accountPricingApplied?: boolean;
+  loadError?: string;
+  partialReasons?: Record<string, string>;
 }
 
 function formatNumber(value: number): string {
@@ -172,6 +175,9 @@ export function CloudCostsView({
   detectedCloud,
   workspaceNameMap,
   workspaceIds,
+  accountPricingApplied = false,
+  loadError,
+  partialReasons,
 }: CloudCostsViewProps) {
   const [sortField, setSortField] = useState<SortField>("estimated_aws_cost");
   const [sortDirection, setSortDirection] = useState<SortDirection>("desc");
@@ -345,6 +351,25 @@ export function CloudCostsView({
       <div className="flex h-64 flex-col items-center justify-center gap-3">
         <div className="h-12 w-12 animate-spin rounded-full border-4 border-gray-200" style={{ borderTopColor: C.lava }} />
         <p className="text-sm text-gray-500">Loading cloud costs...</p>
+      </div>
+    );
+  }
+
+  if (loadError) {
+    return (
+      <div className="space-y-6">
+        <div className="rounded-lg bg-white p-6 border" style={{ borderColor: C.hairline }}>
+          <h3 className="text-lg font-semibold text-gray-900">
+            Cloud cost data could not be loaded
+          </h3>
+          <p className="mt-2 text-sm text-gray-600">
+            Required Databricks usage totals did not complete after automatic retries.
+            Wait for current SQL work to finish, then refresh Cloud Costs.
+          </p>
+          <p className="mt-3 rounded-lg bg-red-50 px-3 py-2 text-xs text-red-800">
+            {loadError}
+          </p>
+        </div>
       </div>
     );
   }
@@ -562,7 +587,9 @@ export function CloudCostsView({
         {hasBillingSummary && (
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
             <div className="rounded-lg bg-white p-6 border" style={{ borderColor: C.hairline }}>
-              <p className="text-sm font-medium text-gray-500">Compute Spend</p>
+              <p className="text-sm font-medium text-gray-500">
+                {accountPricingApplied ? "Account-price" : "List-price"} Compute Spend
+              </p>
               <p className="text-2xl font-semibold text-gray-900">{formatCurrency(billingSummary!.total_cost ?? 0)}</p>
               <p className="mt-1 text-xs text-gray-500">{billingSummary!.days_in_range ?? 0} days (all-purpose + jobs + DLT)</p>
             </div>
@@ -765,6 +792,21 @@ export function CloudCostsView({
           : "Account-wide"}
       />
 
+      {Object.keys(partialReasons ?? {}).length > 0 && (
+        <div
+          className="rounded-lg border border-amber-300 bg-amber-50 px-4 py-3"
+          role="status"
+        >
+          <p className="text-sm font-semibold text-amber-900">
+            Some actual-cost details are temporarily unavailable
+          </p>
+          <p className="mt-1 text-sm text-amber-800">
+            The authoritative total and available sections are shown. Refresh Cloud Costs
+            after current SQL work finishes to retry missing detail.
+          </p>
+        </div>
+      )}
+
       {EstimationInfoBox}
       {ModeToggle}
       {CurSetupBanner}
@@ -791,7 +833,11 @@ export function CloudCostsView({
         <KPICard
           title="Total Cluster DBUs"
           value={formatNumber(cloudSummary.totalDBUHours)}
-          subtitle={`across ${data.clusters.length} clusters`}
+          subtitle={
+            billingSummary?.total_cost
+              ? `${formatCurrency(billingSummary.total_cost)} ${accountPricingApplied ? "account-price" : "list-price"} DBU spend · ${data.clusters.length} clusters`
+              : `across ${data.clusters.length} clusters`
+          }
           onActivate={startDate && endDate ? () => setSelectedKPI({ kpi: "infra_dbu_hours", label: "Daily Cluster DBUs" }) : undefined}
           icon={
             <svg className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">

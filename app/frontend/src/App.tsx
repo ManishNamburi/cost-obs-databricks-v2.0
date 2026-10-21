@@ -26,6 +26,7 @@ import {
   WarehouseGuidanceBanner,
   WarehouseHealthCheckBanner,
 } from "@/components/WarehouseGuidanceBanner";
+import { applyInfraPricing } from "@/utils/cloudCosts";
 import {
   fetchWarehouseHealth,
   warehouseHealthPollInterval,
@@ -79,9 +80,7 @@ function preloadTabChunks() {
 
 import {
   useAccountInfo,
-  useAWSActualCosts,
-  useAzureActualCosts,
-  useGCPActualCosts,
+  useCloudCostsBundle,
   useDashboardBundleFast,
   useSqlBreakdown,
   usePipelineObjects,
@@ -95,7 +94,6 @@ import {
   useTaggingDashboardBundle,
   useDBSQLQueryCosts,
   useDBSQLTopQueries,
-  useInfraBundle,
   useKPIsBundle,
   useUsersGroupsBundle,
 } from "@/hooks/useBillingData";
@@ -689,7 +687,12 @@ function Dashboard() {
     staleTime: 60 * 1000,
   });
 
-  const { applyPricing, multiplier: pricingMultiplier } = usePricing();
+  const {
+    applyPricing,
+    multiplier: pricingMultiplier,
+    useAccountPrices,
+    available: accountPricesAvailable,
+  } = usePricing();
 
   // Central warehouse warming poller — single source of truth for warehouse state.
   // Polls every 5s while warming_up, 15s once warm (catches post-idle auto-stop within ~15s).
@@ -784,9 +787,21 @@ function Dashboard() {
   const { data: interactiveBreakdown, isLoading: interactiveLoading } = useInteractiveBreakdown(dateRange, _wsIds, true);
   const { data: skuBreakdown, isLoading: skuLoading } = useSKUBreakdown(dateRange, _wsIds, true);
 
-  const { data: infraBundle, isLoading: infraBundleLoading, isError: infraBundleError } = useInfraBundle(dateRange, _wsIds, true);
+  const {
+    data: cloudCostsBundle,
+    isLoading: infraBundleLoading,
+    isError: infraBundleError,
+    error: infraBundleErrorObject,
+  } = useCloudCostsBundle(dateRange, _wsIds, true);
+  const infraBundle = cloudCostsBundle?.infra_bundle;
   const infraCosts = infraBundle?.infra_costs;
   const infraCostsTimeseries = infraBundle?.infra_timeseries;
+  const infraPricingMultiplier =
+    useAccountPrices && accountPricesAvailable ? pricingMultiplier : 1;
+  const pricedInfraCosts = useMemo(
+    () => applyInfraPricing(infraCosts, infraPricingMultiplier),
+    [infraCosts, infraPricingMultiplier],
+  );
 
   const { data: kpisBundle, isLoading: kpisBundleLoading, isFetching: kpisBundleFetching, isError: kpisBundleError } = useKPIsBundle(dateRange, _wsIds, true);
   const spendAnomalies = kpisBundle?.anomalies;
@@ -800,10 +815,12 @@ function Dashboard() {
   const { data: appsData, isLoading: appsLoading, isError: appsError } = useAppsDashboardBundle(dateRange, _wsIds, true);
   const { data: taggingData, isLoading: taggingLoading, isError: taggingError } = useTaggingDashboardBundle(dateRange, _wsIds, true);
 
-  // Connected cloud invoices — leave on the warehouse/gold-actuals path.
-  const { data: awsActualData, isLoading: awsActualLoading } = useAWSActualCosts(dateRange, warehouseReady);
-  const { data: azureActualData, isLoading: azureActualLoading } = useAzureActualCosts(dateRange, warehouseReady);
-  const { data: gcpActualData, isLoading: gcpActualLoading } = useGCPActualCosts(dateRange, warehouseReady);
+  const awsActualData = cloudCostsBundle?.aws_actual;
+  const azureActualData = cloudCostsBundle?.azure_actual;
+  const gcpActualData = cloudCostsBundle?.gcp_actual;
+  const awsActualLoading = infraBundleLoading;
+  const azureActualLoading = infraBundleLoading;
+  const gcpActualLoading = infraBundleLoading;
 
   const { data: dbsqlData, isLoading: dbsqlLoading, isFetching: dbsqlFetching, isError: dbsqlError } = useDBSQLQueryCosts(dateRange, _wsIds, true);
   const { data: dbsqlTopQueriesData, isLoading: dbsqlTopQueriesLoading } = useDBSQLTopQueries(dateRange, _wsIds, warehouseReady);
@@ -930,8 +947,8 @@ function Dashboard() {
   // and returns stale false-negatives if it fires before the background MV build completes.
 
   // Memoize infra data transformations to avoid re-creating arrays on every render
-  const infraViewData = useMemo(() => infraCosts ? {
-    clusters: (infraCosts.clusters || []).map(c => ({
+  const infraViewData = useMemo(() => pricedInfraCosts ? {
+    clusters: (pricedInfraCosts.clusters || []).map(c => ({
       cluster_id: c.cluster_id,
       cluster_name: c.cluster_name,
       driver_instance_type: c.driver_instance_type,
@@ -945,15 +962,15 @@ function Dashboard() {
       state: null,
       estimated_aws_cost: c.estimated_cost,
     })),
-    instance_families: infraCosts.instance_families,
-    total_estimated_cost: infraCosts.total_estimated_cost,
-    total_dbu_hours: infraCosts.total_dbu_hours,
-    billing_summary: (infraCosts as any).billing_summary,
-    start_date: infraCosts.start_date,
-    end_date: infraCosts.end_date,
-    disclaimer: infraCosts.disclaimer,
-    error: infraCosts.error,
-  } : undefined, [infraCosts]);
+    instance_families: pricedInfraCosts.instance_families,
+    total_estimated_cost: pricedInfraCosts.total_estimated_cost,
+    total_dbu_hours: pricedInfraCosts.total_dbu_hours,
+    billing_summary: pricedInfraCosts.billing_summary,
+    start_date: pricedInfraCosts.start_date,
+    end_date: pricedInfraCosts.end_date,
+    disclaimer: pricedInfraCosts.disclaimer,
+    error: pricedInfraCosts.error,
+  } : undefined, [pricedInfraCosts]);
 
   const infraViewTimeseries = useMemo(() => infraCostsTimeseries ? {
     timeseries: (infraCostsTimeseries.timeseries || []).map(t => ({
@@ -1445,7 +1462,7 @@ function Dashboard() {
             azureActualLoading={azureActualLoading}
             gcpActualData={gcpActualData}
             gcpActualLoading={gcpActualLoading}
-            infraData={infraCosts}
+            infraData={pricedInfraCosts}
             infraLoading={infraBundleLoading}
             infraTimeseriesData={infraCostsTimeseries}
             infraTimeseriesLoading={infraBundleLoading}
@@ -1454,6 +1471,9 @@ function Dashboard() {
             detectedCloud={accountInfo?.cloud || undefined}
             workspaceNameMap={workspaceNameMap}
             workspaceIds={_wsIds}
+            accountPricingApplied={useAccountPrices && accountPricesAvailable}
+            loadError={infraBundleErrorObject?.message}
+            partialReasons={cloudCostsBundle?.partial_reasons}
           />
           </TabErrorBoundary>
         ) : activeTab === "optimizer" ? (

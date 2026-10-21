@@ -27,6 +27,7 @@ import type {
   InfraCostsResponse,
   InfraCostsTimeseriesResponse,
   InfraBundleResponse,
+  CloudCostsBundleResponse,
   KPIsBundleResponse,
   BudgetDashboardBundle,
 } from "@/types/billing";
@@ -639,6 +640,23 @@ export function useInfraBundle(dateRange?: DateRange, workspaceIds?: string[], e
     queryFn: () => fetchJson(buildUrlWithWs("/api/billing/infra-bundle", dateRange, workspaceIds)),
     staleTime: 5 * 60 * 1000,
     enabled,
+  });
+}
+
+export function useCloudCostsBundle(
+  dateRange?: DateRange,
+  workspaceIds?: string[],
+  enabled: boolean = true,
+) {
+  return useQuery<CloudCostsBundleResponse>({
+    queryKey: ["billing", "cloud-costs-bundle", dateRange, workspaceIds?.join(",") ?? null],
+    queryFn: () => fetchJson(buildUrlWithWs("/api/billing/cloud-costs-bundle", dateRange, workspaceIds)),
+    staleTime: 5 * 60 * 1000,
+    enabled,
+    retry: (failureCount, error) =>
+      failureCount < 3 && /503|429|capacity is full|temporarily unavailable/i.test(
+        error instanceof Error ? error.message : "",
+      ),
   });
 }
 

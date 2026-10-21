@@ -9,7 +9,7 @@ from typing import Any
 
 from cachetools import TTLCache
 
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, HTTPException, Query
 
 from backend.db import (
     execute_query,
@@ -1161,6 +1161,90 @@ async def get_infra_bundle(
             "infra_costs": {**empty, "clusters": [], "instance_families": [], "total_estimated_cost": 0, "total_dbu_hours": 0, "error": str(e)},
             "infra_timeseries": {**empty, "timeseries": [], "error": str(e)},
         }
+
+
+async def _compute_cloud_costs_bundle(
+    start_date: str,
+    end_date: str,
+    workspace_ids: str | None,
+) -> dict[str, Any]:
+    """Compute Cloud Costs: required infra totals plus optional invoice actuals."""
+    from backend.routers import aws_actual, azure_actual, gcp_actual
+
+    infra = await get_infra_bundle(
+        start_date=start_date,
+        end_date=end_date,
+        workspace_ids=workspace_ids,
+    )
+    infra_error = (infra.get("infra_costs") or {}).get("error")
+    if infra_error:
+        raise HTTPException(status_code=503, detail=str(infra_error))
+
+    provider_calls = (
+        ("aws_actual", aws_actual.get_aws_actual_dashboard_bundle),
+        ("azure_actual", azure_actual.get_azure_actual_dashboard_bundle),
+        ("gcp_actual", gcp_actual.get_gcp_actual_dashboard_bundle),
+    )
+    providers: dict[str, Any] = {}
+    partial_reasons: dict[str, str] = {}
+    for name, call in provider_calls:
+        try:
+            providers[name] = await call(start_date, end_date)
+            if providers[name].get("availability") == "partial":
+                partial_reasons[name] = "OPTIONAL_DETAIL_FAILED"
+        except Exception as exc:
+            logger.warning("Optional %s Cloud bundle failed: %s", name, exc)
+            code = str(getattr(exc, "code", "QUERY_FAILED"))
+            partial_reasons[name] = code
+            providers[name] = {
+                "available": False,
+                "availability": "unavailable",
+                "transient_error": True,
+                "error_code": code,
+                "message": (
+                    f"{name.replace('_', ' ').title()} is temporarily unavailable. "
+                    "Usage & Metadata remains available; retry Cloud Costs shortly."
+                ),
+                "start_date": start_date,
+                "end_date": end_date,
+            }
+
+    return {
+        "availability": "partial" if partial_reasons else "available",
+        "partial_reasons": partial_reasons,
+        "infra_bundle": infra,
+        **providers,
+        "start_date": start_date,
+        "end_date": end_date,
+    }
+
+
+@router.get("/cloud-costs-bundle")
+async def get_cloud_costs_bundle(
+    start_date: str = Query(default=None),
+    end_date: str = Query(default=None),
+    workspace_ids: str = Query(default=None),
+) -> dict[str, Any]:
+    """One Cloud Costs payload: infra totals plus optional cloud invoice actuals."""
+    params_start = start_date or get_default_start_date()
+    params_end = end_date or get_default_end_date()
+    cache_key = bundle_cache_key(
+        "billing:cloud-costs-bundle",
+        params_start,
+        params_end,
+        [i.strip() for i in workspace_ids.split(",") if i.strip()] if workspace_ids else None,
+    )
+    if (cached := delta_cache_get(cache_key)) is not None:
+        return cached
+
+    payload = await _compute_cloud_costs_bundle(params_start, params_end, workspace_ids)
+    delta_cache_put(
+        cache_key,
+        "billing:cloud-costs-bundle",
+        payload,
+        ttl_seconds=cache_ttls.BUNDLE_FILTERED if workspace_ids else cache_ttls.BUNDLE,
+    )
+    return payload
 
 
 @router.get("/aws-costs")

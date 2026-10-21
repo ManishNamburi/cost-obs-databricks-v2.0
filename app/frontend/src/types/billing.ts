@@ -277,6 +277,17 @@ export interface InfraBundleResponse {
   infra_timeseries: InfraCostsTimeseriesResponse;
 }
 
+export interface CloudCostsBundleResponse {
+  availability: "available" | "partial";
+  partial_reasons: Record<string, string>;
+  infra_bundle: InfraBundleResponse;
+  aws_actual: AWSActualDashboardBundle;
+  azure_actual: AzureActualDashboardBundle;
+  gcp_actual: GCPActualDashboardBundle;
+  start_date: string;
+  end_date: string;
+}
+
 export interface KPIsBundleResponse {
   kpis: PlatformKPIsResponse;
   anomalies: SpendAnomaliesResponse;
