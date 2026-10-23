@@ -1,6 +1,9 @@
 # **cost-obs** app for Databricks
 
-[![Deploy to Databricks](https://img.shields.io/badge/Deploy%20to-Databricks-FF3621?style=for-the-badge&logo=databricks&logoColor=white)](https://accounts.cloud.databricks.com/select-workspace?destination_url=/apps/install?repo_url=https://github.com/smathews13/cost-obs-databricks)
+[![Deploy to Databricks](https://img.shields.io/badge/Deploy%20to-Databricks-FF3621?style=for-the-badge&logo=databricks&logoColor=white)](https://accounts.cloud.databricks.com/select-workspace?destination_url=/apps/install?repo_url=https://github.com/smathews13/cost-obs-databricks-v2.0)
+
+> **🧪 Release status: 2.1 Beta — select customers**
+> cost-obs 2.1 is in beta testing with a select group of customers. It is feature-complete and deployed to production-like workspaces, but expect fixes to land frequently. Coordinate with your Databricks account team before rolling it out broadly, and report issues through them. For the generally available release, use [cost-obs 1.x](https://github.com/smathews13/cost-obs-databricks).
 
 > **⚠️ Not Official Databricks Software**
 > This application is built and maintained by the Databricks field engineering team and is **not an official Databricks product**. It is not covered by Databricks Support SLAs. Your Databricks account team can help you deploy, configure, and troubleshoot this app as part of your engagement.
@@ -16,9 +19,30 @@ Built on FastAPI + React, deployed as a [Databricks App](https://docs.databricks
 
 ---
 
-## What's new in 2.1 (2026-07-03)
+## What's new in 2.1 Beta (2026-10-23)
 
-Ports the v1 1.1 field-hardening pass into v2's `app/backend/` + `app/frontend/` package layout while retaining v2's bundle-based deployment, Lakebase state store, and Unity Gateway feature set.
+2.1 moves the app onto Lakebase, deploys everything through a Databricks Asset Bundle, and adds Genie and Unity Gateway cost visibility.
+
+**Lakebase-first serving.** Dashboard tabs read pre-aggregated gold tables from a Lakebase (Postgres) copy instead of scanning system tables on a SQL warehouse. Gold tables are built in Unity Catalog and loaded into Lakebase by the app. If Lakebase is empty or unavailable, reads fall back to warehouse gold, so tabs keep working. App state (settings, user roles, pricing, alerts, webhooks, cloud connections, refresh logs and the response cache) also lives in Lakebase. The database sleeps after 5 idle minutes.
+
+**Bundle-owned deployment.** One `databricks bundle deploy` provisions the app, Lakebase project, setup job, and optional Genie space. The setup job builds gold tables, publishes setup notebooks, and fails loudly when Lakebase or catalog access is missing. Fresh installs and 1.x → 2.1 upgrades are detected automatically.
+
+**Unity Gateway tab (formerly AI Gateway).** Combines AI/ML product spend (the former AI/ML tab, now the Cost sub-tab) with governed model traffic from `system.ai_gateway.usage`: requests, tokens, latency, error rate, by model, by service, and top users. A Catalog sub-tab lists model and MCP services through the Unity Gateway SDK. Supports both the current and legacy usage-table column schemas.
+
+**Genie tab.** Genie spend by surface (Genie Code, Genie One, Genie Agents), charged vs free tier, by workspace and over time. A Spaces sub-tab lists Genie spaces and recent conversations through the Genie SDK. The **Ask Genie** drawer answers cost questions against a bundled Genie space.
+
+**Consistent tabs.** Every tab uses the same page header (date range and workspace chips), a methodology panel explaining where its numbers come from, shared KPI cards, and clear "unavailable" notices instead of fake `$0` values.
+
+**Other 2.1 changes**
+- Shared gold sources: point the app at gold tables shared from another workspace, with source filters and per-source capability notices.
+- Account prices on Cloud Costs, matching v1.
+- Region-scoped SQL and warehouse detail is flagged instead of mislabeled.
+- Settings revamp ported from v1 (Access, Resources, Config, Permissions).
+- `databricks-sdk` 0.155.0.
+
+### Field-hardening ported from v1 1.1
+
+Ports the v1 1.1 field-hardening pass into v2's `app/backend/` + `app/frontend/` package layout.
 
 **Apps bundle materialized view.** New `daily_apps_summary` pre-aggregation at (usage_date, workspace_id, app_id, sku_name) grain filtered to `billing_origin_product = 'APPS'`. Powers all six APPS query slots (summary, per-app breakdown, timeseries, filtered averages, avg-cost-per-app, sku breakdown) via an MV fast path with automatic fallback to raw scans when the MV is unavailable.
 
@@ -265,7 +289,25 @@ Use **Settings → Permissions** to manage who can administer or view the app.
 | **Most Expensive Queries** | Top queries with historical toggle, pagination, and query profile links |
 | **Warehouse Rightsizing** | Automated recommendations to right-size overprovisioned warehouses based on `system.query.history` utilization heuristics |
 
-### AI/ML
+### Unity Gateway
+| Feature | Description |
+|---|---|
+| **Cost** | AI/ML product spend (see AI/ML features below) |
+| **Gateway Overview** | Requests, tokens, latency, and error rate over time from `system.ai_gateway.usage` |
+| **Models / Services / Top Users** | Traffic and estimated cost by destination model, gateway service, and requester |
+| **Catalog** | Model and MCP services registered in Unity Gateway |
+
+Requires `AI_GATEWAY_USAGE_TABLE` (usually `system.ai_gateway.usage`) for the traffic sub-tabs; the Cost sub-tab works without it.
+
+### Genie
+| Feature | Description |
+|---|---|
+| **Overview** | Genie spend by surface (Genie Code, Genie One, Genie Agents), charged vs free tier, and daily trend |
+| **Workspaces** | Per-workspace Genie spend |
+| **Spaces** | Genie spaces and recent conversations |
+| **Ask Genie** | Natural-language cost questions answered by a bundled Genie space (`GENIE_SPACE_ID`) |
+
+### AI/ML (Unity Gateway → Cost)
 | Feature | Description |
 |---|---|
 | **AI/ML Spend Over Time** | Stacked area chart by AI/ML category |
