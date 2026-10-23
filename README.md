@@ -176,6 +176,8 @@ The app keeps the initial deployment as simple as possible. For most customers, 
 | `COST_OBS_SCHEMA` | Set by setup wizard | You want to pre-configure the schema name |
 | `COST_OBS_WORKSPACES` | All workspaces | You want to scope the app to a comma-separated list of workspace IDs |
 
+**Lakebase resource added in the Apps UI:** the resource injects `PGHOST` but not `ENDPOINT_NAME`. The app looks the endpoint up from `PGHOST` on startup; if the app's service principal can't see the project, set `ENDPOINT_NAME` = `projects/<project>/branches/production/endpoints/primary` yourself. Bundle deploys set it automatically.
+
 Keep the first deployment minimal. Add optional cloud-cost or advanced integrations only after the base app is healthy.
 
 <details>

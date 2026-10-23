@@ -1817,10 +1817,69 @@ def _resolve_lakebase_runtime_env() -> None:
         logger.warning("Could not resolve PGUSER: %s", e)
 
 
+_endpoint_resolution_done = False
+_endpoint_unresolved = False
+
+
+def _find_endpoint_for_host(host: str) -> str:
+    """Return the Lakebase endpoint name whose host matches PGHOST, or ""."""
+    postgres = get_workspace_client().postgres
+    for project in postgres.list_projects():
+        if not project.name:
+            continue
+        for branch in postgres.list_branches(parent=project.name):
+            if not branch.name:
+                continue
+            for ep in postgres.list_endpoints(parent=branch.name):
+                hosts = ep.status.hosts if ep.status else None
+                if hosts and host in (
+                    hosts.host, hosts.read_write_pooled_host,
+                    hosts.read_only_host, hosts.read_only_pooled_host,
+                ):
+                    return ep.name or ""
+    return ""
+
+
+def _ensure_lakebase_endpoint() -> bool:
+    """Make sure ENDPOINT_NAME is set when PGHOST is. Returns False if unusable.
+
+    A Lakebase resource added through the Apps UI injects PGHOST but not
+    ENDPOINT_NAME. Without it every connect fails to mint a token and each
+    request waits out the pool timeout, so resolve it once from PGHOST and
+    disable Lakebase outright when no endpoint matches.
+    """
+    global _endpoint_resolution_done, _endpoint_unresolved
+    if os.environ.get("ENDPOINT_NAME"):
+        return True
+    if _endpoint_resolution_done:
+        return not _endpoint_unresolved
+    with _lakebase_pool_lock:
+        if not _endpoint_resolution_done:
+            host = os.environ.get("PGHOST", "")
+            endpoint = ""
+            try:
+                endpoint = _find_endpoint_for_host(host)
+            except Exception as e:
+                logger.warning("Could not look up the Lakebase endpoint for PGHOST: %s", e)
+            if endpoint:
+                os.environ["ENDPOINT_NAME"] = endpoint
+                logger.info("Resolved ENDPOINT_NAME=%s from PGHOST", endpoint)
+            else:
+                _endpoint_unresolved = True
+                logger.warning(
+                    "PGHOST is set but ENDPOINT_NAME is not, and no Lakebase endpoint "
+                    "visible to the app matches %s. Lakebase is disabled; set ENDPOINT_NAME="
+                    "projects/<project>/branches/<branch>/endpoints/<endpoint> in the app config.",
+                    host,
+                )
+            _endpoint_resolution_done = True
+    return not _endpoint_unresolved
+
+
 def _lakebase_conninfo() -> str:
     _resolve_lakebase_runtime_env()
     host = os.environ.get("PGHOST", "")
-    if not host:
+    if not host or not _ensure_lakebase_endpoint():
         return ""
     port = os.environ.get("PGPORT", "5432")
     database = os.environ.get("PGDATABASE", "")
