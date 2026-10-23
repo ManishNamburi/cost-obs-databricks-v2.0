@@ -9,7 +9,7 @@ BUNDLE_FILTERED = 1800  # Same bundles when a workspace filter is active: 30 min
 KPI = 300              # KPI endpoints: 5 min — users expect near-real-time numbers
 TREND = 1800           # Timeseries / trend data: 30 min
 INFRA = 1800           # Infrastructure cost bundles: 30 min
-AIML_BUNDLE = 1800     # AI Gateway dashboard bundle: 30 min
+AIML_BUNDLE = 1800     # Unity Gateway dashboard bundle: 30 min
 
 # --- In-memory / TTLCache ---
 STALE_KPI = 3600       # Last-known-good KPI fallback: 1 h

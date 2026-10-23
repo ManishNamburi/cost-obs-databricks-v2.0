@@ -15,11 +15,53 @@ SDKs fall back to the Unity Catalog REST paths.
 from __future__ import annotations
 
 import logging
-from typing import Any
+import threading
+from typing import Any, Callable
+
+from cachetools import TTLCache
 
 from backend.db import execute_query, get_catalog_schema, get_workspace_client
 
 logger = logging.getLogger(__name__)
+
+_columns_cache: TTLCache = TTLCache(maxsize=8, ttl=3600)
+_inventory_cache: TTLCache = TTLCache(maxsize=8, ttl=300)
+_inventory_lock = threading.Lock()
+INVENTORY_TIMEOUT_S = 5.0
+
+
+def cached_inventory(
+    key: str, fetch: Callable[[], dict[str, Any]], empty: dict[str, Any],
+) -> dict[str, Any]:
+    """Return a cached SDK inventory, fetching it with a hard time limit.
+
+    Inventory is decoration on the cost tabs; a slow or hung SDK call must not
+    hold the tab's response.
+    """
+    with _inventory_lock:
+        hit = _inventory_cache.get(key)
+    if hit is not None:
+        return hit
+    box: dict[str, Any] = {}
+
+    def _run() -> None:
+        try:
+            box["result"] = fetch()
+        except Exception as exc:  # noqa: BLE001
+            box["error"] = str(exc)
+
+    # Daemon thread: a hung SDK call must not block worker shutdown.
+    worker = threading.Thread(target=_run, name=f"inventory-{key}", daemon=True)
+    worker.start()
+    worker.join(INVENTORY_TIMEOUT_S)
+    if worker.is_alive():
+        return {**empty, "available": False, "error": "Inventory lookup timed out; showing cost data only."}
+    if "error" in box:
+        return {**empty, "available": False, "error": box["error"]}
+    result = box["result"]
+    with _inventory_lock:
+        _inventory_cache[key] = result
+    return result
 
 # Logical field -> preferred physical columns (new schema first).
 _COLUMN_CANDIDATES: dict[str, tuple[str, ...]] = {
@@ -52,6 +94,8 @@ _NEW_DEFAULTS: dict[str, str] = {
 def _column_names(table: str) -> set[str]:
     if not table:
         return set()
+    if table in _columns_cache:
+        return _columns_cache[table]
     try:
         rows = execute_query(f"SHOW COLUMNS IN {table}", None)
     except Exception as exc:  # noqa: BLE001 — fall back to Unity Gateway names
@@ -68,6 +112,8 @@ def _column_names(table: str) -> set[str]:
         )
         if name:
             names.add(str(name).lower())
+    if names:
+        _columns_cache[table] = names
     return names
 
 
@@ -264,13 +310,20 @@ def list_genie_space_inventory(configured_space_id: str = "") -> dict[str, Any]:
         return {"available": False, "error": str(exc), "spaces": [], "space_count": 0}
 
     conversation_count = 0
+    conversation_count_capped = False
     if configured_space_id:
         try:
-            conv = genie.list_conversations(configured_space_id, page_size=1, include_all=True)
-            conversation_count = int(getattr(conv, "total_count", 0) or 0)
-            if not conversation_count:
-                listed = getattr(conv, "conversations", None) or []
-                conversation_count = len(list(listed))
+            token = None
+            for _ in range(10):
+                conv = genie.list_conversations(
+                    configured_space_id, page_size=100, include_all=True, page_token=token,
+                )
+                conversation_count += len(list(getattr(conv, "conversations", None) or []))
+                token = getattr(conv, "next_page_token", None)
+                if not token:
+                    break
+            else:
+                conversation_count_capped = True
         except Exception as exc:  # noqa: BLE001
             logger.debug("Genie list_conversations failed: %s", exc)
 
@@ -280,4 +333,5 @@ def list_genie_space_inventory(configured_space_id: str = "") -> dict[str, Any]:
         "space_count": len(spaces),
         "configured_space_id": configured_space_id or None,
         "configured_conversation_count": conversation_count,
+        "configured_conversation_count_capped": conversation_count_capped,
     }

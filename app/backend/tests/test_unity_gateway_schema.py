@@ -4,6 +4,8 @@ from backend.unity_gateway import pick_usage_columns, usage_schema_label
 
 
 def test_pick_usage_columns_prefers_unity_schema():
+    from backend.unity_gateway import _columns_cache
+    _columns_cache.clear()
     rows = [
         {"col_name": "event_time"},
         {"col_name": "service_name"},
@@ -36,6 +38,8 @@ def test_pick_usage_columns_falls_back_to_legacy():
         {"col_name": "request_duration_ms"},
         {"col_name": "http_status_code"},
     ]
+    from backend.unity_gateway import _columns_cache
+    _columns_cache.clear()
     with patch("backend.unity_gateway.execute_query", return_value=rows):
         picked = pick_usage_columns("main.cost.ai_gateway")
         assert picked["event_ts"] == "timestamp"
@@ -56,6 +60,7 @@ def test_list_genie_space_inventory_uses_sdk():
     page.spaces = [space]
     conv = MagicMock()
     conv.conversations = [object(), object()]
+    conv.next_page_token = None
     genie = MagicMock()
     genie.list_spaces.return_value = page
     genie.list_conversations.return_value = conv
@@ -69,3 +74,4 @@ def test_list_genie_space_inventory_uses_sdk():
     assert inv["spaces"][0]["configured"] is True
     genie.list_spaces.assert_called_once()
     genie.list_conversations.assert_called_once()
+    assert inv["configured_conversation_count"] == 2

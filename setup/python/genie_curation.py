@@ -64,7 +64,7 @@ This space cannot answer:
   - query-level warehouse cost (no per-statement attribution in the four tables)
   - cloud VM cost / infrastructure spend outside Databricks DBUs
   - future forecasts or trend projections
-  - anomaly explanations that require narrative reasoning (those go through the AI Gateway summary path, not Genie)
+  - anomaly explanations that require narrative reasoning (those go through the Unity Gateway summary path, not Genie)
 If asked, respond with "this Genie space cannot answer that — try the [X] tab in the cost-obs app instead" where [X] is the appropriate tab name (Cloud Costs, SQL, KPIs & Trends, etc.).
 
 **No hallucinated usage_quantity semantics.**

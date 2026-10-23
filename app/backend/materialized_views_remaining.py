@@ -697,7 +697,20 @@ REMAINING_MERGE = {
 }
 
 
-def remaining_tables() -> tuple[dict, dict, dict]:
+def ai_gateway_build_sql() -> tuple[str, str] | None:
+    """daily_ai_gateway CREATE/MERGE rendered for the live usage-table columns.
+
+    Called at build time, not import time, so app startup never waits on a
+    warehouse SHOW COLUMNS and legacy-schema tables get their real columns.
+    """
+    tbl = os.environ.get("AI_GATEWAY_USAGE_TABLE", "").strip()
+    if not tbl:
+        return None
+    create, merge, _ = remaining_tables(probe_columns=True)
+    return create["daily_ai_gateway"], merge["daily_ai_gateway"]
+
+
+def remaining_tables(probe_columns: bool = False) -> tuple[dict, dict, dict]:
     """Include Unity Gateway gold only when the shared usage table is configured."""
     from backend.materialized_views_viewer import viewer_tables
     _v_create, _v_merge, _v_refresh = viewer_tables()
@@ -710,11 +723,9 @@ def remaining_tables() -> tuple[dict, dict, dict]:
     tbl = os.environ.get("AI_GATEWAY_USAGE_TABLE", "").strip()
     if tbl:
         aliases = dict(_UNITY_GATEWAY_SQL_DEFAULTS)
-        try:
+        if probe_columns:
             from backend.unity_gateway import pick_usage_columns
             aliases.update(pick_usage_columns(tbl))
-        except Exception:
-            pass
         create["daily_ai_gateway"] = _CREATE_DAILY_AI_GATEWAY_TMPL.format(
             catalog="{catalog}",
             schema="{schema}",

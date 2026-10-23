@@ -94,9 +94,9 @@ App Setup Wizard:
 
 ---
 
-### Feature 1 — AI Gateway Cost Intelligence
+### Feature 1 — Unity Gateway Cost Intelligence
 
-**Goal:** Surface Unity AI Gateway usage, token spend, and external model cost in the app.
+**Goal:** Surface Unity Gateway usage, token spend, and external model cost in the app.
 
 **Constraint:** `system.ai_gateway.usage` is account-admin only. App SP cannot query it directly.
 
@@ -169,7 +169,7 @@ SQL Alert (scheduled query) → Notification Destination → Email/Slack/Webhook
 **Key nuance:**
 - Usage policies are NON-RETROACTIVE — only future workloads get tagged
 - Creating budgets requires account admin; creating usage policies requires workspace admin
-- AI Gateway budgets are a separate subtype (per-user thresholds, do not stop usage)
+- Unity Gateway budgets are a separate subtype (per-user thresholds, do not stop usage)
 
 **Backend work:**
 - `app/backend/routers/budgets.py` — read-only budget listing + usage policy CRUD (admin-gated)
@@ -333,8 +333,8 @@ User question → Genie Conversation API (user token) → generated SQL
 
 | Decision | Choice | Reason |
 |---|---|---|
-| AI Gateway data path | Admin-owned derived table | `system.ai_gateway.usage` is account-admin only |
-| AI Gateway cost model | `billing.usage` JOIN `list_prices` for 1P; token estimation for external | No stable cost column in usage table |
+| Unity Gateway data path | Admin-owned derived table | `system.ai_gateway.usage` is account-admin only |
+| Unity Gateway cost model | `billing.usage` JOIN `list_prices` for 1P; token estimation for external | No stable cost column in usage table |
 | Lakebase auth | `psycopg_pool` + custom `OAuthConnection` class | PgBouncer incompatible with OAuth roles |
 | Lakebase type | Autoscaling (`postgres_projects`) | Provisioned deprecated post-2026-03-12 |
 | Token rotation | Per new physical connection via `generate_database_credential()` | Tokens expire ~60 min |
@@ -357,7 +357,7 @@ Sprint 1 (foundation):
   Feature 4 (Lakebase) — OAuth pool, schema bootstrap, migrate alerts + permissions
 
 Sprint 2 (new data):
-  Feature 1 (AI Gateway) — backend router, billing join, frontend section in AI/ML
+  Feature 1 (Unity Gateway) — backend router, billing join, frontend section in AI/ML
   Feature 3 (Budgets/Policies) — budget read, usage policy CRUD, custom_tags surfacing
 
 Sprint 3 (UX + deployment):

@@ -15,6 +15,8 @@ def test_get_catalog_schema_env_beats_lakebase(monkeypatch):
 def test_get_catalog_schema_uses_lakebase_when_env_absent(monkeypatch):
     monkeypatch.delenv("COST_OBS_CATALOG", raising=False)
     monkeypatch.delenv("COST_OBS_SCHEMA", raising=False)
+    monkeypatch.setattr(db, "lakebase_available", lambda: True)
+    db._lb_catalog_schema_cache.clear()
     with patch.object(db, "lb_get_config", return_value={"catalog": "lb_cat", "schema": "lb_sch"}):
         with patch.object(db, "_read_dbfs_catalog_override", return_value=("", "")):
             with patch("os.path.exists", return_value=False):

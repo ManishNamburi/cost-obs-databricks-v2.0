@@ -537,6 +537,9 @@ export interface UnityGatewayInventory {
 
 export interface AIGatewayDashboardBundle {
   configured: boolean;
+  available?: boolean;
+  reason?: string;
+  reason_detail?: string;
   table?: string;
   message?: string;
   start_date?: string;

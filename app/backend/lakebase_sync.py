@@ -487,6 +487,14 @@ def sync_one_aggregate(
     else:
         range_start = mn
         with get_pg_conn() as conn:  # clear before full load
+            # Readers skip tables without backfilled_at, so they serve warehouse
+            # gold instead of a half-loaded copy until this load finishes.
+            with conn.cursor() as cur:
+                cur.execute(
+                    f"UPDATE {_SYNC_STATE_TABLE} SET backfilled_at = NULL WHERE table_name = %s",
+                    (table,),
+                )
+            conn.commit()
             try:
                 with conn.cursor() as cur:
                     cur.execute(f'TRUNCATE TABLE "{table}"')

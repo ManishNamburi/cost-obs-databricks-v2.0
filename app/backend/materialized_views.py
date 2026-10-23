@@ -1615,7 +1615,7 @@ CORE_GOLD_CREATE: dict[str, str] = {
     "daily_apps_summary": CREATE_DAILY_APPS_SUMMARY,
 }
 
-# AI Gateway gold is valid only when its administrator-managed source exists.
+# Unity Gateway gold is valid only when its administrator-managed source exists.
 # Connected cloud invoice actuals are deliberately excluded from v2 publishing.
 OPTIONAL_SHARE_TABLES = frozenset({
     "daily_ai_gateway",
@@ -1627,7 +1627,7 @@ def gold_share_create_sql() -> dict[str, str]:
     """Warehouse CREATE SQL for every gold table the share publisher can build.
 
     Templates keep ``{catalog}``, ``{schema}``, ``{billing_lookback_days}``.
-    Optional AI Gateway SQL keeps a table placeholder instead of an
+    Optional Unity Gateway SQL keeps a table placeholder instead of an
     environment-baked name so the generated notebook stays customer-neutral.
     Connected cloud invoice actuals and Lakebase copies are not included.
     """
@@ -1816,6 +1816,12 @@ def _create_materialized_views_impl(catalog: str | None = None, schema: str | No
         t0 = _time.monotonic()
         if on_table_event:
             on_table_event(table_name, "running")
+        gateway_merge_sql = None
+        if table_name == "daily_ai_gateway":
+            from backend.materialized_views_remaining import ai_gateway_build_sql
+            rendered = ai_gateway_build_sql()
+            if rendered:
+                create_sql, gateway_merge_sql = rendered
         try:
             logger.info(f"Refreshing table {catalog}.{schema}.{table_name}...")
             cfg = _TABLE_REFRESH_CONFIG.get(table_name, {})
@@ -1854,7 +1860,7 @@ def _create_materialized_views_impl(catalog: str | None = None, schema: str | No
                     "daily_apps_summary": MERGE_DAILY_APPS_SUMMARY,
                     **EXTRA_MERGE,
                 }
-                merge_sql = merge_sql_map.get(table_name)
+                merge_sql = gateway_merge_sql or merge_sql_map.get(table_name)
 
                 if merge_sql:
                     try:

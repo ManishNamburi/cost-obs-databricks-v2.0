@@ -28,7 +28,7 @@ interface AIMLCostCenterProps {
   host?: string | null;
   workspaceIds?: string[];
   workspaceNameMap?: Record<string, string>;
-  /** When rendered inside the AI Gateway "Cost" sub-tab, the parent already shows
+  /** When rendered inside the Unity Gateway "Cost" sub-tab, the parent already shows
    *  the page title — hide this component's own "AI/ML" header to avoid a duplicate. */
   embedded?: boolean;
 }
@@ -404,7 +404,7 @@ export function AIMLCostCenter({ data, isLoading, startDate, endDate, host, work
         </ul>
       </InfoPanel>
 
-      {/* Header — hidden when embedded (the AI Gateway view already shows the title) */}
+      {/* Header — hidden when embedded (the Unity Gateway view already shows the title) */}
       {!embedded && (
       <PageHero
         icon={

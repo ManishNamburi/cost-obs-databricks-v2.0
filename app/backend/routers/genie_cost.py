@@ -55,8 +55,13 @@ logger = logging.getLogger(__name__)
 def _with_genie_inventory(payload: dict[str, Any]) -> dict[str, Any]:
     try:
         from backend.routers.conversational import configured_space_id
-        from backend.unity_gateway import list_genie_space_inventory
-        payload["inventory"] = list_genie_space_inventory(configured_space_id())
+        from backend.unity_gateway import cached_inventory, list_genie_space_inventory
+        space_id = configured_space_id()
+        payload["inventory"] = cached_inventory(
+            f"genie:{space_id}",
+            lambda: list_genie_space_inventory(space_id),
+            {"spaces": [], "space_count": 0},
+        )
     except Exception as exc:  # noqa: BLE001
         logger.debug("Genie space inventory failed: %s", exc)
         payload["inventory"] = {"available": False, "error": str(exc), "spaces": [], "space_count": 0}
@@ -289,7 +294,7 @@ def _resolve_ws_name(ws_id: str, name_map: dict[str, str]) -> str:
 
 
 @router.get("/dashboard-bundle")
-async def get_genie_dashboard_bundle(
+def get_genie_dashboard_bundle(
     start_date: str = Query(default=None, description="Start date (YYYY-MM-DD)"),
     end_date: str = Query(default=None, description="End date (YYYY-MM-DD)"),
     workspace_ids: str | None = Query(default=None, description="Comma-separated workspace IDs to scope"),
@@ -559,7 +564,7 @@ async def get_genie_dashboard_bundle(
 
 
 @router.get("/diagnostics")
-async def get_genie_diagnostics() -> dict[str, Any]:
+def get_genie_diagnostics() -> dict[str, Any]:
     """Dump the distinct (sku_name, usage_type, billing_origin_product) combinations
     that pass the Genie inclusion filter, so field engineers can validate the
     sub-surface + free-tier CASE mappings against real customer data.

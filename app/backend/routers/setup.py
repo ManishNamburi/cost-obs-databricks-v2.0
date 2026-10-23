@@ -617,7 +617,7 @@ async def mark_setup_complete(background_tasks: BackgroundTasks) -> dict[str, An
     # Persist to DBFS so the flag survives container restarts (Databricks Apps
     # recreates the container from scratch on every stop/start, wiping .settings/).
     from backend.db import write_setup_complete as write_dbfs_setup_complete
-    write_dbfs_setup_complete()
+    await asyncio.to_thread(write_dbfs_setup_complete)
 
     # Invalidate the settings/tables cache so the post-setup check shows fresh data.
     from backend.routers import settings as _settings_router

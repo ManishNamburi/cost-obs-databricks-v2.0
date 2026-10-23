@@ -1328,7 +1328,7 @@ async def get_aiml_dashboard_bundle(
     }
     id_list = [i.strip() for i in workspace_ids.split(",") if i.strip()] if workspace_ids else None
     # AIML cost grain is daily_sku_breakdown. Missing models/clusters/agents
-    # gold must not mark this tab (or Genie / AI Gateway) unsupported.
+    # gold must not mark this tab (or Genie / Unity Gateway) unsupported.
     blocked = source_scope_unavailable(
         {"daily_sku_breakdown"},
         "The selected shared source does not publish AI/ML cost detail.",

@@ -80,7 +80,7 @@ def test_shared_source_without_gold_emits_shared_scope_unsupported():
 
 
 def test_missing_aiml_grain_does_not_block_sku_backed_tabs(monkeypatch):
-    """Genie / AI Gateway / AIML cost must not fail just because models grain is missing."""
+    """Genie / Unity Gateway / AIML cost must not fail just because models grain is missing."""
     monkeypatch.setattr(
         db,
         "get_mv_sources",
@@ -193,13 +193,12 @@ def test_users_mixed_scope_keeps_local_identity_and_notes_omission():
 def test_genie_bundle_unsupported_when_sku_gold_unpublished():
     token = set_source_labels(["shared-west"])
     try:
-        result = asyncio.run(
-            genie_cost.get_genie_dashboard_bundle(
+        with patch("backend.unity_gateway.list_genie_space_inventory", return_value={"spaces": []}):
+            result = genie_cost.get_genie_dashboard_bundle(
                 start_date="2026-08-01",
                 end_date="2026-08-28",
                 workspace_ids=None,
             )
-        )
     finally:
         reset_source_labels(token)
 
@@ -238,13 +237,16 @@ def test_aiml_bundle_uses_sku_gold_not_aiml_grain(monkeypatch):
 def test_ai_gateway_bundle_unsupported_only_for_ai_gateway_gold():
     token = set_source_labels(["shared-west"])
     try:
-        with patch.object(ai_gateway, "_get_usage_table", return_value="main.cost.ai_gateway"):
-            result = asyncio.run(
-                ai_gateway.get_ai_gateway_dashboard_bundle(
-                    start_date="2026-08-01",
-                    end_date="2026-08-28",
-                    workspace_ids=None,
-                )
+        with (
+            patch.object(ai_gateway, "_get_usage_table", return_value="main.cost.ai_gateway"),
+            patch("backend.unity_gateway.list_unity_gateway_inventory", return_value={"model_services": []}),
+            patch("backend.unity_gateway.usage_schema_label", return_value="unity"),
+        ):
+            result = ai_gateway.get_ai_gateway_dashboard_bundle(
+                start_date="2026-08-01",
+                end_date="2026-08-28",
+                workspace_ids=None,
+                workspace_id=None,
             )
     finally:
         reset_source_labels(token)

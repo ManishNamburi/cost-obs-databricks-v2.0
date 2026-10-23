@@ -268,6 +268,11 @@ def _accepted_catalog_schema(catalog: str, schema: str) -> tuple[str, str] | Non
     return cat, sch
 
 
+# get_catalog_schema runs on nearly every request; avoid a Postgres round trip each time.
+_lb_catalog_schema_cache: TTLCache = TTLCache(maxsize=1, ttl=30)
+_MISSING = object()
+
+
 def get_catalog_schema() -> tuple[str, str]:
     """Return the catalog and schema for cost observability tables.
 
@@ -300,7 +305,11 @@ def get_catalog_schema() -> tuple[str, str]:
     # 2. Lakebase — durable after first wizard save. Does not need UC catalog
     # to connect (PGHOST / ENDPOINT_NAME), so this is safe on the hot path.
     try:
-        cfg = lb_get_config("catalog_schema")
+        cached = _lb_catalog_schema_cache.get("v", _MISSING)
+        if cached is _MISSING:
+            cached = lb_get_config("catalog_schema") if lakebase_available() else None
+            _lb_catalog_schema_cache["v"] = cached
+        cfg = cached
         if isinstance(cfg, dict):
             accepted = _accepted_catalog_schema(str(cfg.get("catalog") or ""), str(cfg.get("schema") or ""))
             if accepted:
@@ -346,6 +355,7 @@ def save_catalog_schema(catalog: str, schema: str) -> None:
         lb_set_config("catalog_schema", {"catalog": catalog, "schema": schema})
     except Exception as e:
         logger.debug("Could not save catalog/schema to Lakebase (non-fatal): %s", e)
+    _lb_catalog_schema_cache.clear()
     os.makedirs(os.path.dirname(_CATALOG_OVERRIDE_FILE), exist_ok=True)
     with open(_CATALOG_OVERRIDE_FILE, "w") as f:
         json.dump({"catalog": catalog, "schema": schema}, f)
@@ -1763,6 +1773,11 @@ except ImportError:
 
 _lakebase_pool: "psycopg_pool.ConnectionPool | None" = None
 _lakebase_pool_lock = __import__("threading").Lock()
+# A Lakebase that is attached but unusable (no role yet, endpoint suspended)
+# must not cost every request psycopg_pool's default 30s wait.
+_LAKEBASE_GETCONN_TIMEOUT_S = float(os.getenv("LAKEBASE_CONNECT_TIMEOUT_S", "5"))
+_LAKEBASE_COOLDOWN_S = 60
+_lakebase_down_until = 0.0
 
 
 def mint_lakebase_token(endpoint: str) -> str:
@@ -1819,6 +1834,8 @@ def _resolve_lakebase_runtime_env() -> None:
 
 _endpoint_resolution_done = False
 _endpoint_unresolved = False
+_endpoint_retry_at = float("inf")
+_endpoint_lock = threading.Lock()
 
 
 def _find_endpoint_for_host(host: str) -> str:
@@ -1848,20 +1865,25 @@ def _ensure_lakebase_endpoint() -> bool:
     request waits out the pool timeout, so resolve it once from PGHOST and
     disable Lakebase outright when no endpoint matches.
     """
-    global _endpoint_resolution_done, _endpoint_unresolved
+    global _endpoint_resolution_done, _endpoint_unresolved, _endpoint_retry_at
     if os.environ.get("ENDPOINT_NAME"):
         return True
+    if _endpoint_resolution_done and time.monotonic() >= _endpoint_retry_at:
+        _endpoint_resolution_done = False
     if _endpoint_resolution_done:
         return not _endpoint_unresolved
-    with _lakebase_pool_lock:
+    with _endpoint_lock:
         if not _endpoint_resolution_done:
             host = os.environ.get("PGHOST", "")
             endpoint = ""
+            _endpoint_retry_at = float("inf")
             try:
                 endpoint = _find_endpoint_for_host(host)
             except Exception as e:
-                logger.warning("Could not look up the Lakebase endpoint for PGHOST: %s", e)
+                _endpoint_retry_at = time.monotonic() + 300
+                logger.warning("Could not look up the Lakebase endpoint for PGHOST (retrying in 5 min): %s", e)
             if endpoint:
+                _endpoint_unresolved = False
                 os.environ["ENDPOINT_NAME"] = endpoint
                 logger.info("Resolved ENDPOINT_NAME=%s from PGHOST", endpoint)
             else:
@@ -1889,7 +1911,7 @@ def _lakebase_conninfo() -> str:
     gold = os.environ.get("COST_OBS_PG_GOLD_SCHEMA", "cost_obs_gold")
     return (
         f"host={host} port={port} dbname={database} user={user} sslmode={sslmode} "
-        f"options='-c search_path={gold},{schema}'"
+        f"connect_timeout=10 options='-c search_path={gold},{schema}'"
     )
 
 
@@ -1951,10 +1973,20 @@ def get_pg_conn() -> "Generator[psycopg.Connection, None, None]":
     Commits on clean exit, rolls back on exception.  Raises RuntimeError when
     Lakebase is not configured so callers can fall back gracefully.
     """
+    global _lakebase_down_until
     pool = _get_lakebase_pool()
     if pool is None:
         raise RuntimeError("Lakebase not available — PGHOST not configured or psycopg not installed")
-    conn = pool.getconn()
+    if time.monotonic() < _lakebase_down_until:
+        raise RuntimeError("Lakebase unavailable — recent connection failure, retrying shortly")
+    try:
+        conn = pool.getconn(timeout=_LAKEBASE_GETCONN_TIMEOUT_S)
+    except Exception as e:
+        _lakebase_down_until = time.monotonic() + _LAKEBASE_COOLDOWN_S
+        logger.warning(
+            "Lakebase connection failed; serving fallbacks for %ss: %s", _LAKEBASE_COOLDOWN_S, e,
+        )
+        raise RuntimeError(f"Lakebase connection failed: {e}") from e
     try:
         yield conn
         conn.commit()
@@ -2091,8 +2123,8 @@ def lb_write_build_state(state: dict) -> None:
 # caller can fall back to the UC/warehouse path during the migration.
 
 def lakebase_available() -> bool:
-    """Cheap check: is a Lakebase pool configured (PGHOST set + psycopg present)?"""
-    return _get_lakebase_pool() is not None
+    """Cheap check: is a Lakebase pool configured and not in a failure cooldown?"""
+    return _get_lakebase_pool() is not None and time.monotonic() >= _lakebase_down_until
 
 
 def lakebase_query(sql: str, params: "tuple | dict | None" = None) -> list[dict[str, Any]]:

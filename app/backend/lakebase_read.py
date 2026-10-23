@@ -28,6 +28,7 @@ import datetime as _dt
 import logging
 import os
 import re
+import time
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any
 
@@ -1714,6 +1715,27 @@ def _resolve_delta(delta_result: list[dict] | None, fetch_delta) -> list[dict]:
     return []
 
 
+_PG_TABLE_RE = re.compile(r'\b(?:FROM|JOIN)\s+"?([A-Za-z_][A-Za-z0-9_]*)"?', re.I)
+_loading_cache: dict[str, Any] = {"at": 0.0, "tables": frozenset()}
+
+
+def _tables_still_loading() -> frozenset[str]:
+    """Gold copies mid full reload (sync cleared backfilled_at). Cached 30s."""
+    now = time.monotonic()
+    if now - _loading_cache["at"] < 30:
+        return _loading_cache["tables"]
+    tables: frozenset[str] = frozenset()
+    try:
+        from backend.db import lakebase_query
+        from backend.lakebase_sync import _SYNC_STATE_TABLE
+        rows = lakebase_query(f"SELECT table_name FROM {_SYNC_STATE_TABLE} WHERE backfilled_at IS NULL")
+        tables = frozenset(str(r["table_name"]) for r in rows)
+    except Exception as e:
+        logger.debug("lakebase_read: sync-state check failed: %s", e)
+    _loading_cache.update(at=now, tables=tables)
+    return tables
+
+
 def dual_read(
     name: str,
     pg_tmpl: str,
@@ -1750,6 +1772,10 @@ def dual_read(
 
         if mode == "on":
             from backend.db import lakebase_query
+            loading = _tables_still_loading()
+            if loading and loading.intersection(_PG_TABLE_RE.findall(pg_sql)):
+                logger.info("lakebase_read[%s]: gold copy is reloading, serving warehouse gold", name)
+                return _resolve_delta(delta_result, fetch_delta)
             try:
                 pg_rows = lakebase_query(pg_sql, pg_params)
             except Exception as e:

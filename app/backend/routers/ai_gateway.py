@@ -237,9 +237,11 @@ ORDER BY u.usage_date
 
 
 def _with_inventory(bundle: dict[str, Any], tbl: str | None) -> dict[str, Any]:
-    from backend.unity_gateway import list_unity_gateway_inventory, usage_schema_label
+    from backend.unity_gateway import cached_inventory, list_unity_gateway_inventory, usage_schema_label
     try:
-        bundle["inventory"] = list_unity_gateway_inventory()
+        bundle["inventory"] = cached_inventory(
+            "unity-gateway", list_unity_gateway_inventory, {"model_services": [], "mcp_services": []},
+        )
         bundle["usage_schema"] = usage_schema_label(tbl) if tbl else "unity"
     except Exception as exc:  # noqa: BLE001
         logger.debug("Unity Gateway inventory failed: %s", exc)
@@ -250,13 +252,24 @@ def _with_inventory(bundle: dict[str, Any], tbl: str | None) -> dict[str, Any]:
     return bundle
 
 
+def _ws_ids(csv: str | None, repeated: list[str] | None) -> list[str] | None:
+    """Merge `workspace_ids=a,b` (what the UI sends) and repeated `workspace_id`, dropping unsafe values.
+
+    Falls back to the app's configured workspace scope (COST_OBS_WORKSPACES).
+    """
+    from backend.workspace_filter import _is_safe_id, get_configured_workspace_ids
+    raw = [*(csv.split(",") if csv else []), *(repeated or [])]
+    ids = sorted({w.strip() for w in raw if w.strip() and _is_safe_id(w.strip())})
+    return ids or get_configured_workspace_ids() or None
+
+
 def _apply_workspace_filter(sql: str, workspace_ids: list[str] | None, table_alias: str = "") -> tuple[str, dict]:
     """Inject workspace filter and return (sql, extra_params)."""
     prefix = f"{table_alias}." if table_alias else ""
     if workspace_ids:
         placeholders = ", ".join(f":ws_{i}" for i in range(len(workspace_ids)))
-        clause = f"AND {prefix}workspace_id IN ({placeholders})"
-        params = {f"ws_{i}": int(wid) for i, wid in enumerate(workspace_ids)}
+        clause = f"AND CAST({prefix}workspace_id AS STRING) IN ({placeholders})"
+        params = {f"ws_{i}": str(wid) for i, wid in enumerate(workspace_ids)}
         return sql.replace("{workspace_filter}", clause), params
     return sql.replace("{workspace_filter}", ""), {}
 
@@ -340,12 +353,37 @@ def _aggregate_gateway_rows(rows: list[dict]) -> dict[str, Any]:
     }
 
 
+def _billing_by_date(billing_rows: list[dict]) -> dict[str, float]:
+    """Sum billing-correlated serving cost per day across workspaces."""
+    out: dict[str, float] = {}
+    for r in billing_rows:
+        d = str(r.get("usage_date"))
+        out[d] = out.get(d, 0.0) + float(r.get("estimated_cost_usd") or 0)
+    return out
+
+
 def _annotate_costs(rows: list[dict], billing_by_date: dict) -> list[dict]:
-    """Attach estimated_cost_usd to timeseries rows from billing correlation + token pricing."""
+    """Attach estimated_cost_usd to timeseries rows from billing correlation + token pricing.
+
+    A day's billed serving cost is split across that day's model rows by token
+    share (request share when tokens are absent), so the chart sums to the bill.
+    """
+    day_tokens: dict[str, float] = {}
+    day_requests: dict[str, float] = {}
+    for row in rows:
+        d = str(row.get("usage_date", ""))
+        day_tokens[d] = day_tokens.get(d, 0.0) + float(row.get("total_tokens") or 0)
+        day_requests[d] = day_requests.get(d, 0.0) + float(row.get("request_count") or 0)
     for row in rows:
         date_str = str(row.get("usage_date", ""))
         model = str(row.get("model_name", "")).lower()
-        billing_cost = billing_by_date.get(date_str, 0.0)
+        if day_tokens.get(date_str):
+            share = float(row.get("total_tokens") or 0) / day_tokens[date_str]
+        elif day_requests.get(date_str):
+            share = float(row.get("request_count") or 0) / day_requests[date_str]
+        else:
+            share = 0.0
+        billing_cost = billing_by_date.get(date_str, 0.0) * share
         prices = _model_price(model)
         input_k = (row.get("input_tokens") or 0) / 1000.0
         output_k = (row.get("output_tokens") or 0) / 1000.0
@@ -433,9 +471,11 @@ async def get_ai_gateway_status() -> dict[str, Any]:
 async def get_ai_gateway_summary(
     start_date: str | None = Query(None),
     end_date: str | None = Query(None),
-    workspace_ids: list[str] | None = Query(None, alias="workspace_id"),
+    workspace_ids: str | None = Query(None, description="Comma-separated workspace IDs"),
+    workspace_id: list[str] | None = Query(None),
 ) -> dict[str, Any]:
     """Overall request counts, token consumption, and latency for the period."""
+    workspace_ids = _ws_ids(workspace_ids, workspace_id)
     tbl = _get_usage_table()
     if not tbl:
         return {"error": "AI_GATEWAY_USAGE_TABLE not configured"}
@@ -481,9 +521,11 @@ async def get_ai_gateway_summary(
 async def get_ai_gateway_by_model(
     start_date: str | None = Query(None),
     end_date: str | None = Query(None),
-    workspace_ids: list[str] | None = Query(None, alias="workspace_id"),
+    workspace_ids: str | None = Query(None, description="Comma-separated workspace IDs"),
+    workspace_id: list[str] | None = Query(None),
 ) -> list[dict[str, Any]]:
     """Token consumption and request counts broken down by model."""
+    workspace_ids = _ws_ids(workspace_ids, workspace_id)
     tbl = _get_usage_table()
     if not tbl:
         return []
@@ -507,9 +549,11 @@ async def get_ai_gateway_by_model(
 async def get_ai_gateway_by_route(
     start_date: str | None = Query(None),
     end_date: str | None = Query(None),
-    workspace_ids: list[str] | None = Query(None, alias="workspace_id"),
+    workspace_ids: str | None = Query(None, description="Comma-separated workspace IDs"),
+    workspace_id: list[str] | None = Query(None),
 ) -> list[dict[str, Any]]:
     """Token consumption and request counts broken down by Unity Gateway service."""
+    workspace_ids = _ws_ids(workspace_ids, workspace_id)
     tbl = _get_usage_table()
     if not tbl:
         return []
@@ -533,9 +577,11 @@ async def get_ai_gateway_by_route(
 async def get_ai_gateway_by_user(
     start_date: str | None = Query(None),
     end_date: str | None = Query(None),
-    workspace_ids: list[str] | None = Query(None, alias="workspace_id"),
+    workspace_ids: str | None = Query(None, description="Comma-separated workspace IDs"),
+    workspace_id: list[str] | None = Query(None),
 ) -> list[dict[str, Any]]:
     """Token consumption and request counts broken down by calling user/service principal."""
+    workspace_ids = _ws_ids(workspace_ids, workspace_id)
     tbl = _get_usage_table()
     if not tbl:
         return []
@@ -554,9 +600,11 @@ async def get_ai_gateway_by_user(
 async def get_ai_gateway_timeseries(
     start_date: str | None = Query(None),
     end_date: str | None = Query(None),
-    workspace_ids: list[str] | None = Query(None, alias="workspace_id"),
+    workspace_ids: str | None = Query(None, description="Comma-separated workspace IDs"),
+    workspace_id: list[str] | None = Query(None),
 ) -> list[dict[str, Any]]:
     """Daily token usage and request counts by model for the time series chart."""
+    workspace_ids = _ws_ids(workspace_ids, workspace_id)
     tbl = _get_usage_table()
     if not tbl:
         return []
@@ -582,25 +630,24 @@ async def get_ai_gateway_timeseries(
         ], timeout=60)
         usage_rows = results.get("usage") or []
         billing_rows = results.get("billing") or []
-        billing_by_date = {
-            str(r["usage_date"]): float(r.get("estimated_cost_usd") or 0)
-            for r in billing_rows
-        }
+        billing_by_date = _billing_by_date(billing_rows)
         return _annotate_costs(usage_rows, billing_by_date)
 
     return await loop.run_in_executor(None, _run)
 
 
 @router.get("/dashboard-bundle")
-async def get_ai_gateway_dashboard_bundle(
+def get_ai_gateway_dashboard_bundle(
     start_date: str | None = Query(None),
     end_date: str | None = Query(None),
-    workspace_ids: list[str] | None = Query(None, alias="workspace_id"),
+    workspace_ids: str | None = Query(None, description="Comma-separated workspace IDs"),
+    workspace_id: list[str] | None = Query(None),
 ) -> dict[str, Any]:
     """All Unity Gateway data in one call for the dashboard tab.
 
     Returns: status, summary, by_model, by_route, top_users, timeseries, inventory.
     """
+    workspace_ids = _ws_ids(workspace_ids, workspace_id)
     tbl = _get_usage_table()
     if not tbl:
         return _with_inventory({
@@ -612,7 +659,7 @@ async def get_ai_gateway_dashboard_bundle(
         }, None)
 
     start_date, end_date = _defaults(start_date, end_date)
-    # AI Gateway gold is daily_ai_gateway. Missing AIML grain is not a reason
+    # Unity Gateway gold is daily_ai_gateway. Missing AIML grain is not a reason
     # to mark this tab unsupported.
     blocked = source_scope_unavailable(
         {"daily_ai_gateway"},
@@ -641,10 +688,8 @@ async def get_ai_gateway_dashboard_bundle(
         return _with_inventory(cached, tbl)
 
     params: dict[str, Any] = {"start_date": start_date, "end_date": end_date}
-    ws_clause = ""
-    if workspace_ids:
-        quoted = ", ".join(f"'{w}'" for w in workspace_ids)
-        ws_clause = f"AND CAST(workspace_id AS STRING) IN ({quoted})"
+    from backend import workspace_filter as wf
+    ws_clause = wf.build_ws_filter_clause(col="workspace_id", id_list=workspace_ids) if workspace_ids else ""
 
     from backend.lakebase_read import PG_AI_GATEWAY_ROWS, gold_read
 
@@ -662,9 +707,6 @@ async def get_ai_gateway_dashboard_bundle(
             delta_cache_put(cache_key, "ai-gateway-bundle", bundle, ttl_seconds=_BUNDLE_TTL)
             return bundle
         return None
-
-    import asyncio
-    loop = asyncio.get_running_loop()
 
     def _run():
         gold_bundle = _gold_run()
@@ -709,10 +751,7 @@ async def get_ai_gateway_dashboard_bundle(
         route_rows = _enrich_model_costs(results.get("by_route") or [])
         user_rows = results.get("by_user") or []
         billing_rows = results.get("billing") or []
-        billing_by_date = {
-            str(r["usage_date"]): float(r.get("estimated_cost_usd") or 0)
-            for r in billing_rows
-        }
+        billing_by_date = _billing_by_date(billing_rows)
         ts_rows = _annotate_costs(results.get("timeseries") or [], billing_by_date)
 
         # Build summary dict
@@ -748,4 +787,4 @@ async def get_ai_gateway_dashboard_bundle(
         delta_cache_put(cache_key, "ai-gateway-bundle", bundle, ttl_seconds=_BUNDLE_TTL)
         return bundle
 
-    return _with_inventory(await loop.run_in_executor(None, _run), tbl)
+    return _with_inventory(_run(), tbl)

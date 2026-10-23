@@ -14,7 +14,7 @@ import type {
 } from "@/types/billing";
 import { formatCurrency } from "@/utils/formatters";
 import { AIMLCostCenter } from "@/components/AIMLCostCenter";
-import { PageHero, InfoPanel } from "@/components/brand";
+import { PageHero, InfoPanel, SourceCapabilityNotice } from "@/components/brand";
 import { KPICard } from "@/components/ui/KPICard";
 import { C } from "@/theme";
 
@@ -337,7 +337,7 @@ function TopUsersTable({ rows }: { rows: Array<{ client_user: string; request_co
 
 // V2.1: AI/ML content was merged into this tab (Option A). "cost" is the new
 // default sub-tab and shows the former AI/ML tab surface via AIMLCostCenter;
-// the AI Gateway analytics sub-tabs (overview/models/routes/users) require
+// the Unity Gateway analytics sub-tabs (overview/models/routes/users) require
 // AI_GATEWAY_USAGE_TABLE to be configured and gracefully degrade otherwise.
 type SubTab = "cost" | "overview" | "models" | "routes" | "users" | "services";
 
@@ -369,7 +369,7 @@ export function AIGatewayView({
   const [gatewaySearch, setGatewaySearch] = useState("");
   const [infoMinimized, setInfoMinimized] = useState(false);
 
-  // The AI/ML "cost" sub-tab (default) doesn't need the AI Gateway derived
+  // The AI/ML "cost" sub-tab (default) doesn't need the Unity Gateway derived
   // table to be configured — it reads system.billing.usage directly. So
   // handle the loading + not-configured states differently by sub-tab.
   const gatewayConfigured = !!data?.configured;
@@ -487,12 +487,27 @@ export function AIGatewayView({
     );
   }
 
-  // After the early returns above, data is guaranteed defined AND configured
-  // AND has a summary. TypeScript can't infer that from the gatewayConfigured
-  // boolean, so we widen with non-null assertions here rather than sprinkle
-  // them through the JSX below.
-  const d = data!;
-  const gs = s!;
+  if (data?.available === false || !s || s.total_requests == null) {
+    return (
+      <div className="animate-fade-in space-y-5">
+        {header("Governed model traffic")}
+        {subTab === "services" ? (
+          <CatalogPanel inventory={inventory} />
+        ) : (
+          <SourceCapabilityNotice
+            title="Unity Gateway traffic is not available for this source"
+            description={data?.reason_detail || "The selected source does not publish Unity Gateway usage detail."}
+            requiredAggregates={["daily_ai_gateway"]}
+          />
+        )}
+      </div>
+    );
+  }
+
+  // After the early returns above, data is guaranteed defined, configured,
+  // and has a summary.
+  const d = data;
+  const gs = s;
 
   return (
     <div className="animate-fade-in space-y-5">
