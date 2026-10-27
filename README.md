@@ -278,7 +278,7 @@ Use **Settings → Permissions** to manage who can administer or view the app.
 | **Workspace Table** | Per-workspace cost breakdown with top products/users |
 | **Interactive Compute** | All-purpose cluster usage by user, cluster, or notebook with historical toggle |
 | **ETL Breakdown** | Jobs and SDP pipeline spend with type filters, pagination, and historical toggle |
-| **Account Prices Toggle** | Switch between list prices and negotiated account prices (from `system.billing.account_prices`, private preview) |
+| **Account Prices Toggle** | Apply a blended negotiated-rate discount (from `system.billing.account_prices`, private preview) to Overview and infrastructure spend. See [Account discounts](#account-discounts-and-negotiated-pricing) |
 
 ### SQL
 | Feature | Description |
@@ -433,6 +433,23 @@ All billing and compute data is **account-level** — queries run against Unity 
 | `system.lakeflow.job_run_timeline` | Job success/failure tracking for KPIs |
 | `system.serving.served_entities` | ML endpoint metadata |
 | `system.access.workspaces_latest` | Workspace name resolution |
+
+### Account discounts and negotiated pricing
+
+**By default, every dollar figure is at list price**: usage from `system.billing.usage` multiplied by the current rate in `system.billing.list_prices`. Discounts linked to your Databricks account are not reflected unless you turn on account pricing.
+
+To apply them, open **Settings → Experimental → Account Pricing** and enable **Use account prices**. The app then:
+
+- reads your negotiated rates from `system.billing.account_prices` (private preview; the app's service principal needs `SELECT` on it),
+- computes one usage-weighted blended ratio, `Σ usage × account price / Σ usage × list price`, over the selected date range and workspaces. SKUs without a negotiated rate count at list price,
+- scales the **Overview** spend figures (summary, products, workspaces, trend) and **infrastructure** spend by that ratio. A banner shows the active discount.
+
+Limits to be aware of:
+
+- Other tabs (SQL, Unity Gateway / AI, Apps, Genie, Users & Groups, KPIs, Optimize, Tagging), budgets and alerts still show list prices.
+- The ratio is blended, so per-product splits on the Overview assume the same discount on every SKU. If your discounts differ a lot by SKU, the total is right for the selected range but individual products are approximate.
+- Only discounts expressed as per-SKU rates in `system.billing.account_prices` are captured. Commit-level credits, prepaid balances or invoice adjustments that don't appear there are not.
+- If the table is unavailable or holds no rates for the SKUs you used, the banner says so and list prices are shown.
 
 ### App-Managed Tables
 
