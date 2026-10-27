@@ -44,15 +44,16 @@ export interface OptimizeExport {
     available: boolean;
     serverless_detected: boolean;
     warehouses: Array<{
-      warehouse_id: string;
-      warehouse_name: string;
-      warehouse_size: string;
+      warehouse_id: string | null;
+      warehouse_name: string | null;
+      warehouse_size: string | null;
       warehouse_type: string;
       workspace_id: string;
       idle_minutes: number;
       idle_pct: number;
       total_spend: number;
-      estimated_idle_spend: number;
+      // null when the backend suppressed attribution (serverless / multi-cluster / billing uptime).
+      estimated_idle_spend: number | null;
     }>;
   };
 }
@@ -1566,7 +1567,7 @@ export function generateCostReport(data: ExportData, sections?: ExportSections) 
         yPos += 6;
 
         const rows = [...data.optimize.idle.warehouses]
-          .sort((a, b) => b.estimated_idle_spend - a.estimated_idle_spend)
+          .sort((a, b) => (b.estimated_idle_spend ?? -1) - (a.estimated_idle_spend ?? -1))
           .slice(0, 10)
           .map((w) => [
             w.warehouse_name || w.warehouse_id,
@@ -1574,7 +1575,7 @@ export function generateCostReport(data: ExportData, sections?: ExportSections) 
             w.warehouse_type || "—",
             `${(w.idle_minutes / 60).toFixed(1)} h`,
             `${w.idle_pct.toFixed(1)}%`,
-            formatCurrency(w.estimated_idle_spend),
+            w.estimated_idle_spend != null ? formatCurrency(w.estimated_idle_spend) : "—",
           ]);
 
         autoTable(doc, {

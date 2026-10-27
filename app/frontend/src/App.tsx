@@ -96,6 +96,7 @@ import {
   useDBSQLTopQueries,
   useKPIsBundle,
   useUsersGroupsBundle,
+  fetchJson,
 } from "@/hooks/useBillingData";
 import type { DateRange, WorkspaceBreakdown } from "@/types/billing";
 import { generateCostReport } from "@/utils/pdfExport";
@@ -879,7 +880,7 @@ function Dashboard() {
     }>;
   }>({
     queryKey: ["warehouse-health"],
-    queryFn: () => fetch("/api/sql/warehouse-health").then(r => r.json()),
+    queryFn: () => fetchJson("/api/sql/warehouse-health"),
     staleTime: 30 * 60 * 1000,
     retry: false,
     // Deferred: only fire when the Optimize tab is actually opened. Previously
@@ -890,17 +891,17 @@ function Dashboard() {
     available: boolean;
     serverless_detected: boolean;
     warehouses: Array<{
-      warehouse_id: string;
-      warehouse_name: string;
-      warehouse_size: string;
+      warehouse_id: string | null;
+      warehouse_name: string | null;
+      warehouse_size: string | null;
       warehouse_type: string;
       workspace_id: string;
       total_running_minutes: number;
-      total_query_minutes: number;
+      busy_union_minutes: number;
       idle_minutes: number;
       idle_pct: number;
       total_spend: number;
-      estimated_idle_spend: number;
+      estimated_idle_spend: number | null;
     }>;
   }>({
     queryKey: ["warehouse-idle-time", dateRange.startDate, dateRange.endDate, _wsIds?.join(",")],
@@ -909,7 +910,7 @@ function Dashboard() {
       if (dateRange.startDate) params.set("start_date", dateRange.startDate);
       if (dateRange.endDate) params.set("end_date", dateRange.endDate);
       if (_wsIds?.length) params.set("workspace_ids", _wsIds.join(","));
-      return fetch(`/api/sql/warehouse-health/idle-time?${params}`).then(r => r.json());
+      return fetchJson(`/api/sql/warehouse-health/idle-time?${params}`);
     },
     staleTime: 30 * 60 * 1000,
     retry: false,

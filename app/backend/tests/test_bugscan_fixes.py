@@ -81,3 +81,28 @@ def test_genie_conversation_count_pages_through(monkeypatch):
     out = ug.list_genie_space_inventory("space-1")
     assert out["configured_conversation_count"] == 142
     assert out["configured_conversation_count_capped"] is False
+
+
+def test_idle_time_gold_row_without_name_falls_back_to_id(monkeypatch):
+    import asyncio
+    from backend import lakebase_read
+    from backend.routers import warehouse_health as wh
+
+    row = {"warehouse_id": "abc123", "warehouse_name": None, "warehouse_type": "CLASSIC",
+           "total_running_minutes": 120, "idle_minutes": 60, "total_spend": 5,
+           "estimated_idle_spend": None}
+    monkeypatch.setattr(wh, "_warehouse_scope_blocked", lambda: False)
+    monkeypatch.setattr(wh, "_idle_time_cache", None)
+    monkeypatch.setattr(lakebase_read, "gold_read", lambda *a, **k: [row])
+    monkeypatch.setattr(lakebase_read, "warehouse_view_fallback", lambda: False)
+    # No dates: the default-date path used to import missing backend.db helpers and 500.
+    out = asyncio.run(wh.get_warehouse_idle_time(None, None, None))
+    [w] = out["warehouses"]
+    assert w["warehouse_name"] == "abc123"
+    assert w["idle_pct"] == 50.0
+    assert w["estimated_idle_spend"] is None
+
+    row.update(warehouse_id=None)
+    monkeypatch.setattr(wh, "_idle_time_cache", None)
+    out = asyncio.run(wh.get_warehouse_idle_time("2026-10-01", "2026-10-07", None))
+    assert out["warehouses"][0]["warehouse_name"] == "Unattributed"

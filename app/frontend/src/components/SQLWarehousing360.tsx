@@ -3,6 +3,7 @@ import { formatIdentity, useSpNameMap } from "@/utils/identity";
 import { createPortal } from "react-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useFeatureAvailability } from "@/hooks/useFeatureAvailability";
+import { fetchJson } from "@/hooks/useBillingData";
 import {
   AreaChart,
   Area,
@@ -1416,7 +1417,7 @@ export function OptimizeMethodologyPanel() {
 }
 
 export function WarehouseRightsizingView({ host }: { host?: string | null }) {
-  const { data: warehouseHealth, isLoading: healthLoading } = useQuery<{
+  const { data: warehouseHealth, isLoading: healthLoading, error: healthError, refetch: refetchHealth } = useQuery<{
     available: boolean;
     reason?: string;
     reason_detail?: string;
@@ -1431,10 +1432,12 @@ export function WarehouseRightsizingView({ host }: { host?: string | null }) {
     warehouses_analyzed: number;
   }>({
     queryKey: ["warehouse-health"],
-    queryFn: () => fetch("/api/sql/warehouse-health").then(r => r.json()),
+    queryFn: () => fetchJson("/api/sql/warehouse-health"),
     staleTime: 30 * 60 * 1000,
     retry: false,
   });
+  // IDLE_RUNNING is reported by the idle-time table, so the empty state must ignore it too.
+  const healthRecs = (warehouseHealth?.recommendations ?? []).filter((r) => r.recommendation_type !== "IDLE_RUNNING");
   const HEALTH_ISSUE_OPTIONS = [
     { value: "OVER_SCALED", label: "Over-Scaled" },
     { value: "OVERSIZED", label: "Oversized" },
@@ -1466,10 +1469,10 @@ export function WarehouseRightsizingView({ host }: { host?: string | null }) {
           </h3>
         </div>
         <div className="flex items-center gap-3">
-          {warehouseHealth && (
+          {typeof warehouseHealth?.warehouses_analyzed === "number" && (
             <span className="text-xs text-gray-500">{warehouseHealth.warehouses_analyzed} warehouse{warehouseHealth.warehouses_analyzed !== 1 ? "s" : ""} analyzed</span>
           )}
-          {warehouseHealth?.recommendations?.length ? (
+          {healthRecs.length ? (
             <>
               <div className="relative" ref={healthIssueDropdownRef}>
                 <button
@@ -1522,6 +1525,12 @@ export function WarehouseRightsizingView({ host }: { host?: string | null }) {
         <div className="flex h-24 items-center justify-center">
           <div className="h-6 w-6 animate-spin rounded-full border-2 border-gray-200" style={{ borderTopColor: C.lava }} />
         </div>
+      ) : healthError ? (
+        <SourceCapabilityNotice
+          title="Rightsizing recommendations failed to load"
+          description={healthError.message}
+          onRetry={() => { void refetchHealth(); }}
+        />
       ) : warehouseHealth?.available === false && warehouseHealth.reason === "shared_scope_unsupported" ? (
         <SourceCapabilityNotice
           title="Rightsizing detail is not included in this source"
@@ -1534,7 +1543,7 @@ export function WarehouseRightsizingView({ host }: { host?: string | null }) {
           description="Warehouse health data unavailable. Requires system.compute.warehouse_events access."
           requiredAggregates={["warehouse_health_summary"]}
         />
-      ) : !warehouseHealth?.recommendations.length ? (
+      ) : !healthRecs.length ? (
         <div className="rounded-lg p-4 text-sm" style={{ background: C.oatPage, color: C.greenInk }}>
           <span className="inline-flex items-center gap-2">
             <svg className="h-4 w-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" /></svg>
@@ -1552,10 +1561,9 @@ export function WarehouseRightsizingView({ host }: { host?: string | null }) {
           OVER_SCALED: "Over-Scaled",
           OVERSIZED: "Oversized",
         };
-        const filtered = warehouseHealth.recommendations
-          .filter((r) => r.recommendation_type !== "IDLE_RUNNING")
+        const filtered = healthRecs
           .filter((r) => healthIssueFilter.length === 0 || healthIssueFilter.includes(r.recommendation_type))
-          .filter((r) => !healthSearch || (r.warehouse_name || r.warehouse_id).toLowerCase().includes(healthSearch.toLowerCase()));
+          .filter((r) => !healthSearch || (r.warehouse_name || r.warehouse_id || "").toLowerCase().includes(healthSearch.toLowerCase()));
         const totalPages = Math.max(1, Math.ceil(filtered.length / HEALTH_PAGE_SIZE));
         const safePage = Math.min(healthPage, totalPages);
         const pageRecs = filtered.slice((safePage - 1) * HEALTH_PAGE_SIZE, safePage * HEALTH_PAGE_SIZE);
@@ -1663,16 +1671,16 @@ export function WarehouseIdleTimeView({
   if (endDate) params.set("end_date", endDate);
   if (workspaceIds && workspaceIds.length > 0) params.set("workspace_ids", workspaceIds.join(","));
 
-  const { data, isLoading } = useQuery<{
+  const { data, isLoading, error: idleError, refetch: refetchIdle } = useQuery<{
     available: boolean;
     reason?: string;
     reason_detail?: string;
     serverless_detected: boolean;
     error?: string;
     warehouses: Array<{
-      warehouse_id: string;
-      warehouse_name: string;
-      warehouse_size: string;
+      warehouse_id: string | null;
+      warehouse_name: string | null;
+      warehouse_size: string | null;
       warehouse_type: string;
       workspace_id: string;
       uptime_source?: string;
@@ -1693,10 +1701,11 @@ export function WarehouseIdleTimeView({
   }>({
     queryKey: ["warehouse-idle-time", startDate, endDate, workspaceIds?.join(",")],
     queryFn: () =>
-      fetch(`/api/sql/warehouse-health/idle-time?${params}`).then(r => r.json()),
+      fetchJson(`/api/sql/warehouse-health/idle-time?${params}`),
     staleTime: 30 * 60 * 1000,
     retry: false,
   });
+  const idleWarehouses = useMemo(() => data?.warehouses ?? [], [data?.warehouses]);
   const [idlePage, setIdlePage] = useState(1);
   const [idleSearch, setIdleSearch] = useState("");
   const [idleSizeFilter, setIdleSizeFilter] = useState<string[]>([]);
@@ -1710,15 +1719,15 @@ export function WarehouseIdleTimeView({
   const IDLE_PAGE_SIZE = 10;
 
   const availableIdleSizes = useMemo(
-    () => Array.from(new Set((data?.warehouses || []).map(w => w.warehouse_size))).filter(Boolean).sort() as string[],
-    [data?.warehouses],
+    () => Array.from(new Set(idleWarehouses.map(w => w.warehouse_size))).filter(Boolean).sort() as string[],
+    [idleWarehouses],
   );
   // Normalize warehouse_type to the two labels the dropdown actually shows
   // (Serverless vs Classic). Raw values include 'CLASSIC', 'PRO', 'SERVERLESS';
   // Pro is a classic-family variant and should not appear as a duplicate row.
   const availableIdleTypes = useMemo(
-    () => Array.from(new Set((data?.warehouses || []).map(w => w.warehouse_type))).filter(Boolean) as string[],
-    [data?.warehouses],
+    () => Array.from(new Set(idleWarehouses.map(w => w.warehouse_type))).filter(Boolean) as string[],
+    [idleWarehouses],
   );
 
   useEffect(() => {
@@ -1768,9 +1777,9 @@ export function WarehouseIdleTimeView({
             <InfoTooltip text="Idle time = warehouse uptime minus busy time (union of query intervals — bounded by wall-clock even under concurrency). Est. Idle Spend is only computed for CLASSIC single-cluster warehouses because serverless bills per-query with warm-hold at a reduced rate, and multi-cluster warehouses have concurrent cluster billing that wall-clock uptime can't reconstruct. For serverless rows, look at Warm-Hold (minutes held ready between queries, capped at auto_stop_mins) and the 'low conf.' badge — the actionable knob is auto_stop_mins, not raw idle %." />
           </h3>
         </div>
-        {data?.available && data.warehouses.length > 0 && (() => {
-          const distinctSizes = Array.from(new Set(data.warehouses.map(w => w.warehouse_size))).filter(Boolean).sort();
-          const distinctTypes = Array.from(new Set(data.warehouses.map(w => w.warehouse_type))).filter(Boolean);
+        {data?.available && idleWarehouses.length > 0 && (() => {
+          const distinctSizes = availableIdleSizes;
+          const distinctTypes = availableIdleTypes;
           return (
             <div className="flex items-center gap-2 shrink-0">
               {distinctSizes.length > 0 && (
@@ -1858,6 +1867,12 @@ export function WarehouseIdleTimeView({
         <div className="flex h-24 items-center justify-center">
           <div className="h-6 w-6 animate-spin rounded-full border-2 border-gray-200" style={{ borderTopColor: C.lava }} />
         </div>
+      ) : idleError ? (
+        <SourceCapabilityNotice
+          title="Idle time analysis failed to load"
+          description={idleError.message}
+          onRetry={() => { void refetchIdle(); }}
+        />
       ) : data?.available === false && data.reason === "shared_scope_unsupported" ? (
         <SourceCapabilityNotice
           title="Idle-time detail is not included in this source"
@@ -1872,17 +1887,17 @@ export function WarehouseIdleTimeView({
             : "Idle time data unavailable. Requires access to system.compute.warehouse_events and system.query.history."}
           requiredAggregates={["warehouse_idle_summary"]}
         />
-      ) : !data?.warehouses.length ? (
+      ) : !idleWarehouses.length ? (
         <div className="rounded-lg border border-gray-100 bg-gray-50 p-4 text-sm text-gray-500">
           {data?.serverless_detected
             ? "Idle time via lifecycle events is not available for Serverless SQL Warehouses. Serverless warehouses scale per-query and do not emit start/stop events."
             : "No warehouse uptime data found for this date range."}
         </div>
       ) : (() => {
-        const filteredWarehouses = data.warehouses
-          .filter(w => idleSizeFilter.length === 0 || idleSizeFilter.includes(w.warehouse_size))
+        const filteredWarehouses = idleWarehouses
+          .filter(w => idleSizeFilter.length === 0 || !w.warehouse_size || idleSizeFilter.includes(w.warehouse_size))
           .filter(w => idleTypeFilter.length === 0 || idleTypeFilter.includes(w.warehouse_type))
-          .filter(w => !idleSearch || w.warehouse_name.toLowerCase().includes(idleSearch.toLowerCase()));
+          .filter(w => !idleSearch || (w.warehouse_name || w.warehouse_id || "").toLowerCase().includes(idleSearch.toLowerCase()));
         const totalIdlePages = Math.max(1, Math.ceil(filteredWarehouses.length / IDLE_PAGE_SIZE));
         const safeIdlePage = Math.min(idlePage, totalIdlePages);
         const pageWarehouses = filteredWarehouses.slice((safeIdlePage - 1) * IDLE_PAGE_SIZE, safeIdlePage * IDLE_PAGE_SIZE);
@@ -1913,13 +1928,13 @@ export function WarehouseIdleTimeView({
                   {pageWarehouses.map((wh, i) => (
                     <tr key={`${wh.warehouse_id}-${i}`} className="hover:bg-gray-50">
                       <td className="px-4 py-3 font-medium text-gray-900">
-                        {host ? (
+                        {host && wh.warehouse_id ? (
                           <a href={`${host}/sql/warehouses/${wh.warehouse_id}/edit`} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline">
-                            {wh.warehouse_name}
+                            {wh.warehouse_name || wh.warehouse_id}
                           </a>
-                        ) : wh.warehouse_name}
+                        ) : (wh.warehouse_name || wh.warehouse_id)}
                       </td>
-                      <td className="px-4 py-3 text-left text-sm text-gray-500">{wh.warehouse_size}</td>
+                      <td className="px-4 py-3 text-left text-sm text-gray-500">{wh.warehouse_size || "—"}</td>
                       <td className="px-4 py-3 text-left">
                         <span className={`inline-flex rounded-full px-2 py-0.5 text-xs font-medium ${wh.warehouse_type === 'SERVERLESS' ? 'bg-cyan-100 text-cyan-700' : 'bg-gray-100 text-gray-600'}`}>
                           {wh.warehouse_type === 'SERVERLESS' ? 'Serverless' : 'Classic'}
@@ -1990,7 +2005,7 @@ export function WarehouseIdleTimeView({
             </div>
             {totalIdlePages > 1 && (
               <div className="mt-3 flex items-center justify-between text-xs text-gray-500">
-                <span>{filteredWarehouses.length} warehouse{filteredWarehouses.length !== 1 ? "s" : ""}{filteredWarehouses.length !== data.warehouses.length ? ` of ${data.warehouses.length}` : ""}</span>
+                <span>{filteredWarehouses.length} warehouse{filteredWarehouses.length !== 1 ? "s" : ""}{filteredWarehouses.length !== idleWarehouses.length ? ` of ${idleWarehouses.length}` : ""}</span>
                 <div className="flex items-center gap-1">
                   <button onClick={() => setIdlePage((p) => Math.max(1, p - 1))} disabled={safeIdlePage <= 1} className="rounded px-2 py-1 disabled:opacity-40 hover:bg-gray-100">‹ Prev</button>
                   <span className="px-2">Page {safeIdlePage} of {totalIdlePages}</span>
