@@ -3132,83 +3132,120 @@ async def set_pricing_mode(data: dict) -> dict[str, Any]:
     return {"use_account_prices": use_account_prices, "status": "ok"}
 
 
-# Usage-weighted blended account price multiplier query
+# Usage-weighted blended account price multiplier query. Weighted by usage in the
+# caller's date range / workspaces so the ratio matches the figures it scales.
+# SKUs with no negotiated rate are billed at list, so they count at list (ratio 1)
+# instead of being dropped — dropping them spread the discount onto undiscounted SKUs.
 _ACCOUNT_PRICE_MULTIPLIER_SQL = """
-WITH recent_usage AS (
+WITH range_usage AS (
   SELECT
     u.sku_name,
     u.cloud,
     SUM(u.usage_quantity) AS total_quantity
   FROM system.billing.usage u
-  WHERE u.usage_date >= CURRENT_DATE - INTERVAL 30 DAY
+  WHERE u.usage_date BETWEEN :start_date AND :end_date
     AND u.usage_quantity > 0
+    {workspace_filter}
   GROUP BY u.sku_name, u.cloud
+),
+current_account_prices AS (
+  SELECT sku_name, cloud, currency_code, MIN(pricing.default) AS account_price
+  FROM system.billing.account_prices
+  WHERE (price_end_time IS NULL OR price_end_time > CURRENT_TIMESTAMP)
+    AND pricing.default > 0
+  GROUP BY sku_name, cloud, currency_code
 ),
 price_comparison AS (
   SELECT
-    cu.sku_name,
-    cu.total_quantity,
-    COALESCE(lp.pricing.default, 0)   AS list_price,
-    COALESCE(ap.pricing.default, 0)   AS account_price
-  FROM recent_usage cu
-  LEFT JOIN system.billing.list_prices lp
-    ON cu.sku_name = lp.sku_name AND cu.cloud = lp.cloud AND lp.price_end_time IS NULL
-  LEFT JOIN system.billing.account_prices ap
-    ON cu.sku_name = ap.sku_name AND cu.cloud = ap.cloud AND ap.price_end_time IS NULL
+    ru.sku_name,
+    ru.total_quantity,
+    lp.pricing.default AS list_price,
+    COALESCE(ap.account_price, lp.pricing.default) AS account_price,
+    ap.sku_name IS NOT NULL AS has_account_price
+  FROM range_usage ru
+  JOIN system.billing.list_prices lp
+    ON ru.sku_name = lp.sku_name AND ru.cloud = lp.cloud AND lp.price_end_time IS NULL
+  LEFT JOIN current_account_prices ap
+    ON ru.sku_name = ap.sku_name AND ru.cloud = ap.cloud AND lp.currency_code = ap.currency_code
   WHERE lp.pricing.default > 0
-    AND ap.pricing.default > 0
 )
 SELECT
   SUM(total_quantity * account_price) / NULLIF(SUM(total_quantity * list_price), 0) AS multiplier,
-  COUNT(DISTINCT sku_name) AS sku_count,
+  COUNT(DISTINCT CASE WHEN has_account_price THEN sku_name END) AS sku_count,
+  COUNT(DISTINCT sku_name) AS priced_sku_count,
   SUM(total_quantity * list_price)   AS weighted_list_spend,
   SUM(total_quantity * account_price) AS weighted_account_spend
 FROM price_comparison
 """
 
+_UNAVAILABLE_MULTIPLIER = {"multiplier": 1.0, "available": False, "sku_count": 0, "discount_percent": 0}
+
 
 @router.get("/account-price-multiplier")
-async def get_account_price_multiplier() -> dict[str, Any]:
+async def get_account_price_multiplier(
+    start_date: str | None = None,
+    end_date: str | None = None,
+    workspace_ids: str | None = None,
+) -> dict[str, Any]:
     """Compute a usage-weighted blended account price multiplier.
 
-    Returns the ratio of account-negotiated prices to list prices,
-    weighted by recent usage quantity. Used by the frontend to scale
-    all spend figures when 'use_account_prices' is enabled.
+    Returns the ratio of account-negotiated prices to list prices, weighted by
+    usage in [start_date, end_date] (default: last 30 days) for the selected
+    workspaces. The frontend scales the Overview and infrastructure spend
+    figures by it when 'use_account_prices' is enabled; other tabs stay at list.
 
-    Returns multiplier=1.0 if account_prices table is unavailable.
+    Returns multiplier=1.0 if account_prices is unavailable or has no rates.
     """
+    from datetime import date, timedelta
+
+    from backend import workspace_filter as wf
     from backend.db import execute_query as _exec
 
     pricing_settings = _load_pricing_settings()
     use_account_prices = pricing_settings.get("use_account_prices", False)
 
     if not use_account_prices:
-        return {"multiplier": 1.0, "available": False, "sku_count": 0, "discount_percent": 0}
+        return dict(_UNAVAILABLE_MULTIPLIER)
+
+    params = {
+        "start_date": start_date or (date.today() - timedelta(days=30)).isoformat(),
+        "end_date": end_date or date.today().isoformat(),
+    }
+    id_list = [i.strip() for i in workspace_ids.split(",") if i.strip()] if workspace_ids else None
+    sql = _ACCOUNT_PRICE_MULTIPLIER_SQL.replace(
+        "{workspace_filter}", wf.build_ws_filter_clause(col="u.workspace_id", id_list=id_list)
+    )
 
     try:
-        rows = _exec(_ACCOUNT_PRICE_MULTIPLIER_SQL)
+        rows = _exec(sql, params)
         if not rows or rows[0].get("multiplier") is None:
-            return {"multiplier": 1.0, "available": False, "sku_count": 0, "discount_percent": 0}
+            return dict(_UNAVAILABLE_MULTIPLIER)
         row = rows[0]
-        multiplier = float(row["multiplier"])
         sku_count = int(row.get("sku_count") or 0)
+        if sku_count == 0:
+            return {**_UNAVAILABLE_MULTIPLIER,
+                    "message": "No negotiated rates in system.billing.account_prices for SKUs used in this range"}
+        multiplier = float(row["multiplier"])
         discount_percent = round((1.0 - multiplier) * 100, 2)
         return {
             "multiplier": multiplier,
             "available": True,
             "sku_count": sku_count,
+            "priced_sku_count": int(row.get("priced_sku_count") or 0),
             "discount_percent": discount_percent,
             "weighted_list_spend": float(row.get("weighted_list_spend") or 0),
             "weighted_account_spend": float(row.get("weighted_account_spend") or 0),
+            "start_date": params["start_date"],
+            "end_date": params["end_date"],
         }
     except Exception as e:
         err = str(e).lower()
         if any(kw in err for kw in ("table", "not found", "does not exist", "cannot resolve")):
             logger.info("system.billing.account_prices not available for multiplier computation")
-            return {"multiplier": 1.0, "available": False, "sku_count": 0, "discount_percent": 0,
+            return {**_UNAVAILABLE_MULTIPLIER,
                     "message": "system.billing.account_prices not available (private preview)"}
         logger.warning(f"Account price multiplier computation failed: {e}")
-        return {"multiplier": 1.0, "available": False, "sku_count": 0, "discount_percent": 0}
+        return dict(_UNAVAILABLE_MULTIPLIER)
 
 
 # ── Unified app settings (Phase 2 aggregator) ─────────────────────────────────

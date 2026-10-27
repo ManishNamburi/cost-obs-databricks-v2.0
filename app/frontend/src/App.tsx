@@ -456,8 +456,8 @@ function AccountPricingBanner() {
         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
       </svg>
       {available
-        ? `Account prices active — ${discountPercent.toFixed(1)}% discount applied across ${skuCount} SKUs (from system.billing.account_prices)`
-        : "Account prices mode active — system.billing.account_prices not available, showing list prices"}
+        ? `Account prices active — ${discountPercent.toFixed(1)}% blended discount (${skuCount} SKUs with negotiated rates, from system.billing.account_prices) applied to Overview and infrastructure spend. Other tabs show list prices.`
+        : "Account prices mode active — no negotiated rates found in system.billing.account_prices, showing list prices"}
     </div>
   );
 }
@@ -714,6 +714,7 @@ function Dashboard() {
     multiplier: pricingMultiplier,
     useAccountPrices,
     available: accountPricesAvailable,
+    setPricingScope,
   } = usePricing();
 
   // Central warehouse warming poller — single source of truth for warehouse state.
@@ -818,6 +819,10 @@ function Dashboard() {
   }, [bundle?.timeseries, pricingMultiplier, applyPricing]);
 
   const _wsIds = selectedWorkspaceIds.length ? selectedWorkspaceIds : undefined;
+  // Weight the blended account-price discount by the same range/workspaces it scales.
+  useEffect(() => {
+    setPricingScope(dateRange.startDate, dateRange.endDate, _wsIds);
+  }, [setPricingScope, dateRange.startDate, dateRange.endDate, _wsIds]);
 
   // Viewer tabs read Lakebase. Connected invoices and SQL 360 per-query drill still wait on the warehouse.
   const { data: sqlBreakdown, isLoading: sqlLoading } = useSqlBreakdown(dateRange, _wsIds, true);
