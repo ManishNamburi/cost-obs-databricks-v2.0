@@ -10,7 +10,7 @@ system.query.history to detect underutilized warehouses via three heuristics:
 import asyncio
 import logging
 import time
-from datetime import datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from typing import Any
 
 from fastapi import APIRouter
@@ -571,11 +571,11 @@ async def get_warehouse_idle_time(
     the approximation.
     """
     global _idle_time_cache, _idle_time_cache_ts
-    from backend.db import get_default_start_date, get_default_end_date
     from backend import workspace_filter as wf
 
-    sd = start_date or get_default_start_date()
-    ed = end_date or get_default_end_date()
+    # backend.db has no date-default helpers; importing them made every request 500.
+    sd = start_date or (date.today() - timedelta(days=30)).isoformat()
+    ed = end_date or date.today().isoformat()
     if _warehouse_scope_blocked():
         return {
             **_shared_scope_unavailable(),
@@ -595,11 +595,10 @@ async def get_warehouse_idle_time(
     ws_clause = wf.build_ws_filter_clause(col="workspace_id", id_list=id_list)
     ws_clause_wh = wf.build_ws_filter_clause(col="workspace_id", id_list=id_list)
 
-    from datetime import date as _date, timedelta as _timedelta
-    _ed_dt = _date.fromisoformat(ed)
+    _ed_dt = date.fromisoformat(ed)
     params = {
         "start_ts": f"{sd} 00:00:00",
-        "end_ts": (_ed_dt + _timedelta(days=1)).strftime("%Y-%m-%d 00:00:00"),
+        "end_ts": (_ed_dt + timedelta(days=1)).strftime("%Y-%m-%d 00:00:00"),
         "start_date": sd,
         "end_date": ed,
     }
@@ -623,7 +622,9 @@ async def get_warehouse_idle_time(
         _est_idle = row.get("estimated_idle_spend")
         warehouses.append({
             "warehouse_id": row.get("warehouse_id"),
-            "warehouse_name": row.get("warehouse_name"),
+            # Gold rows carry NULL for '__na__' names (and ids, for the unattributed bucket);
+            # match the live SQL's COALESCE to the id.
+            "warehouse_name": row.get("warehouse_name") or row.get("warehouse_id") or "Unattributed",
             "warehouse_size": row.get("warehouse_size"),
             "warehouse_type": row.get("warehouse_type") or "CLASSIC",
             "workspace_id": str(row.get("workspace_id") or ""),
@@ -661,7 +662,7 @@ async def get_warehouse_idle_time(
             "low_confidence": bool(row.get("low_confidence") or False),
         })
     lookback_min = max((
-        ( _date.fromisoformat(ed) - _date.fromisoformat(sd) ).days + 1
+        ( date.fromisoformat(ed) - date.fromisoformat(sd) ).days + 1
     ) * 1440, 1)
     for wh in warehouses:
         if (wh.get("warehouse_type") == "SERVERLESS"
