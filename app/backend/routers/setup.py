@@ -2306,9 +2306,11 @@ async def get_readiness(refresh: bool = False) -> dict[str, Any]:
 async def list_workspaces() -> dict:
     """Return all workspaces in the account for the setup wizard workspace picker.
 
-    Queries the app's own daily_workspace_breakdown table (already created by
-    the time the wizard reaches this step) rather than system.access.workspaces_latest,
-    which requires a separate schema grant the SP does not hold.
+    Queries the app's own daily_workspace_breakdown table rather than
+    system.access.workspaces_latest, which requires a separate schema grant the SP
+    may not hold. That MV is often still building when the wizard reaches this step
+    (Create Tables can be skipped and keeps running in the background), so an empty
+    or missing MV falls back to the top-nav filter's list (/api/billing/workspaces).
     """
     from backend.db import execute_query, get_catalog_schema
     try:
@@ -2321,7 +2323,7 @@ async def list_workspaces() -> dict:
             WHERE workspace_id IS NOT NULL
             GROUP BY workspace_id
             ORDER BY MAX(workspace_name)
-        """)
+        """, no_cache=True)
         workspaces = []
         for r in (rows or []):
             wid = r.get("workspace_id")
@@ -2340,52 +2342,24 @@ async def list_workspaces() -> dict:
             })
         if workspaces:
             return {"workspaces": workspaces}
-        logger.info("list-workspaces: daily_workspace_breakdown empty — falling back to system.billing.usage")
+        logger.info("list-workspaces: daily_workspace_breakdown empty — using the top-nav workspace list")
     except Exception as e:
-        logger.warning("list-workspaces: daily_workspace_breakdown unavailable (%s) — falling back to system.billing.usage", e)
+        logger.warning("list-workspaces: daily_workspace_breakdown unavailable (%s) — using the top-nav workspace list", e)
 
-    # The MV is often still building (Create Tables can be skipped and keeps running
-    # in the background), which left the picker empty. Fall back to the same source as
-    # the top-nav filter: system.billing.usage, with names from workspaces_latest.
-    try:
-        try:
-            rows = await asyncio.to_thread(execute_query, """
-                SELECT
-                    CAST(u.workspace_id AS STRING) AS workspace_id,
-                    MAX(wsl.workspace_name) AS workspace_name
-                FROM system.billing.usage u
-                LEFT JOIN system.access.workspaces_latest wsl
-                    ON CAST(u.workspace_id AS BIGINT) = CAST(wsl.workspace_id AS BIGINT)
-                WHERE u.usage_date >= DATE_SUB(CURRENT_DATE(), 365)
-                  AND u.workspace_id IS NOT NULL
-                GROUP BY u.workspace_id
-                ORDER BY COALESCE(MAX(wsl.workspace_name), CAST(u.workspace_id AS STRING))
-            """, no_cache=True)
-        except Exception as e:
-            logger.warning("list-workspaces: workspaces_latest unavailable (%s), falling back to IDs only", e)
-            rows = await asyncio.to_thread(execute_query, """
-                SELECT CAST(workspace_id AS STRING) AS workspace_id, CAST(NULL AS STRING) AS workspace_name
-                FROM system.billing.usage
-                WHERE usage_date >= DATE_SUB(CURRENT_DATE(), 365)
-                  AND workspace_id IS NOT NULL
-                GROUP BY workspace_id
-                ORDER BY workspace_id
-            """, no_cache=True)
-        workspaces = []
-        for r in (rows or []):
-            wid = r.get("workspace_id")
-            if not wid:
-                continue
-            raw_name = (r.get("workspace_name") or "").strip()
-            workspaces.append({
-                "id": wid,
-                "name": raw_name or wid,
-                "historical": (not raw_name) or (raw_name == wid),
-            })
-        return {"workspaces": workspaces}
-    except Exception as e:
-        logger.warning("list-workspaces failed: %s", e)
-        return {"workspaces": [], "error": str(e)}
+    from datetime import date, timedelta
+    from backend.routers.billing import get_workspace_list
+    data = await get_workspace_list(
+        start_date=(date.today() - timedelta(days=365)).isoformat(),
+        end_date=date.today().isoformat(),
+    )
+    workspaces = [
+        {"id": w["id"], "name": w.get("name") or w["id"], "historical": bool(w.get("historical"))}
+        for w in data.get("workspaces", [])
+    ]
+    out: dict = {"workspaces": workspaces}
+    if data.get("error"):
+        out["error"] = data["error"]
+    return out
 
 
 @router.get("/list-catalogs")
@@ -2483,6 +2457,68 @@ async def preflight_catalog_endpoint(request: Request) -> dict:
     return await loop.run_in_executor(None, _check)
 
 
+def _workspace_filter_table() -> str:
+    from backend.db import get_catalog_schema
+    catalog, schema = get_catalog_schema()
+    return f"`{catalog}`.`{schema}`.app_workspace_filter"
+
+
+def _parse_saved_workspace_ids(row: dict) -> list[str]:
+    """Read either app_workspace_filter schema.
+
+    Create Tables (settings._ensure_workspace_filter_table) creates
+    (workspace_ids_json, updated_at); deployments that saved before that step ran
+    have the older (workspace_ids) comma-separated column.
+    """
+    import re as _re
+    raw_json = row.get("workspace_ids_json")
+    if raw_json:
+        try:
+            ids = json.loads(raw_json)
+        except (TypeError, ValueError):
+            ids = []
+        if not isinstance(ids, list):
+            ids = []
+    else:
+        ids = str(row.get("workspace_ids") or "").split(",")
+    return [s for s in (str(i).strip() for i in ids) if s and _re.match(r'^[a-zA-Z0-9_\-\.]+$', s)]
+
+
+def _read_saved_workspace_ids() -> list[str]:
+    """The workspace pool saved in Delta. [] means all workspaces, and is not a lock.
+
+    Returns [] when the table doesn't exist yet; raises on any other error.
+    """
+    from backend.db import execute_query
+    from backend.routers.settings import _table_missing
+    try:
+        rows = execute_query(f"SELECT * FROM {_workspace_filter_table()} LIMIT 1", no_cache=True)
+    except Exception as e:
+        if _table_missing(e):
+            return []
+        raise
+    return _parse_saved_workspace_ids(rows[0]) if rows else []
+
+
+def _write_saved_workspace_ids(ids: list[str]) -> None:
+    """Replace the saved pool. An empty list clears it (all workspaces, unlocked)."""
+    from backend.db import execute_query, execute_write
+    from backend.routers.settings import _ensure_workspace_filter_table
+    _ensure_workspace_filter_table()
+    table = _workspace_filter_table()
+    cols = {str(r.get("col_name")) for r in execute_query(f"DESCRIBE TABLE {table}", no_cache=True)}
+    execute_write(f"DELETE FROM {table}")
+    if not ids:
+        return
+    if "workspace_ids_json" in cols:
+        execute_write(
+            f"INSERT INTO {table} (workspace_ids_json, updated_at) VALUES (:v, current_timestamp())",
+            {"v": json.dumps(ids)},
+        )
+    else:
+        execute_write(f"INSERT INTO {table} (workspace_ids) VALUES (:v)", {"v": ",".join(ids)})
+
+
 @router.get("/workspace-filter")
 async def get_workspace_filter() -> dict:
     """Return the current workspace filter and whether it is locked (already configured during setup)."""
@@ -2496,25 +2532,16 @@ async def get_workspace_filter() -> dict:
     except (FileNotFoundError, json.JSONDecodeError):
         pass
 
-    # Locked = Delta table has a row (written on first save, survives redeploys)
+    # Locked = Delta holds a non-empty pool (written on first save, survives redeploys)
     locked = False
     try:
-        from backend.db import execute_query, get_catalog_schema
-        catalog, schema = get_catalog_schema()
-        rows = await asyncio.to_thread(execute_query, 
-            f"SELECT workspace_ids FROM `{catalog}`.`{schema}`.app_workspace_filter LIMIT 1",
-            no_cache=True,
-        )
-        # An empty row ("all workspaces", saved by older builds) is not a lock.
-        if rows and str(rows[0].get("workspace_ids") or "").strip():
+        saved = await asyncio.to_thread(_read_saved_workspace_ids)
+        if saved:
             locked = True
             if not workspace_ids:
-                workspace_ids = [
-                    i.strip() for i in str(rows[0]["workspace_ids"]).split(",")
-                    if i.strip() and _re.match(r'^[a-zA-Z0-9_\-\.]+$', i.strip())
-                ]
-    except Exception:
-        pass
+                workspace_ids = saved
+    except Exception as e:
+        logger.warning("workspace-filter: could not read saved pool: %s", e)
 
     return {"workspace_ids": workspace_ids, "locked": locked}
 
@@ -2531,14 +2558,8 @@ def restore_workspace_filter_from_delta() -> None:
     if os.path.exists(settings_path):
         return
     try:
-        from backend.db import execute_query, get_catalog_schema
-        catalog, schema = get_catalog_schema()
-        rows = execute_query(
-            f"SELECT workspace_ids FROM `{catalog}`.`{schema}`.app_workspace_filter LIMIT 1",
-            no_cache=True,
-        )
-        if rows and rows[0].get("workspace_ids"):
-            ids = [i.strip() for i in str(rows[0]["workspace_ids"]).split(",") if i.strip()]
+        ids = _read_saved_workspace_ids()
+        if ids:
             os.makedirs(SETTINGS_DIR, exist_ok=True)
             with open(settings_path, "w") as f:
                 json.dump({"workspace_ids": ids}, f)
@@ -2551,7 +2572,10 @@ def restore_workspace_filter_from_delta() -> None:
 
 @router.post("/save-workspace-filter")
 async def save_workspace_filter(request: Request) -> dict:
-    """Persist selected workspace IDs to .settings/workspace_filter.json and Delta. Admin only."""
+    """Persist selected workspace IDs to .settings/workspace_filter.json and Delta. Admin only.
+
+    An empty list means all workspaces: it clears the saved pool and does not lock.
+    """
     import time as _time
     import re as _re
     t0 = _time.monotonic()
@@ -2572,22 +2596,15 @@ async def save_workspace_filter(request: Request) -> dict:
 
     # Lock check — workspace filter is one-time, set during initial setup only
     try:
-        from backend.db import execute_query, get_catalog_schema
-        _catalog, _schema = get_catalog_schema()
-        _rows = await asyncio.to_thread(execute_query, 
-            f"SELECT COUNT(*) as cnt FROM `{_catalog}`.`{_schema}`.app_workspace_filter "
-            f"WHERE TRIM(COALESCE(workspace_ids, '')) != ''",
-            no_cache=True,
+        saved = await asyncio.to_thread(_read_saved_workspace_ids)
+    except Exception as e:
+        logger.warning("save-workspace-filter: lock check failed, proceeding: %s", e)
+        saved = []
+    if saved:
+        raise HTTPException(
+            status_code=409,
+            detail="Workspace filter is already configured and cannot be changed after initial setup.",
         )
-        if _rows and int(_rows[0].get("cnt", 0)) > 0:
-            raise HTTPException(
-                status_code=409,
-                detail="Workspace filter is already configured and cannot be changed after initial setup.",
-            )
-    except HTTPException:
-        raise
-    except Exception:
-        pass  # Table doesn't exist yet — first save, proceed normally
 
     # Write to file (fast path for running workers)
     settings_path = os.path.join(SETTINGS_DIR, "workspace_filter.json")
@@ -2602,33 +2619,9 @@ async def save_workspace_filter(request: Request) -> dict:
         logger.error("save-workspace-filter: write failed after %.1fms — path=%s error=%s", elapsed_ms, settings_path, e)
         raise HTTPException(status_code=500, detail=f"Failed to persist workspace filter: {e}")
 
-    # An empty selection means "all workspaces" (no filter). Don't persist it to Delta:
-    # a row there locks the filter permanently, and "Continue (all workspaces)" is also
-    # the only way out when the picker failed to load — which would lock admins out of
-    # ever scoping this deployment.
-    if not valid_ids:
-        logger.info("save-workspace-filter: empty selection — not locking")
-        return {"saved": valid_ids}
-
     # Write to Delta (survives redeploys — restored to file on next startup)
     try:
-        from backend.db import execute_query, get_catalog_schema
-        catalog, schema = get_catalog_schema()
-        ids_csv = ",".join(valid_ids)
-        await asyncio.to_thread(
-            execute_query,
-            f"CREATE TABLE IF NOT EXISTS `{catalog}`.`{schema}`.app_workspace_filter "
-            f"(workspace_ids STRING) USING DELTA",
-            no_cache=True,
-        )
-        await asyncio.to_thread(
-            execute_query,
-            f"MERGE INTO `{catalog}`.`{schema}`.app_workspace_filter AS t "
-            f"USING (SELECT '{ids_csv}' AS workspace_ids) AS s ON TRUE "
-            f"WHEN MATCHED THEN UPDATE SET t.workspace_ids = s.workspace_ids "
-            f"WHEN NOT MATCHED THEN INSERT (workspace_ids) VALUES (s.workspace_ids)",
-            no_cache=True,
-        )
+        await asyncio.to_thread(_write_saved_workspace_ids, valid_ids)
         logger.info("save-workspace-filter: persisted to Delta in %.1fms", (_time.monotonic() - t0) * 1000)
     except Exception as e:
         logger.warning("save-workspace-filter: Delta write failed (non-fatal — file is primary): %s", e)
