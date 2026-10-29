@@ -2322,7 +2322,7 @@ async def list_workspaces() -> dict:
             FROM `{catalog}`.`{schema}`.daily_workspace_breakdown
             WHERE workspace_id IS NOT NULL
             GROUP BY workspace_id
-            ORDER BY MAX(workspace_name)
+            ORDER BY workspace_name NULLS LAST
         """, no_cache=True)
         workspaces = []
         for r in (rows or []):
