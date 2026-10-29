@@ -172,6 +172,7 @@ export function SetupWizard({ onComplete, onClose, embedded }: SetupWizardProps)
   const [allWorkspaces, setAllWorkspaces] = useState<{ id: string; name: string; historical?: boolean }[]>([]);
   const [selectedWsIds, setSelectedWsIds] = useState<Set<string>>(new Set());
   const [wsSaved, setWsSaved] = useState(false);
+  const [wsSaving, setWsSaving] = useState(false);
   const [wsLocked, setWsLocked] = useState(false);
   const [lockedWsIds, setLockedWsIds] = useState<string[]>([]);
 
@@ -376,18 +377,33 @@ export function SetupWizard({ onComplete, onClose, embedded }: SetupWizardProps)
     }
   }, []);
 
-  const saveWorkspaceFilter = async () => {
-    if (wsLocked) return;
-    const ids = Array.from(selectedWsIds);
+  // Returns false (and shows the error) when the save failed, so the wizard stays on
+  // this step instead of moving on as if the filter had been saved.
+  const saveWorkspaceFilter = async (): Promise<boolean> => {
+    if (wsLocked) return true;
+    // Every workspace selected means "no filter". Sending the explicit list would lock
+    // the pool to today's workspaces and hide any created later.
+    const ids = selectedWsIds.size === allWorkspaces.length ? [] : Array.from(selectedWsIds);
+    setError(null);
+    setWsSaving(true);
     try {
       const res = await fetch("/api/setup/save-workspace-filter", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ workspace_ids: ids }),
       });
-      if (res.ok) setWsSaved(true);
-    } catch {
-      // ignore — not fatal
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        setError(body.detail || `Could not save the workspace filter (HTTP ${res.status})`);
+        return false;
+      }
+      if (ids.length > 0) setWsSaved(true);
+      return true;
+    } catch (e) {
+      setError(`Could not save the workspace filter: ${e}`);
+      return false;
+    } finally {
+      setWsSaving(false);
     }
   };
 
@@ -554,11 +570,11 @@ export function SetupWizard({ onComplete, onClose, embedded }: SetupWizardProps)
                   </button>
                 )}
                 <button
-                  onClick={() => { if (!wsLocked) saveWorkspaceFilter(); goNext(); }}
-                  disabled={wsLoading}
+                  onClick={async () => { if (await saveWorkspaceFilter()) goNext(); }}
+                  disabled={wsLoading || wsSaving}
                   className="btn-brand rounded-lg px-6 py-2 text-sm font-bold text-white transition-colors disabled:opacity-50"
                 >
-                  {selectedWsIds.size === 0 ? "Continue (all workspaces)" : `Save & Continue (${selectedWsIds.size} workspace${selectedWsIds.size !== 1 ? "s" : ""})`}
+                  {selectedWsIds.size === 0 || selectedWsIds.size === allWorkspaces.length ? "Continue (all workspaces)" : `Save & Continue (${selectedWsIds.size} workspace${selectedWsIds.size !== 1 ? "s" : ""})`}
                 </button>
               </div>
             ) : step === "create-tables" ? (
@@ -1240,7 +1256,7 @@ function WorkspaceFilterStep({
         <>
           <div className="flex items-center justify-between">
             <span className="text-xs text-gray-500">
-              {selectedIds.size === 0 ? "All workspaces will be shown" : `${selectedIds.size} of ${workspaces.length} selected`}
+              {selectedIds.size === 0 || selectedIds.size === workspaces.length ? "All workspaces will be shown" : `${selectedIds.size} of ${workspaces.length} selected`}
             </span>
             <div className="flex gap-3">
               <button onClick={onSelectAll} className="text-xs font-medium hover:underline" style={{ color: '#FF3621' }}>Select All</button>
