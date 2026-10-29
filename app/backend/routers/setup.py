@@ -2338,6 +2338,50 @@ async def list_workspaces() -> dict:
                 "name": raw_name or wid,
                 "historical": historical,
             })
+        if workspaces:
+            return {"workspaces": workspaces}
+        logger.info("list-workspaces: daily_workspace_breakdown empty — falling back to system.billing.usage")
+    except Exception as e:
+        logger.warning("list-workspaces: daily_workspace_breakdown unavailable (%s) — falling back to system.billing.usage", e)
+
+    # The MV is often still building (Create Tables can be skipped and keeps running
+    # in the background), which left the picker empty. Fall back to the same source as
+    # the top-nav filter: system.billing.usage, with names from workspaces_latest.
+    try:
+        try:
+            rows = await asyncio.to_thread(execute_query, """
+                SELECT
+                    CAST(u.workspace_id AS STRING) AS workspace_id,
+                    MAX(wsl.workspace_name) AS workspace_name
+                FROM system.billing.usage u
+                LEFT JOIN system.access.workspaces_latest wsl
+                    ON CAST(u.workspace_id AS BIGINT) = CAST(wsl.workspace_id AS BIGINT)
+                WHERE u.usage_date >= DATE_SUB(CURRENT_DATE(), 365)
+                  AND u.workspace_id IS NOT NULL
+                GROUP BY u.workspace_id
+                ORDER BY COALESCE(MAX(wsl.workspace_name), CAST(u.workspace_id AS STRING))
+            """, no_cache=True)
+        except Exception as e:
+            logger.warning("list-workspaces: workspaces_latest unavailable (%s), falling back to IDs only", e)
+            rows = await asyncio.to_thread(execute_query, """
+                SELECT CAST(workspace_id AS STRING) AS workspace_id, CAST(NULL AS STRING) AS workspace_name
+                FROM system.billing.usage
+                WHERE usage_date >= DATE_SUB(CURRENT_DATE(), 365)
+                  AND workspace_id IS NOT NULL
+                GROUP BY workspace_id
+                ORDER BY workspace_id
+            """, no_cache=True)
+        workspaces = []
+        for r in (rows or []):
+            wid = r.get("workspace_id")
+            if not wid:
+                continue
+            raw_name = (r.get("workspace_name") or "").strip()
+            workspaces.append({
+                "id": wid,
+                "name": raw_name or wid,
+                "historical": (not raw_name) or (raw_name == wid),
+            })
         return {"workspaces": workspaces}
     except Exception as e:
         logger.warning("list-workspaces failed: %s", e)
@@ -2461,9 +2505,10 @@ async def get_workspace_filter() -> dict:
             f"SELECT workspace_ids FROM `{catalog}`.`{schema}`.app_workspace_filter LIMIT 1",
             no_cache=True,
         )
-        if rows:
+        # An empty row ("all workspaces", saved by older builds) is not a lock.
+        if rows and str(rows[0].get("workspace_ids") or "").strip():
             locked = True
-            if not workspace_ids and rows[0].get("workspace_ids"):
+            if not workspace_ids:
                 workspace_ids = [
                     i.strip() for i in str(rows[0]["workspace_ids"]).split(",")
                     if i.strip() and _re.match(r'^[a-zA-Z0-9_\-\.]+$', i.strip())
@@ -2530,7 +2575,8 @@ async def save_workspace_filter(request: Request) -> dict:
         from backend.db import execute_query, get_catalog_schema
         _catalog, _schema = get_catalog_schema()
         _rows = await asyncio.to_thread(execute_query, 
-            f"SELECT COUNT(*) as cnt FROM `{_catalog}`.`{_schema}`.app_workspace_filter",
+            f"SELECT COUNT(*) as cnt FROM `{_catalog}`.`{_schema}`.app_workspace_filter "
+            f"WHERE TRIM(COALESCE(workspace_ids, '')) != ''",
             no_cache=True,
         )
         if _rows and int(_rows[0].get("cnt", 0)) > 0:
@@ -2555,6 +2601,14 @@ async def save_workspace_filter(request: Request) -> dict:
         elapsed_ms = (_time.monotonic() - t0) * 1000
         logger.error("save-workspace-filter: write failed after %.1fms — path=%s error=%s", elapsed_ms, settings_path, e)
         raise HTTPException(status_code=500, detail=f"Failed to persist workspace filter: {e}")
+
+    # An empty selection means "all workspaces" (no filter). Don't persist it to Delta:
+    # a row there locks the filter permanently, and "Continue (all workspaces)" is also
+    # the only way out when the picker failed to load — which would lock admins out of
+    # ever scoping this deployment.
+    if not valid_ids:
+        logger.info("save-workspace-filter: empty selection — not locking")
+        return {"saved": valid_ids}
 
     # Write to Delta (survives redeploys — restored to file on next startup)
     try:
