@@ -2458,9 +2458,8 @@ async def preflight_catalog_endpoint(request: Request) -> dict:
 
 
 def _workspace_filter_table() -> str:
-    from backend.db import get_catalog_schema
-    catalog, schema = get_catalog_schema()
-    return f"`{catalog}`.`{schema}`.app_workspace_filter"
+    from backend.routers.settings import _config_table
+    return _config_table("app_workspace_filter")
 
 
 def _parse_saved_workspace_ids(row: dict) -> list[str]:
@@ -2470,7 +2469,7 @@ def _parse_saved_workspace_ids(row: dict) -> list[str]:
     (workspace_ids_json, updated_at); deployments that saved before that step ran
     have the older (workspace_ids) comma-separated column.
     """
-    import re as _re
+    from backend.workspace_filter import _is_safe_id
     raw_json = row.get("workspace_ids_json")
     if raw_json:
         try:
@@ -2481,7 +2480,7 @@ def _parse_saved_workspace_ids(row: dict) -> list[str]:
             ids = []
     else:
         ids = str(row.get("workspace_ids") or "").split(",")
-    return [s for s in (str(i).strip() for i in ids) if s and _re.match(r'^[a-zA-Z0-9_\-\.]+$', s)]
+    return [s for s in (str(i).strip() for i in ids) if _is_safe_id(s)]
 
 
 def _read_saved_workspace_ids() -> list[str]:
@@ -2501,22 +2500,26 @@ def _read_saved_workspace_ids() -> list[str]:
 
 
 def _write_saved_workspace_ids(ids: list[str]) -> None:
-    """Replace the saved pool. An empty list clears it (all workspaces, unlocked)."""
+    """Replace the saved pool. An empty list clears it (all workspaces, unlocked).
+
+    Each case is a single statement, so a failed write leaves the previous pool intact
+    and concurrent saves can't leave more than one row.
+    """
     from backend.db import execute_query, execute_write
     from backend.routers.settings import _ensure_workspace_filter_table
     _ensure_workspace_filter_table()
     table = _workspace_filter_table()
-    cols = {str(r.get("col_name")) for r in execute_query(f"DESCRIBE TABLE {table}", no_cache=True)}
-    execute_write(f"DELETE FROM {table}")
     if not ids:
+        execute_write(f"DELETE FROM {table}")
         return
+    cols = {str(r.get("col_name")) for r in execute_query(f"DESCRIBE TABLE {table}", no_cache=True)}
     if "workspace_ids_json" in cols:
         execute_write(
-            f"INSERT INTO {table} (workspace_ids_json, updated_at) VALUES (:v, current_timestamp())",
+            f"INSERT OVERWRITE {table} (workspace_ids_json, updated_at) VALUES (:v, current_timestamp())",
             {"v": json.dumps(ids)},
         )
     else:
-        execute_write(f"INSERT INTO {table} (workspace_ids) VALUES (:v)", {"v": ",".join(ids)})
+        execute_write(f"INSERT OVERWRITE {table} (workspace_ids) VALUES (:v)", {"v": ",".join(ids)})
 
 
 @router.get("/workspace-filter")
@@ -2595,11 +2598,16 @@ async def save_workspace_filter(request: Request) -> dict:
     logger.info("save-workspace-filter: validated %d/%d ids (%.1fms)", len(valid_ids), len(raw_ids), (_time.monotonic() - t0) * 1000)
 
     # Lock check — workspace filter is one-time, set during initial setup only
+    # Fail closed: saving overwrites the table, so an unreadable lock must not be
+    # treated as "unlocked".
     try:
         saved = await asyncio.to_thread(_read_saved_workspace_ids)
     except Exception as e:
-        logger.warning("save-workspace-filter: lock check failed, proceeding: %s", e)
-        saved = []
+        logger.warning("save-workspace-filter: lock check failed: %s", e)
+        raise HTTPException(
+            status_code=503,
+            detail="Could not check whether the workspace filter is already configured. Try again in a moment.",
+        )
     if saved:
         raise HTTPException(
             status_code=409,

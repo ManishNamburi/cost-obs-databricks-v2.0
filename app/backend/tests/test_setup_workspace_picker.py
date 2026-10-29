@@ -10,9 +10,11 @@ from backend.routers import setup
 @pytest.fixture
 def fake_db(monkeypatch, tmp_path):
     """Route execute_query/execute_write through a recorder; `row` is the stored filter row."""
-    state = {"cols": ["workspace_ids_json", "updated_at"], "row": None, "writes": [], "mv": []}
+    state = {"cols": ["workspace_ids_json", "updated_at"], "row": None, "writes": [], "mv": [], "read_error": None}
 
     def _query(sql, *args, **kwargs):
+        if state["read_error"] and sql.startswith("SELECT *"):
+            raise state["read_error"]
         if "daily_workspace_breakdown" in sql:
             return state["mv"]
         if sql.startswith("DESCRIBE"):
@@ -30,6 +32,7 @@ def fake_db(monkeypatch, tmp_path):
     monkeypatch.setattr("backend.db.execute_query", _query)
     monkeypatch.setattr("backend.db.execute_write", _write)
     monkeypatch.setattr("backend.routers.settings._ensure_workspace_filter_table", lambda: None)
+    monkeypatch.setattr("backend.routers.settings._config_table", lambda name: f"`cat`.`sch`.{name}")
     return state
 
 
@@ -94,15 +97,16 @@ def test_lock_follows_saved_pool_in_either_schema(fake_db):
 
 def test_save_writes_json_column_created_by_create_tables(fake_db, admin):
     assert asyncio.run(setup.save_workspace_filter(_Req(["111", "222"]))) == {"saved": ["111", "222"]}
-    sql, params = fake_db["writes"][-1]
-    assert "workspace_ids_json" in sql and json.loads(params["v"]) == ["111", "222"]
+    [(sql, params)] = fake_db["writes"]  # one atomic statement, no DELETE-then-INSERT
+    assert sql.startswith("INSERT OVERWRITE") and "workspace_ids_json" in sql
+    assert json.loads(params["v"]) == ["111", "222"]
 
 
 def test_save_writes_legacy_csv_column(fake_db, admin):
     fake_db["cols"] = ["workspace_ids"]
     asyncio.run(setup.save_workspace_filter(_Req(["111", "222"])))
-    sql, params = fake_db["writes"][-1]
-    assert "(workspace_ids)" in sql and params == {"v": "111,222"}
+    [(sql, params)] = fake_db["writes"]
+    assert sql.startswith("INSERT OVERWRITE") and "(workspace_ids)" in sql and params == {"v": "111,222"}
 
 
 def test_saving_all_workspaces_clears_pool_without_locking(fake_db, admin, tmp_path):
@@ -118,3 +122,17 @@ def test_save_rejected_once_a_pool_is_locked(fake_db, admin):
         asyncio.run(setup.save_workspace_filter(_Req(["222"])))
     assert exc.value.status_code == 409
     assert fake_db["writes"] == []
+
+
+def test_save_fails_closed_when_lock_cannot_be_read(fake_db, admin, tmp_path):
+    fake_db["read_error"] = RuntimeError("warehouse unavailable")
+    with pytest.raises(HTTPException) as exc:
+        asyncio.run(setup.save_workspace_filter(_Req([])))
+    assert exc.value.status_code == 503
+    assert fake_db["writes"] == []
+    assert not (tmp_path / "workspace_filter.json").exists()
+
+
+def test_missing_table_is_not_a_lock(fake_db, admin):
+    fake_db["read_error"] = RuntimeError("[TABLE_OR_VIEW_NOT_FOUND] app_workspace_filter")
+    assert asyncio.run(setup.save_workspace_filter(_Req(["111"]))) == {"saved": ["111"]}
