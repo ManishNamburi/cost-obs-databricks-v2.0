@@ -1572,7 +1572,15 @@ def _mv_write_guard():
                 lf.close()
 
 
-def create_materialized_views(catalog: str | None = None, schema: str | None = None, lookback_days: int = 180, on_table_event: "Callable[[str, str], None] | None" = None, force_full_rebuild: bool = False) -> dict:
+def _build_errors(results: dict) -> dict[str, str]:
+    """Steps or tables a build reported as failed, as {name: "error: ..."}."""
+    return {
+        k: v for k, v in (results or {}).items()
+        if k != "__mv_timings__" and isinstance(v, str) and v.startswith("error:")
+    }
+
+
+def create_materialized_views(catalog: str | None = None, schema: str | None = None, lookback_days: int = 180, on_table_event: "Callable[[str, str], None] | None" = None, force_full_rebuild: bool = False, on_table_error: "Callable[[str, str], None] | None" = None, stop_on_error: bool = False) -> dict:
     """Serialized entry point for ALL MV refresh/rebuild paths.
 
     The actual work lives in _create_materialized_views_impl; this wrapper holds
@@ -1583,13 +1591,18 @@ def create_materialized_views(catalog: str | None = None, schema: str | None = N
     """
     with _mv_write_guard():
         result = _create_materialized_views_impl(
-            catalog, schema, lookback_days, on_table_event, force_full_rebuild
+            catalog, schema, lookback_days, on_table_event, force_full_rebuild,
+            on_table_error=on_table_error, stop_on_error=stop_on_error,
         )
         # Phase B: app-managed direct load of the fresh aggregates into Lakebase,
         # under the SAME write guard so it can never overlap a rebuild. Best-effort
         # and no-op when Lakebase is absent — a warehouse-only deploy is unaffected,
         # and a sync failure must never fail the (successful) Delta build.
-        if not (isinstance(result, dict) and result.get("error")):
+        # The setup wizard asks to stop at the first failure: a half-built set is
+        # not worth copying to Lakebase while the user waits to retry.
+        if not (isinstance(result, dict) and result.get("error")) and not (
+            stop_on_error and _build_errors(result)
+        ):
             try:
                 from backend.lakebase_sync import sync_all_aggregates
                 sync_summary = sync_all_aggregates(catalog, schema, full=force_full_rebuild)
@@ -1669,7 +1682,7 @@ def gold_share_create_sql() -> dict[str, str]:
     return tables
 
 
-def _create_materialized_views_impl(catalog: str | None = None, schema: str | None = None, lookback_days: int = 180, on_table_event: "Callable[[str, str], None] | None" = None, force_full_rebuild: bool = False) -> dict:
+def _create_materialized_views_impl(catalog: str | None = None, schema: str | None = None, lookback_days: int = 180, on_table_event: "Callable[[str, str], None] | None" = None, force_full_rebuild: bool = False, on_table_error: "Callable[[str, str], None] | None" = None, stop_on_error: bool = False) -> dict:
     """Create all materialized view tables.
 
     Args:
@@ -1910,6 +1923,8 @@ def _create_materialized_views_impl(catalog: str | None = None, schema: str | No
                     on_table_event(table_name, "done")
             else:
                 logger.error(f"✗ Failed to refresh {table_name}: {e}")
+                if on_table_error:
+                    on_table_error(table_name, str(e))
                 if on_table_event:
                     on_table_event(table_name, "error")
             return table_name, status, elapsed
@@ -1924,7 +1939,9 @@ def _create_materialized_views_impl(catalog: str | None = None, schema: str | No
 
     # Second wave: sku / jobs / interactive / tag-coverage / SQL-360 rollups.
     # daily_dbsql_source reads dbsql_cost_per_query, so it cannot run in wave 1.
-    if extra_tables:
+    if stop_on_error and _build_errors(results):
+        logger.warning("Stopping after the first wave: %s failed", ", ".join(_build_errors(results)))
+    elif extra_tables:
         with ThreadPoolExecutor(max_workers=len(extra_tables)) as executor:
             futures = {executor.submit(_create_table, name, sql): name for name, sql in extra_tables}
             for future in as_completed(futures):

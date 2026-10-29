@@ -4,6 +4,8 @@ import { Spinner } from "./Spinner";
 import { ReadinessChecks, normalizeReadinessResult } from "./settings/ReadinessChecks";
 import { VirtualizedList } from "./VirtualizedList";
 import type { ReadinessResult } from "./settings/ReadinessChecks";
+import { isAccessError, isGrantableCatalogError, setupBuildOutcome } from "../utils/setupBuild";
+import type { SetupBuildTask } from "../utils/setupBuild";
 
 interface SetupWizardProps {
   onComplete: () => void;
@@ -30,7 +32,7 @@ interface SetupStatus {
   all_tables_exist: boolean;
   missing_tables: string[];
   status: "ready" | "setup_required";
-  task?: { status: string; error: string | null; table_progress?: Record<string, string> };
+  task?: SetupBuildTask;
   next_poll_ms?: number;
 }
 
@@ -149,6 +151,10 @@ export function SetupWizard({ onComplete, onClose, embedded }: SetupWizardProps)
   const [loading, setLoading] = useState(true);
   const [creating, setCreating] = useState(false);
   const [tablesJustCreated, setTablesJustCreated] = useState(false);
+  // A table failed but the server is still finishing the ones already running;
+  // Retry stays disabled until it lets go, because it would refuse a second build.
+  const [buildDraining, setBuildDraining] = useState(false);
+  const failedPollsRef = useRef(0);
   // Poll-loop handles, held in refs so Skip (and unmount) can cancel the loop
   // that handleCreateTables started — the loop is otherwise a closure with no
   // external cancellation handle, which is why a frozen build had no way out.
@@ -282,6 +288,7 @@ export function SetupWizard({ onComplete, onClose, embedded }: SetupWizardProps)
     pollCancelledRef.current = true;
     clearPollTimers();
     setCreating(false);
+    setBuildDraining(false);
     goNext();
   };
 
@@ -291,6 +298,8 @@ export function SetupWizard({ onComplete, onClose, embedded }: SetupWizardProps)
   const handleCreateTables = async () => {
     setCreating(true);
     setError(null);
+    setBuildDraining(false);
+    failedPollsRef.current = 0;
     pollCancelledRef.current = false;
     clearPollTimers();
     try {
@@ -311,22 +320,29 @@ export function SetupWizard({ onComplete, onClose, embedded }: SetupWizardProps)
         if (pollCancelledRef.current) return;
         const status = await pollSetupStatus();
         if (pollCancelledRef.current) return;
-        const taskStatus = status?.task?.status;
-        const progress = status?.task?.table_progress ?? {};
-        const progressVals = Object.values(progress);
-        const allDone = progressVals.length > 0 && progressVals.every((s) => s === "done");
-        if (taskStatus === "done" || allDone) {
+        failedPollsRef.current = status ? 0 : failedPollsRef.current + 1;
+        const outcome = setupBuildOutcome(status?.task, failedPollsRef.current);
+        if (outcome.kind === "done") {
           clearPollTimers();
           setCreating(false);
+          setBuildDraining(false);
           setTablesJustCreated(true);
-        } else if (taskStatus === "error") {
+        } else if (outcome.kind === "failed" || outcome.kind === "lost") {
+          if (safetyTimeoutRef.current) { clearTimeout(safetyTimeoutRef.current); safetyTimeoutRef.current = null; }
+          setCreating(false);
+          setError(outcome.message);
+          if (outcome.kind === "failed" && outcome.serverBusy) {
+            // Keep polling quietly so Retry unlocks once the server finishes.
+            setBuildDraining(true);
+            pollTimeoutRef.current = setTimeout(schedulePoll, status?.next_poll_ms ?? 5000);
+          } else {
+            clearPollTimers();
+            setBuildDraining(false);
+          }
+        } else if (outcome.kind === "interrupted") {
           clearPollTimers();
           setCreating(false);
-          const detail = status?.task?.error || "Table creation failed — check server logs for details.";
-          setError(`Table creation failed: ${detail}`);
-        } else if (taskStatus === "interrupted") {
-          clearPollTimers();
-          setCreating(false);
+          setBuildDraining(false);
         } else {
           const delay = status?.next_poll_ms ?? 5000;
           pollTimeoutRef.current = setTimeout(schedulePoll, delay);
@@ -470,14 +486,27 @@ export function SetupWizard({ onComplete, onClose, embedded }: SetupWizardProps)
         {/* Body */}
         <div className="flex-1 min-h-0 overflow-y-auto px-8 py-6">
           {error && (() => {
-            // Detect permission errors that include GRANT SQL
-            const isPermissionError = /needs.*CREATE SCHEMA|needs.*USE CATALOG|GRANT USE CATALOG|GRANT CREATE SCHEMA/i.test(error);
-            if (isPermissionError) {
+            if (isGrantableCatalogError(error)) {
               return <PermissionErrorBlock error={error} onGranted={() => { setError(null); }} />;
             }
+            const accessProblem = step === "create-tables" && isAccessError(error);
             return (
               <div className="mb-4 rounded-lg bg-red-50 p-3 text-sm text-red-700">
-                {error}
+                <p className="break-words">{error}</p>
+                {accessProblem && (
+                  <div className="mt-2 flex flex-wrap items-center gap-2">
+                    <span>This looks like missing access. Check what the app can reach, grant it, then retry.</span>
+                    <button
+                      onClick={() => { setError(null); setStep("permissions"); loadReadiness(); }}
+                      className="rounded-md border border-red-300 bg-white px-3 py-1 text-xs font-medium text-red-700 hover:bg-red-100"
+                    >
+                      Review permissions
+                    </button>
+                  </div>
+                )}
+                {step === "create-tables" && buildDraining && (
+                  <p className="mt-2 text-xs text-red-600">Finishing the tables already in progress. Retry unlocks when they are done.</p>
+                )}
               </div>
             );
           })()}
@@ -597,10 +626,10 @@ export function SetupWizard({ onComplete, onClose, embedded }: SetupWizardProps)
               ) : (
                 <button
                   onClick={handleCreateTables}
-                  disabled={preflightLoading || !preflightResult?.ok}
+                  disabled={preflightLoading || !preflightResult?.ok || buildDraining}
                   className="btn-brand rounded-lg px-6 py-2 text-sm font-bold text-white transition-colors disabled:opacity-50"
                 >
-                  Create Tables
+                  {buildDraining ? "Finishing…" : error ? "Retry" : "Create Tables"}
                 </button>
               )
             ) : step === "storage-location" ? (

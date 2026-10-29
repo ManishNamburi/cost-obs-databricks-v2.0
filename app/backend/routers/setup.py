@@ -11,6 +11,7 @@ from fastapi import APIRouter, BackgroundTasks, HTTPException, Query, Request
 
 from backend.materialized_views import (
     _MV_TABLES,
+    _build_errors,
     check_materialized_views_exist,
     create_materialized_views,
     drop_materialized_views,
@@ -29,7 +30,7 @@ SETTINGS_DIR = os.path.join(os.path.dirname(__file__), "..", "..", ".settings")
 SETUP_DONE_FILE = os.path.join(SETTINGS_DIR, "setup_done.json")
 
 # Simple in-process state for the background create-tables task
-_create_task_state: dict = {"status": "idle", "error": None, "started_at": None, "elapsed_seconds": None, "table_progress": {}}  # idle | running | interrupted | done | error
+_create_task_state: dict = {"status": "idle", "error": None, "started_at": None, "elapsed_seconds": None, "table_progress": {}, "table_errors": {}}  # idle | running | interrupted | done | error
 
 _TASK_STATE_FILE = os.path.join(SETTINGS_DIR, "build_progress.json")
 
@@ -85,6 +86,7 @@ def _restore_task_state() -> None:
             "started_at": None,
             "elapsed_seconds": None,
             "table_progress": saved.get("table_progress", {}),
+            "table_errors": saved.get("table_errors") or {},
         })
         logger.info("Restored interrupted task state from previous pod session")
     elif status == "error":
@@ -94,6 +96,7 @@ def _restore_task_state() -> None:
             "started_at": None,
             "elapsed_seconds": None,
             "table_progress": saved.get("table_progress", {}),
+            "table_errors": saved.get("table_errors") or {},
         })
 
 
@@ -140,7 +143,9 @@ def _reconcile_task_state_from_disk() -> None:
         return
 
     def _done_count(state: dict) -> int:
-        return sum(1 for v in (state.get("table_progress") or {}).values() if v == "done")
+        # A failed table is as settled as a built one: counting only "done" kept a
+        # non-builder worker from ever reporting a table error mid-build.
+        return sum(1 for v in (state.get("table_progress") or {}).values() if v in ("done", "error"))
 
     mem_rank = _TASK_STATE_RANK.get(_create_task_state.get("status", "idle"), 0)
     disk_rank = _TASK_STATE_RANK.get(disk.get("status", "idle"), 0)
@@ -156,6 +161,7 @@ def _reconcile_task_state_from_disk() -> None:
         _create_task_state["status"] = disk.get("status", _create_task_state["status"])
         _create_task_state["error"] = disk.get("error")
         _create_task_state["table_progress"] = disk.get("table_progress") or {}
+        _create_task_state["table_errors"] = disk.get("table_errors") or {}
 
 
 # Core billing tables — must exist for the dashboard to be functional.
@@ -422,6 +428,7 @@ async def get_setup_status() -> dict[str, Any]:
                 "Use the Setup wizard to retry, or check app logs for details."
             )
             logger.error(f"Bootstrap timed out after {elapsed}s — marking as error")
+            _persist_task_state()
         else:
             return {
                 "catalog": catalog,
@@ -999,6 +1006,7 @@ async def create_tables(
             "app_mv_refresh_state", "app_schedule_settings", "app_workspace_filter",
         ]
         _create_task_state["table_progress"] = {t: "pending" for t in _ALL_SETUP_TABLES}
+        _create_task_state["table_errors"] = {}
         _persist_task_state()
         # Read the raw header token directly — _auth_mode may have been locked to "sp"
         # (e.g. after a scope error on a previous request), which forces _db_user_token
@@ -1052,6 +1060,7 @@ def _create_tables_task(catalog: str, schema: str, user_token: str = ""):
     if not catalog or not schema:
         _create_task_state["status"] = "error"
         _create_task_state["error"] = "Catalog and schema must be configured before creating tables."
+        _persist_task_state()
         return
 
     try:
@@ -1074,6 +1083,7 @@ def _create_tables_task(catalog: str, schema: str, user_token: str = ""):
                         f"Could not grant SP catalog access to `{catalog}`: "
                         + "; ".join(pre_grant.get("errors", []))
                     )
+                    _persist_task_state()
                     return
             finally:
                 _db_user_token.reset(pre_tok)
@@ -1105,8 +1115,29 @@ def _create_tables_task(catalog: str, schema: str, user_token: str = ""):
             _create_task_state["table_progress"][table_name] = event
             if event in ("done", "error"):
                 _persist_task_state()
-        results = create_materialized_views(catalog, schema, on_table_event=_on_table_event)
+
+        def _on_table_error(table_name: str, message: str) -> None:
+            _create_task_state["table_errors"][table_name] = _clean_sdk_error(message)
+
+        # Stop at the first failed table: the wizard shows the failure and offers
+        # a retry, instead of spinning while every other table and the Lakebase
+        # copy finish first.
+        results = create_materialized_views(
+            catalog, schema, on_table_event=_on_table_event,
+            on_table_error=_on_table_error, stop_on_error=True,
+        )
         logger.info(f"Table creation completed: {results}")
+
+        all_errors = _build_errors(results)
+        if all_errors:
+            failed_name, first_error = next(iter(all_errors.items()))
+            detail = _create_task_state["table_errors"].get(failed_name) or first_error.replace("error: ", "", 1)
+            _create_task_state["status"] = "error"
+            _create_task_state["error"] = (
+                detail if failed_name in ("catalog", "schema") else f"Creating `{failed_name}` failed: {detail}"
+            )
+            _persist_task_state()
+            return
 
         # Explicitly bootstrap all config/state Delta tables now that the SP has
         # schema-level permissions. Lazy creation would fail silently until post-setup
@@ -1134,17 +1165,6 @@ def _create_tables_task(catalog: str, schema: str, user_token: str = ""):
             except Exception as _te:
                 _create_task_state["table_progress"][_tname] = "error"
                 logger.warning("Could not bootstrap %s during setup: %s", _tname, _te)
-
-        all_errors = {
-            k: v for k, v in results.items()
-            if k != "__mv_timings__" and isinstance(v, str) and v.startswith("error:")
-        }
-        if all_errors:
-            first_error = next(iter(all_errors.values()))
-            _create_task_state["status"] = "error"
-            _create_task_state["error"] = first_error.replace("error: ", "", 1)
-            _persist_task_state()
-            return
 
         # Post-creation grants — schema now exists so schema-level privileges
         # (USE SCHEMA, CREATE TABLE, SELECT) actually land in UC.
