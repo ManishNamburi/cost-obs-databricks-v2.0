@@ -736,7 +736,10 @@ async def get_created_tables() -> dict[str, Any]:
     """
     catalog, schema = get_catalog_schema()
     names = list(_MV_TABLES) + _SETUP_CONFIG_TABLES
-    exists = await asyncio.to_thread(check_materialized_views_exist, catalog, schema, names)
+    try:
+        exists = await asyncio.to_thread(check_materialized_views_exist, catalog, schema, names, True)
+    except Exception as e:
+        raise HTTPException(status_code=503, detail=f"Could not list the app tables: {_clean_sdk_error(str(e))}")
     return {
         "catalog": catalog,
         "schema": schema,
@@ -984,14 +987,20 @@ def _preflight_catalog_check(catalog: str) -> dict:
         }
 
 
-def _verify_built_objects_as_sp(catalog: str, schema: str) -> dict:
+def _verify_built_objects_as_sp(catalog: str, schema: str, skipped: frozenset[str] = frozenset()) -> dict:
     """Probe every MV table with a one-row read as the SP to confirm UC grants propagated.
+
+    `skipped`: tables the build skipped (optional source not connected, e.g. cloud
+    invoice actuals). They don't exist, so probing them would fail every setup that
+    hasn't connected those sources.
 
     Returns {"ok": bool, "failed": list[str], "errors": dict[str, str]}
     """
     failed: list[str] = []
     errors: dict[str, str] = {}
     for table in _MV_TABLES:
+        if table in skipped:
+            continue
         try:
             _execute_as_sp(f"SELECT 1 FROM `{catalog}`.`{schema}`.`{table}` LIMIT 1")
         except Exception as e:
@@ -1025,6 +1034,9 @@ async def create_tables(
 
     if run_in_background:
         import time as _time
+        # Before the state turns 'running': if this stalled or raised after it, no
+        # build would start and every retry would be refused as already in progress.
+        grant_to = await _admin_installer_email(request)
         _create_task_state["status"] = "running"
         _create_task_state["error"] = None
         _create_task_state["started_at"] = _time.monotonic()
@@ -1042,7 +1054,6 @@ async def create_tables(
             request.headers.get("x-forwarded-access-token", "")
             or _db_user_token.get()
         )
-        grant_to = await _admin_installer_email(request)
         background_tasks.add_task(
             _create_tables_task, target_catalog, target_schema, _token_snap,
             grant_to or "", grant_to is not None,
@@ -1158,10 +1169,7 @@ def _create_tables_task(
             on_table_error=_on_table_error, stop_on_error=True,
         )
         logger.info(f"Table creation completed: {results}")
-        # Per-table outcome for the wizard: created / refreshed / skipped... / error...
-        _create_task_state["table_results"] = {
-            k: v for k, v in results.items() if isinstance(v, str) and not k.startswith("__")
-        }
+        _create_task_state["table_results"] = _table_results(results)
 
         all_errors = _build_errors(results)
         if all_errors:
@@ -1233,7 +1241,10 @@ def _create_tables_task(
         for delay in retry_delays:
             if delay > 0:
                 _time.sleep(delay)
-            last_verify = _verify_built_objects_as_sp(catalog, schema)
+            last_verify = _verify_built_objects_as_sp(
+                catalog, schema,
+                frozenset(t for t, r in _create_task_state["table_results"].items() if r.startswith("skipped")),
+            )
             logger.info(
                 f"SP verification (delay +{delay}s): ok={last_verify['ok']} "
                 f"failed={last_verify.get('failed', [])}"
@@ -1530,6 +1541,18 @@ async def bootstrap_admin(request: Request) -> dict[str, Any]:
 # ============================================================================
 
 
+def _table_results(results: dict) -> dict[str, str]:
+    """Per-table outcome for the wizard: created / refreshed / skipped... / error...
+
+    The build result also carries "catalog" and "schema" step statuses and
+    "__"-prefixed metadata, which aren't tables.
+    """
+    return {
+        k: v for k, v in results.items()
+        if isinstance(v, str) and not k.startswith("__") and k not in ("catalog", "schema")
+    }
+
+
 async def _admin_installer_email(request: Request) -> str | None:
     """The caller's email when they may receive catalog grants, else None.
 
@@ -1539,7 +1562,12 @@ async def _admin_installer_email(request: Request) -> str | None:
     """
     from backend.routers.user import _get_user_role
     email = request.headers.get("X-Forwarded-Email", "")
-    if await _get_user_role(email) != "admin":
+    try:
+        role = await _get_user_role(email)
+    except Exception as e:
+        logger.warning("Skipping catalog grants: could not resolve the caller's role: %s", e)
+        return None
+    if role != "admin":
         logger.info("Skipping catalog grants for non-admin caller %s", email or "(unknown)")
         return None
     return email
@@ -2662,10 +2690,25 @@ async def get_workspace_filter() -> dict:
         return {"workspace_ids": await asyncio.to_thread(_read_saved_workspace_ids)}
     except Exception as e:
         logger.warning("workspace-filter: could not read saved pool: %s", e)
-        raise HTTPException(
-            status_code=503,
-            detail="Could not read the saved workspace scope. Try again in a moment.",
+        raise HTTPException(status_code=503, detail=_pool_read_error_detail(e))
+
+
+def _pool_read_error_detail(e: Exception) -> str:
+    """What the wizard shows when the saved pool can't be read.
+
+    Access problems don't clear on retry (e.g. a redeploy's new SP has no grant on
+    the table yet), so name the table and the grant instead of "try again".
+    """
+    msg = _clean_sdk_error(str(e))
+    lower = msg.lower()
+    if any(k in lower for k in ("permission", "insufficient", "does not have", "not authorized", "schema_not_found")):
+        sp = os.getenv("DATABRICKS_CLIENT_ID", "") or "<app service principal>"
+        table = _workspace_filter_table()
+        return (
+            f"The app can't read its saved workspace scope in {table}: {msg} "
+            f"A catalog owner can fix this with: GRANT SELECT, MODIFY ON TABLE {table} TO `{sp}`; then Retry."
         )
+    return f"Could not read the saved workspace scope: {msg} Try again in a moment."
 
 
 def restore_workspace_filter_from_delta() -> None:

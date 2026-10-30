@@ -172,3 +172,12 @@ def test_settings_file_wins_over_delta(fake_db, tmp_path):
     fake_db["row"] = {"workspace_ids_json": '["111"]'}
     fake_db["read_error"] = RuntimeError("should not be read")
     assert asyncio.run(setup.get_workspace_filter()) == {"workspace_ids": []}
+
+
+def test_access_errors_name_the_table_and_grant(fake_db, monkeypatch):
+    monkeypatch.setenv("DATABRICKS_CLIENT_ID", "sp-123")
+    fake_db["read_error"] = RuntimeError("[INSUFFICIENT_PERMISSIONS] User does not have SELECT on Table")
+    with pytest.raises(HTTPException) as exc:
+        asyncio.run(setup.get_workspace_filter())
+    assert exc.value.status_code == 503
+    assert "GRANT SELECT, MODIFY ON TABLE `cat`.`sch`.app_workspace_filter TO `sp-123`" in exc.value.detail

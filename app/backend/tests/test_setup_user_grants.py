@@ -49,7 +49,7 @@ def test_created_tables_lists_gold_and_config_tables(monkeypatch):
     monkeypatch.setattr(setup, "get_catalog_schema", lambda: ("cat", "sch"))
     monkeypatch.setattr(
         setup, "check_materialized_views_exist",
-        lambda catalog, schema, names: {n: n != "daily_sku_breakdown" for n in names},
+        lambda catalog, schema, names, raise_on_failure=False: {n: n != "daily_sku_breakdown" for n in names},
     )
     out = asyncio.run(setup.get_created_tables())
     assert (out["catalog"], out["schema"]) == ("cat", "sch")
@@ -73,3 +73,48 @@ def test_only_admins_receive_catalog_grants(monkeypatch):
     assert asyncio.run(setup._admin_installer_email(_Req("admin@example.com"))) == "admin@example.com"
     assert asyncio.run(setup._admin_installer_email(_Req("viewer@example.com"))) is None
     assert asyncio.run(setup._admin_installer_email(_Req(""))) is None
+
+
+def test_table_results_skip_build_steps_and_metadata():
+    out = setup._table_results({
+        "catalog": "ok", "schema": "exists", "__mv_timings__": {"x": 1}, "__note": "n",
+        "daily_usage_summary": "refreshed", "daily_sku_breakdown": "created",
+    })
+    assert out == {"daily_usage_summary": "refreshed", "daily_sku_breakdown": "created"}
+
+
+def test_role_lookup_failure_means_no_grants(monkeypatch):
+    import asyncio
+
+    async def _boom(email):
+        raise RuntimeError("warehouse starting")
+    monkeypatch.setattr("backend.routers.user._get_user_role", _boom)
+    assert asyncio.run(setup._admin_installer_email(_Req("admin@example.com"))) is None
+
+
+def test_created_tables_reports_a_failed_listing(monkeypatch):
+    import asyncio
+    import pytest
+    from fastapi import HTTPException
+
+    def _fail(catalog, schema, names, raise_on_failure):
+        assert raise_on_failure
+        raise RuntimeError("could not list tables in cat.sch: PERMISSION_DENIED")
+    monkeypatch.setattr(setup, "get_catalog_schema", lambda: ("cat", "sch"))
+    monkeypatch.setattr(setup, "check_materialized_views_exist", _fail)
+    with pytest.raises(HTTPException) as exc:
+        asyncio.run(setup.get_created_tables())
+    assert exc.value.status_code == 503 and "PERMISSION_DENIED" in exc.value.detail
+
+
+def test_verification_skips_tables_the_build_skipped(monkeypatch):
+    probed = []
+
+    def _probe(sql):
+        probed.append(sql)
+        if "daily_cloud_actuals" in sql:
+            raise RuntimeError("[TABLE_OR_VIEW_NOT_FOUND] daily_cloud_actuals")
+    monkeypatch.setattr(setup, "_execute_as_sp", _probe)
+    out = setup._verify_built_objects_as_sp("cat", "sch", frozenset({"daily_cloud_actuals"}))
+    assert out["ok"] and not any("daily_cloud_actuals" in q for q in probed)
+    assert not setup._verify_built_objects_as_sp("cat", "sch")["ok"]

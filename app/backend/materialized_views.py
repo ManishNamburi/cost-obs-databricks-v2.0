@@ -2142,8 +2142,11 @@ def drop_unified_views(catalog: str | None = None, schema: str | None = None) ->
             logger.debug("drop unified view %s failed (non-fatal): %s", t, e)
 
 
-def check_materialized_views_exist(catalog: str | None = None, schema: str | None = None, table_names: list[str] | None = None) -> dict:
+def check_materialized_views_exist(catalog: str | None = None, schema: str | None = None, table_names: list[str] | None = None, raise_on_failure: bool = False) -> dict:
     """Check which materialized view tables (or the given table_names) exist.
+
+    raise_on_failure: raise when the listing itself fails, instead of reporting
+    every table as missing.
 
     Uses the Unity Catalog REST API (no SQL warehouse required) so this is
     fast even when the warehouse is cold/starting. Avoids the thread-exhaustion
@@ -2176,6 +2179,7 @@ def check_materialized_views_exist(catalog: str | None = None, schema: str | Non
         pass
     clients_to_try.append(("sp", get_workspace_client()))
 
+    last_error: Exception | None = None
     for label, w in clients_to_try:
         try:
             existing: set[str] = set()
@@ -2184,9 +2188,12 @@ def check_materialized_views_exist(catalog: str | None = None, schema: str | Non
                     existing.add(t.name.lower())
             return {name: name.lower() in existing for name in table_names}
         except Exception as e:
+            last_error = e
             logger.debug(f"UC tables.list failed ({label} token): {e}")
 
     # Both clients failed — schema/catalog likely doesn't exist yet on this fresh deploy.
+    if raise_on_failure:
+        raise RuntimeError(f"could not list tables in {catalog}.{schema}: {last_error}")
     return {name: False for name in table_names}
 
 

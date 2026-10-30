@@ -80,7 +80,7 @@ def test_rebuilt_tables_are_rewritten_not_emptied(monkeypatch):
     assert seen["daily_usage_summary"] == (False, False)
 
 
-def test_rewrite_replaces_every_chunk_without_emptying(monkeypatch):
+def _run_sync(monkeypatch, *, stored_mode=None, rewrite=False):
     import datetime as dt
     from contextlib import contextmanager
 
@@ -91,8 +91,13 @@ def test_rewrite_replaces_every_chunk_without_emptying(monkeypatch):
             self._one = None
 
         def execute(self, sql, params=None):
-            ran.append(sql)
-            self._one = ("2026-10-01",) if ("backfilled_at" in sql or "LIMIT 1" in sql) else None
+            ran.append(sql if params is None or "mode = %s" not in sql else f"{sql} <- {params[0]}")
+            if "backfilled_at, mode" in sql:
+                self._one = ("2026-10-01", stored_mode)
+            elif "LIMIT 1" in sql:
+                self._one = (1,)
+            else:
+                self._one = None
 
         def executemany(self, sql, rows):
             ran.append(f"INSERT x{len(rows)}")
@@ -133,12 +138,31 @@ def test_rewrite_replaces_every_chunk_without_emptying(monkeypatch):
     monkeypatch.setattr(lakebase_sync, "_finish", lambda *a: None)
 
     cfg = {"pk": ["usage_date"], "source_date_col": "usage_date", "reprocess_days": 14}
-    out = lakebase_sync.sync_one_aggregate("c", "s", "daily_sku_breakdown", cfg, rewrite=True)
+    out = lakebase_sync.sync_one_aggregate("c", "s", "daily_sku_breakdown", cfg, rewrite=rewrite)
+    return out, ran
 
+
+def test_rewrite_replaces_every_chunk_without_emptying(monkeypatch):
+    out, ran = _run_sync(monkeypatch, rewrite=True)
     assert out["mode"] == "rewrite" and out["window_start"] == "2026-10-01"
     assert not any("TRUNCATE" in q or "backfilled_at = NULL" in q for q in ran)
+    # Marked pending before the first chunk, so a failed run is retried.
+    pending = next(i for i, q in enumerate(ran) if q.endswith("<- rewrite_pending"))
+    first_chunk = next(i for i, q in enumerate(ran) if "BETWEEN" in q)
+    assert pending < first_chunk
     assert sum(q.startswith('DELETE FROM "daily_sku_breakdown" WHERE "usage_date" BETWEEN') for q in ran) == 3
     assert ran[-1].startswith('DELETE FROM "daily_sku_breakdown" WHERE "usage_date" < %s OR')
+    assert ran[-1].endswith('IS NULL')
+
+
+def test_unfinished_rewrite_is_resumed_on_the_next_sync(monkeypatch):
+    out, _ = _run_sync(monkeypatch, stored_mode="rewrite_pending")
+    assert out["mode"] == "rewrite" and out["window_start"] == "2026-10-01"
+
+
+def test_normal_sync_stays_incremental(monkeypatch):
+    out, _ = _run_sync(monkeypatch, stored_mode="incremental")
+    assert out["mode"] == "incremental"
 
 
 class _ClearCur:

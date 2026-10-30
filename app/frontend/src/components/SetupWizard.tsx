@@ -192,8 +192,8 @@ export function SetupWizard({ onComplete, onClose, embedded }: SetupWizardProps)
   const [wsSaving, setWsSaving] = useState(false);
   // The pool saved by a previous run of this step. [] = all workspaces.
   const [savedWsIds, setSavedWsIds] = useState<string[]>([]);
-  // Set when the saved pool couldn't be read. Saving is blocked then: the
-  // selection would start from "all workspaces" and silently widen the pool.
+  // Set when the saved pool or the workspace list couldn't be loaded. Saving is
+  // blocked then: the selection would be empty or "all", silently widening the pool.
   const [wsPoolError, setWsPoolError] = useState<string | null>(null);
 
   // Load initial data
@@ -385,7 +385,7 @@ export function SetupWizard({ onComplete, onClose, embedded }: SetupWizardProps)
     try {
       const [filterRes, listRes] = await Promise.all([
         fetch("/api/setup/workspace-filter").catch(() => null),
-        fetch("/api/setup/list-workspaces"),
+        fetch("/api/setup/list-workspaces").catch(() => null),
       ]);
       if (!filterRes?.ok) {
         const body = await filterRes?.json().catch(() => ({}));
@@ -394,7 +394,14 @@ export function SetupWizard({ onComplete, onClose, embedded }: SetupWizardProps)
       }
       const saved: string[] = (await filterRes.json()).workspace_ids ?? [];
       setSavedWsIds(saved);
-      if (listRes.ok) {
+      // Without the list nothing is selectable, and saving an empty selection means
+      // "all workspaces", so this blocks saving the same way an unreadable pool does.
+      if (!listRes?.ok) {
+        const body = await listRes?.json().catch(() => ({}));
+        setWsPoolError(body?.detail || "Could not load the workspace list.");
+        return;
+      }
+      {
         const data = await listRes.json();
         const list: { id: string; name: string; historical?: boolean }[] = data.workspaces ?? [];
         // Keep saved ids the list didn't return selectable, so saving again can't drop them silently.
@@ -403,8 +410,8 @@ export function SetupWizard({ onComplete, onClose, embedded }: SetupWizardProps)
         // Start from the saved pool; with none saved, everything is selected.
         setSelectedWsIds(new Set(saved.length > 0 ? saved : list.map((w) => w.id)));
       }
-    } catch {
-      // non-fatal — user can skip
+    } catch (e) {
+      setWsPoolError(`Could not load the workspaces: ${e}`);
     } finally {
       setWsLoading(false);
     }
@@ -1163,15 +1170,19 @@ function CreatedTablesList({ catalog, schema, results }: {
 }) {
   const hasResults = !!results && Object.keys(results).length > 0;
   const [existing, setExisting] = useState<{ catalog: string; schema: string; tables: { name: string; exists: boolean }[] } | null>(null);
-  const [loadFailed, setLoadFailed] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
 
   useEffect(() => {
     if (hasResults) return;
     let cancelled = false;
     fetch("/api/setup/created-tables")
-      .then((r) => (r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`))))
+      .then(async (r) => {
+        if (r.ok) return r.json();
+        const body = await r.json().catch(() => ({}));
+        throw new Error(body?.detail || `HTTP ${r.status}`);
+      })
       .then((data) => { if (!cancelled) setExisting(data); })
-      .catch(() => { if (!cancelled) setLoadFailed(true); });
+      .catch((e) => { if (!cancelled) setLoadError(e instanceof Error ? e.message : String(e)); });
     return () => { cancelled = true; };
   }, [hasResults]);
 
@@ -1186,8 +1197,8 @@ function CreatedTablesList({ catalog, schema, results }: {
   const sch = schema || existing?.schema;
 
   if (!hasResults && !existing) {
-    return loadFailed
-      ? <p className="px-1 text-xs text-gray-500">Could not list the app tables.</p>
+    return loadError
+      ? <p className="px-1 text-xs text-amber-700">{loadError}</p>
       : <LoadingSpinner text="Listing tables…" />;
   }
   const counts = rows.reduce<Record<string, number>>((acc, r) => ({ ...acc, [r.label]: (acc[r.label] ?? 0) + 1 }), {});
@@ -1390,7 +1401,7 @@ function WorkspaceFilterStep({
 
       {workspaces.length === 0 ? (
         <div className="rounded-lg bg-amber-50 p-3 text-sm text-amber-700">
-          Could not load workspace list. Click <strong>Continue (all workspaces)</strong> to show data for all workspaces, or go back and check that system table permissions are granted.
+          No workspaces with billing activity were found. Click <strong>Continue (all workspaces)</strong> to show data for all workspaces, or go back and check that system table permissions are granted.
         </div>
       ) : (
         <>

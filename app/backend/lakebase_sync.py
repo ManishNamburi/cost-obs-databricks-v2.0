@@ -36,6 +36,9 @@ logger = logging.getLogger(__name__)
 WORKSPACE_ID_SENTINEL = "__account__"
 GENERIC_KEY_SENTINEL = "__na__"
 
+# agg_sync_state.mode while a rewrite is in flight; see sync_one_aggregate.
+_REWRITE_PENDING = "rewrite_pending"
+
 # Batch size for executemany inserts.
 _INSERT_BATCH = 5000
 
@@ -468,9 +471,13 @@ def sync_one_aggregate(
         with conn.cursor() as cur:
             cur.execute(f'SELECT 1 FROM "{table}" LIMIT 1')
             table_empty = cur.fetchone() is None
-            cur.execute(f"SELECT backfilled_at FROM {_SYNC_STATE_TABLE} WHERE table_name = %s", (table,))
+            cur.execute(f"SELECT backfilled_at, mode FROM {_SYNC_STATE_TABLE} WHERE table_name = %s", (table,))
             row = cur.fetchone()
             backfill_done = bool(row and row[0])
+            # A rewrite that didn't finish left old rows outside the window it reached;
+            # keep rewriting until one completes (see _REWRITE_PENDING).
+            if not full and row and len(row) > 1 and row[1] == _REWRITE_PENDING:
+                rewrite = True
 
     do_incremental = (not full) and (not table_empty) and backfill_done and have_date
 
@@ -508,6 +515,11 @@ def sync_one_aggregate(
     mode = ("rewrite" if rewrite else "incremental") if do_incremental else "full"
     if do_incremental and rewrite:
         range_start = mn
+        # Recorded before any chunk is replaced. _finish overwrites it on success;
+        # if this run fails, the next sync sees it and rewrites again instead of
+        # dropping back to the 14-day window.
+        with get_pg_conn() as conn, conn.cursor() as cur:
+            cur.execute(f"UPDATE {_SYNC_STATE_TABLE} SET mode = %s WHERE table_name = %s", (_REWRITE_PENDING, table))
     elif do_incremental:
         range_start = max(compute_reprocess_start(reprocess_days, overlap_days), mn)
     else:
@@ -555,7 +567,8 @@ def sync_one_aggregate(
     if mode == "rewrite":
         with get_pg_conn() as conn, conn.cursor() as cur:
             cur.execute(
-                f'DELETE FROM "{table}" WHERE "{source_date_col}" < %s OR "{source_date_col}" > %s',
+                f'DELETE FROM "{table}" WHERE "{source_date_col}" < %s OR "{source_date_col}" > %s '
+                f'OR "{source_date_col}" IS NULL',
                 (range_start, mx),
             )
 
