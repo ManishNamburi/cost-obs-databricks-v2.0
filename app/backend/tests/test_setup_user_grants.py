@@ -57,3 +57,19 @@ def test_created_tables_lists_gold_and_config_tables(monkeypatch):
     assert by_name["daily_sku_breakdown"] is False
     assert by_name["daily_usage_summary"] is True
     assert by_name["app_workspace_filter"] is True
+
+
+class _Req:
+    def __init__(self, email):
+        self.headers = {"X-Forwarded-Email": email}
+
+
+def test_only_admins_receive_catalog_grants(monkeypatch):
+    import asyncio
+
+    async def _role(email):
+        return "admin" if email == "admin@example.com" else "consumer"
+    monkeypatch.setattr("backend.routers.user._get_user_role", _role)
+    assert asyncio.run(setup._admin_installer_email(_Req("admin@example.com"))) == "admin@example.com"
+    assert asyncio.run(setup._admin_installer_email(_Req("viewer@example.com"))) is None
+    assert asyncio.run(setup._admin_installer_email(_Req(""))) is None

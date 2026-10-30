@@ -158,3 +158,17 @@ def test_bundle_cache_key_changes_with_pool(monkeypatch):
     assert scoped != unscoped
     # An explicit selection doesn't depend on the pool.
     assert db.bundle_cache_key("x", "a", "b", ["111"]) == db.bundle_cache_key("x", "a", "b", ["111"])
+
+
+def test_unreadable_pool_is_an_error_not_all_workspaces(fake_db):
+    fake_db["read_error"] = RuntimeError("warehouse unavailable")
+    with pytest.raises(HTTPException) as exc:
+        asyncio.run(setup.get_workspace_filter())
+    assert exc.value.status_code == 503
+
+
+def test_settings_file_wins_over_delta(fake_db, tmp_path):
+    (tmp_path / "workspace_filter.json").write_text('{"workspace_ids": []}')
+    fake_db["row"] = {"workspace_ids_json": '["111"]'}
+    fake_db["read_error"] = RuntimeError("should not be read")
+    assert asyncio.run(setup.get_workspace_filter()) == {"workspace_ids": []}

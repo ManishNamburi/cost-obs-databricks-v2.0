@@ -1042,9 +1042,10 @@ async def create_tables(
             request.headers.get("x-forwarded-access-token", "")
             or _db_user_token.get()
         )
+        grant_to = await _admin_installer_email(request)
         background_tasks.add_task(
             _create_tables_task, target_catalog, target_schema, _token_snap,
-            request.headers.get("X-Forwarded-Email", ""),
+            grant_to or "", grant_to is not None,
         )
         return {
             "status": "started",
@@ -1063,7 +1064,9 @@ async def create_tables(
         }
 
 
-def _create_tables_task(catalog: str, schema: str, user_token: str = "", user_email: str = ""):
+def _create_tables_task(
+    catalog: str, schema: str, user_token: str = "", user_email: str = "", grant_installer: bool = False,
+):
     """Background task: grants → build → verify.
 
     The catalog-existence check is done by the frontend endpoint (user token)
@@ -1211,16 +1214,18 @@ def _create_tables_task(catalog: str, schema: str, user_token: str = "", user_em
 
         # The SP owns what it just built; without these the installer can't browse
         # or manage the app catalog. Reported to the wizard rather than failing setup.
-        try:
-            _create_task_state["user_grants"] = _grant_user_catalog_visibility(
-                catalog, schema, user_token, user_email
-            )
-        except Exception as _ge:
-            logger.warning("Installer catalog grants failed: %s", _ge)
-            _create_task_state["user_grants"] = {
-                "ok": False, "grantee": user_email, "applied": [], "failed": [],
-                "error": _clean_sdk_error(str(_ge)), "manual_sql": "",
-            }
+        # Admins only (see _admin_installer_email): the grants include MANAGE.
+        if grant_installer:
+            try:
+                _create_task_state["user_grants"] = _grant_user_catalog_visibility(
+                    catalog, schema, user_token, user_email
+                )
+            except Exception as _ge:
+                logger.warning("Installer catalog grants failed: %s", _ge)
+                _create_task_state["user_grants"] = {
+                    "ok": False, "grantee": user_email, "applied": [], "failed": [],
+                    "error": _clean_sdk_error(str(_ge)), "manual_sql": "",
+                }
 
         # Phase 3: Verify with retry backoff for grant propagation.
         retry_delays = [0, 10, 20, 30]
@@ -1525,6 +1530,21 @@ async def bootstrap_admin(request: Request) -> dict[str, Any]:
 # ============================================================================
 
 
+async def _admin_installer_email(request: Request) -> str | None:
+    """The caller's email when they may receive catalog grants, else None.
+
+    The grants include MANAGE on the app catalog, so only app admins get them. On a
+    fresh deploy with no admins configured everyone is admin (user._get_user_role),
+    which keeps first-time setup working.
+    """
+    from backend.routers.user import _get_user_role
+    email = request.headers.get("X-Forwarded-Email", "")
+    if await _get_user_role(email) != "admin":
+        logger.info("Skipping catalog grants for non-admin caller %s", email or "(unknown)")
+        return None
+    return email
+
+
 def _resolve_installer_email(user_token: str, user_email: str = "") -> str:
     """The installing user's UC principal: the forwarded email, else the token's identity."""
     if user_email:
@@ -1619,7 +1639,7 @@ async def ensure_catalog(request: Request) -> dict[str, Any]:
 
     catalog, _ = get_catalog_schema()
     user_token = request.headers.get("x-forwarded-access-token", "")
-    user_email = request.headers.get("X-Forwarded-Email", "")
+    grant_to = await _admin_installer_email(request)
     sp_id = os.getenv("DATABRICKS_CLIENT_ID", "")
 
     if not catalog:
@@ -1738,7 +1758,8 @@ async def ensure_catalog(request: Request) -> dict[str, Any]:
         try:
             w.catalogs.get(catalog)
             logger.info(f"Catalog `{catalog}` verified accessible to SP")
-            _grant_user_catalog_visibility(catalog, None, user_token, user_email)
+            if grant_to is not None:
+                _grant_user_catalog_visibility(catalog, None, user_token, grant_to)
             return {"ok": True, "catalog": catalog, "message": f"Catalog `{catalog}` is ready."}
         except Exception as e:
             msg = _clean_sdk_error(str(e))
@@ -1774,7 +1795,7 @@ async def ensure_schema(request: Request) -> dict[str, Any]:
 
     catalog, schema = get_catalog_schema()
     user_token = request.headers.get("x-forwarded-access-token", "")
-    user_email = request.headers.get("X-Forwarded-Email", "")
+    grant_to = await _admin_installer_email(request)
 
     if not catalog or not schema:
         raise HTTPException(status_code=400, detail="No catalog/schema configured.")
@@ -1798,7 +1819,8 @@ async def ensure_schema(request: Request) -> dict[str, Any]:
         try:
             w.schemas.get(f"{catalog}.{schema}")
             logger.info(f"Schema `{catalog}`.`{schema}` verified")
-            _grant_user_catalog_visibility(catalog, schema, user_token, user_email)
+            if grant_to is not None:
+                _grant_user_catalog_visibility(catalog, schema, user_token, grant_to)
             return {"ok": True, "schema": f"{catalog}.{schema}",
                     "message": f"Schema `{catalog}.{schema}` is ready."}
         except Exception as e:
@@ -1807,7 +1829,8 @@ async def ensure_schema(request: Request) -> dict[str, Any]:
             if any(kw in lower for kw in ("permission", "privilege", "forbidden", "unauthorized",
                                           "does not have", "access", "insufficient")):
                 logger.info(f"Schema `{catalog}`.`{schema}` exists (SP lacks USE SCHEMA, grants pending)")
-                _grant_user_catalog_visibility(catalog, schema, user_token, user_email)
+                if grant_to is not None:
+                    _grant_user_catalog_visibility(catalog, schema, user_token, grant_to)
                 return {"ok": True, "schema": f"{catalog}.{schema}",
                         "message": f"Schema `{catalog}.{schema}` is ready."}
             logger.warning(f"ensure-schema verify failed: {msg}")
@@ -2619,25 +2642,30 @@ def _write_saved_workspace_ids(ids: list[str]) -> None:
 
 @router.get("/workspace-filter")
 async def get_workspace_filter() -> dict:
-    """Return the saved workspace pool. [] means all workspaces."""
+    """Return the saved workspace pool. [] means all workspaces.
+
+    503 when the pool can't be read: the wizard preselects from this, and treating
+    an unreadable pool as "all workspaces" would let a save widen it silently.
+    """
     settings_path = os.path.join(SETTINGS_DIR, "workspace_filter.json")
     import re as _re
-    workspace_ids: list[str] = []
     try:
         with open(settings_path) as f:
             data = json.load(f)
-        workspace_ids = [str(i) for i in data.get("workspace_ids", []) if _re.match(r'^[a-zA-Z0-9_\-\.]+$', str(i))]
+        ids = [str(i) for i in data.get("workspace_ids", []) if _re.match(r'^[a-zA-Z0-9_\-\.]+$', str(i))]
+        return {"workspace_ids": ids}
     except (FileNotFoundError, json.JSONDecodeError):
         pass
 
-    # Delta survives redeploys; the file can be missing until startup restores it.
-    if not workspace_ids:
-        try:
-            workspace_ids = await asyncio.to_thread(_read_saved_workspace_ids)
-        except Exception as e:
-            logger.warning("workspace-filter: could not read saved pool: %s", e)
-
-    return {"workspace_ids": workspace_ids}
+    # The file is missing until startup restores it from Delta (it's wiped on deploy).
+    try:
+        return {"workspace_ids": await asyncio.to_thread(_read_saved_workspace_ids)}
+    except Exception as e:
+        logger.warning("workspace-filter: could not read saved pool: %s", e)
+        raise HTTPException(
+            status_code=503,
+            detail="Could not read the saved workspace scope. Try again in a moment.",
+        )
 
 
 def restore_workspace_filter_from_delta() -> None:

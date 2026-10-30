@@ -192,6 +192,9 @@ export function SetupWizard({ onComplete, onClose, embedded }: SetupWizardProps)
   const [wsSaving, setWsSaving] = useState(false);
   // The pool saved by a previous run of this step. [] = all workspaces.
   const [savedWsIds, setSavedWsIds] = useState<string[]>([]);
+  // Set when the saved pool couldn't be read. Saving is blocked then: the
+  // selection would start from "all workspaces" and silently widen the pool.
+  const [wsPoolError, setWsPoolError] = useState<string | null>(null);
 
   // Load initial data
   useEffect(() => {
@@ -378,12 +381,18 @@ export function SetupWizard({ onComplete, onClose, embedded }: SetupWizardProps)
   const loadWorkspaces = useCallback(async () => {
     setWsLoading(true);
     setWsSaved(false);
+    setWsPoolError(null);
     try {
       const [filterRes, listRes] = await Promise.all([
-        fetch("/api/setup/workspace-filter"),
+        fetch("/api/setup/workspace-filter").catch(() => null),
         fetch("/api/setup/list-workspaces"),
       ]);
-      const saved: string[] = filterRes.ok ? ((await filterRes.json()).workspace_ids ?? []) : [];
+      if (!filterRes?.ok) {
+        const body = await filterRes?.json().catch(() => ({}));
+        setWsPoolError(body?.detail || "Could not read the saved workspace scope.");
+        return;
+      }
+      const saved: string[] = (await filterRes.json()).workspace_ids ?? [];
       setSavedWsIds(saved);
       if (listRes.ok) {
         const data = await listRes.json();
@@ -404,6 +413,7 @@ export function SetupWizard({ onComplete, onClose, embedded }: SetupWizardProps)
   // Returns false (and shows the error) when the save failed, so the wizard stays on
   // this step instead of moving on as if the filter had been saved.
   const saveWorkspaceFilter = async (): Promise<boolean> => {
+    if (wsPoolError) return false;
     // Every workspace selected means "no filter". Sending the explicit list would lock
     // the pool to today's workspaces and hide any created later.
     const ids = selectedWsIds.size === allWorkspaces.length ? [] : Array.from(selectedWsIds);
@@ -577,6 +587,8 @@ export function SetupWizard({ onComplete, onClose, embedded }: SetupWizardProps)
               onClearAll={() => setSelectedWsIds(new Set())}
               saved={wsSaved}
               savedIds={savedWsIds}
+              poolError={wsPoolError}
+              onRetry={loadWorkspaces}
             />
           )}
 
@@ -613,7 +625,7 @@ export function SetupWizard({ onComplete, onClose, embedded }: SetupWizardProps)
                 </button>
                 <button
                   onClick={async () => { if (await saveWorkspaceFilter()) goNext(); }}
-                  disabled={wsLoading || wsSaving}
+                  disabled={wsLoading || wsSaving || !!wsPoolError}
                   className="btn-brand rounded-lg px-6 py-2 text-sm font-bold text-white transition-colors disabled:opacity-50"
                 >
                   {selectedWsIds.size === 0 || selectedWsIds.size === allWorkspaces.length ? "Continue (all workspaces)" : `Save & Continue (${selectedWsIds.size} workspace${selectedWsIds.size !== 1 ? "s" : ""})`}
@@ -1328,6 +1340,8 @@ function WorkspaceFilterStep({
   onClearAll,
   saved,
   savedIds,
+  poolError,
+  onRetry,
 }: {
   loading: boolean;
   workspaces: { id: string; name: string; historical?: boolean }[];
@@ -1337,8 +1351,24 @@ function WorkspaceFilterStep({
   onClearAll: () => void;
   saved: boolean;
   savedIds: string[];
+  poolError: string | null;
+  onRetry: () => void;
 }) {
   if (loading) return <LoadingSpinner text="Loading workspaces..." />;
+
+  if (poolError) {
+    return (
+      <div className="space-y-3 rounded-lg border border-red-200 bg-red-50 px-4 py-3">
+        <p className="text-sm font-medium text-red-800">{poolError}</p>
+        <p className="text-xs text-red-700">
+          Saving is disabled so the current scope isn't replaced by mistake. Retry, or Skip to keep it as it is.
+        </p>
+        <button onClick={onRetry} className="text-sm font-medium hover:underline" style={{ color: '#FF3621' }}>
+          Retry
+        </button>
+      </div>
+    );
+  }
 
   const nameOf = (id: string) => workspaces.find((w) => w.id === id)?.name || id;
   const currentScope = savedIds.length === 0
