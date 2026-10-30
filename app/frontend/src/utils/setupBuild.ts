@@ -13,6 +13,8 @@ export interface SetupBuildTask {
   error: string | null;
   table_progress?: Record<string, string>;
   table_errors?: Record<string, string>;
+  /** Build outcome per table: created / refreshed / skipped… / ensured / error… */
+  table_results?: Record<string, string>;
   user_grants?: SetupUserGrants | null;
 }
 

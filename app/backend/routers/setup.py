@@ -87,6 +87,7 @@ def _restore_task_state() -> None:
             "elapsed_seconds": None,
             "table_progress": saved.get("table_progress", {}),
             "table_errors": saved.get("table_errors") or {},
+            "table_results": saved.get("table_results") or {},
         })
         logger.info("Restored interrupted task state from previous pod session")
     elif status == "error":
@@ -97,6 +98,7 @@ def _restore_task_state() -> None:
             "elapsed_seconds": None,
             "table_progress": saved.get("table_progress", {}),
             "table_errors": saved.get("table_errors") or {},
+            "table_results": saved.get("table_results") or {},
         })
 
 
@@ -162,7 +164,15 @@ def _reconcile_task_state_from_disk() -> None:
         _create_task_state["error"] = disk.get("error")
         _create_task_state["table_progress"] = disk.get("table_progress") or {}
         _create_task_state["table_errors"] = disk.get("table_errors") or {}
+        _create_task_state["table_results"] = disk.get("table_results") or {}
         _create_task_state["user_grants"] = disk.get("user_grants")
+
+
+# App config/state tables Create Tables bootstraps after the gold tables.
+_SETUP_CONFIG_TABLES = [
+    "app_response_cache", "app_user_permissions",
+    "app_mv_refresh_state", "app_schedule_settings", "app_workspace_filter",
+]
 
 
 # Core billing tables — must exist for the dashboard to be functional.
@@ -717,6 +727,23 @@ async def reset_bootstrap_state() -> dict[str, Any]:
     return {"ok": True, "previous": prev, "current": _create_task_state.copy()}
 
 
+@router.get("/created-tables")
+async def get_created_tables() -> dict[str, Any]:
+    """Which tables Create Tables manages exist in the app schema (UC REST, no warehouse).
+
+    The wizard shows this when no build ran in this session, so its build results
+    (task.table_results) aren't available.
+    """
+    catalog, schema = get_catalog_schema()
+    names = list(_MV_TABLES) + _SETUP_CONFIG_TABLES
+    exists = await asyncio.to_thread(check_materialized_views_exist, catalog, schema, names)
+    return {
+        "catalog": catalog,
+        "schema": schema,
+        "tables": [{"name": n, "exists": bool(exists.get(n))} for n in names],
+    }
+
+
 @router.get("/bootstrap-state")
 async def get_bootstrap_state() -> dict[str, Any]:
     """Return current in-process bootstrap task state for debugging."""
@@ -1002,12 +1029,9 @@ async def create_tables(
         _create_task_state["error"] = None
         _create_task_state["started_at"] = _time.monotonic()
         _create_task_state["elapsed_seconds"] = 0
-        _ALL_SETUP_TABLES = _MV_TABLES + [
-            "app_response_cache", "app_user_permissions",
-            "app_mv_refresh_state", "app_schedule_settings", "app_workspace_filter",
-        ]
-        _create_task_state["table_progress"] = {t: "pending" for t in _ALL_SETUP_TABLES}
+        _create_task_state["table_progress"] = {t: "pending" for t in _MV_TABLES + _SETUP_CONFIG_TABLES}
         _create_task_state["table_errors"] = {}
+        _create_task_state["table_results"] = {}
         _create_task_state["user_grants"] = None
         _persist_task_state()
         # Read the raw header token directly — _auth_mode may have been locked to "sp"
@@ -1131,6 +1155,10 @@ def _create_tables_task(catalog: str, schema: str, user_token: str = "", user_em
             on_table_error=_on_table_error, stop_on_error=True,
         )
         logger.info(f"Table creation completed: {results}")
+        # Per-table outcome for the wizard: created / refreshed / skipped... / error...
+        _create_task_state["table_results"] = {
+            k: v for k, v in results.items() if isinstance(v, str) and not k.startswith("__")
+        }
 
         all_errors = _build_errors(results)
         if all_errors:
@@ -1165,9 +1193,11 @@ def _create_tables_task(catalog: str, schema: str, user_token: str = "", user_em
                 _create_task_state["table_progress"][_tname] = "running"
                 _fn()
                 _create_task_state["table_progress"][_tname] = "done"
+                _create_task_state["table_results"][_tname] = "ensured"
                 logger.info("%s table ensured during setup", _tname)
             except Exception as _te:
                 _create_task_state["table_progress"][_tname] = "error"
+                _create_task_state["table_results"][_tname] = f"error: {_clean_sdk_error(str(_te))}"
                 logger.warning("Could not bootstrap %s during setup: %s", _tname, _te)
 
         # Post-creation grants — schema now exists so schema-level privileges

@@ -580,10 +580,14 @@ def get_genie_dashboard_bundle(
         "timeseries": timeseries,
         "surface_breakdown": surface_breakdown,
     })
-    try:
-        delta_cache_put(dkey, "genie:dashboard-bundle", payload, ttl_seconds=cache_ttls.AIML_BUNDLE)
-    except Exception as e:
-        logger.debug("Delta cache write failed for genie bundle: %s", e)
+    # An empty result is cheap to recompute and is what a read returns while the
+    # Lakebase copy of daily_sku_breakdown is being reloaded; caching it would
+    # show "No Genie spend" for the whole TTL after the reload finishes.
+    if ws_rows:
+        try:
+            delta_cache_put(dkey, "genie:dashboard-bundle", payload, ttl_seconds=cache_ttls.AIML_BUNDLE)
+        except Exception as e:
+            logger.debug("Delta cache write failed for genie bundle: %s", e)
     return payload
 
 

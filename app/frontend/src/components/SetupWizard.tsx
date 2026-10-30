@@ -1125,6 +1125,83 @@ function UserGrantsNotice({ grants }: { grants?: SetupUserGrants | null }) {
   );
 }
 
+type CreatedTableRow = { name: string; label: string; tone: "ok" | "muted" | "warn" | "error"; detail?: string };
+
+function describeTableResult(result: string): Omit<CreatedTableRow, "name"> {
+  if (result === "created") return { label: "Created", tone: "ok" };
+  if (result === "ensured") return { label: "Ready", tone: "ok" };
+  if (result === "refreshed") return { label: "Updated", tone: "muted", detail: "Already existed; refreshed with recent data" };
+  if (result.startsWith("skipped")) return { label: "Skipped", tone: "warn", detail: "Optional source not connected" };
+  return { label: "Failed", tone: "error", detail: result.replace(/^error:\s*/, "") };
+}
+
+const TABLE_TONE_CLASS: Record<CreatedTableRow["tone"], string> = {
+  ok: "border-green-200 bg-green-50 text-green-700",
+  muted: "border-gray-200 bg-gray-50 text-gray-600",
+  warn: "border-amber-200 bg-amber-50 text-amber-700",
+  error: "border-red-200 bg-red-50 text-red-700",
+};
+
+// The tables Create Tables manages, with what this build did to each. When no
+// build ran in this session (e.g. setup finished earlier), shows which exist.
+function CreatedTablesList({ catalog, schema, results }: {
+  catalog?: string;
+  schema?: string;
+  results?: Record<string, string>;
+}) {
+  const hasResults = !!results && Object.keys(results).length > 0;
+  const [existing, setExisting] = useState<{ catalog: string; schema: string; tables: { name: string; exists: boolean }[] } | null>(null);
+  const [loadFailed, setLoadFailed] = useState(false);
+
+  useEffect(() => {
+    if (hasResults) return;
+    let cancelled = false;
+    fetch("/api/setup/created-tables")
+      .then((r) => (r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`))))
+      .then((data) => { if (!cancelled) setExisting(data); })
+      .catch(() => { if (!cancelled) setLoadFailed(true); });
+    return () => { cancelled = true; };
+  }, [hasResults]);
+
+  const rows: CreatedTableRow[] = hasResults
+    ? Object.entries(results!).map(([name, result]) => ({ name, ...describeTableResult(result) }))
+    : (existing?.tables ?? []).map(({ name, exists }) => (
+      exists ? { name, label: "Exists", tone: "ok" as const } : { name, label: "Missing", tone: "warn" as const }
+    ));
+  const cat = catalog || existing?.catalog;
+  const sch = schema || existing?.schema;
+
+  if (!hasResults && !existing) {
+    return loadFailed
+      ? <p className="px-1 text-xs text-gray-500">Could not list the app tables.</p>
+      : <LoadingSpinner text="Listing tables…" />;
+  }
+  const counts = rows.reduce<Record<string, number>>((acc, r) => ({ ...acc, [r.label]: (acc[r.label] ?? 0) + 1 }), {});
+
+  return (
+    <div className="rounded-lg border border-gray-200">
+      <div className="flex flex-wrap items-baseline justify-between gap-2 border-b border-gray-100 px-3 py-2">
+        <span className="text-xs font-semibold text-gray-700">
+          {rows.length} tables{cat && sch ? <> in <span className="font-mono font-normal">{cat}.{sch}</span></> : null}
+        </span>
+        <span className="text-[11px] text-gray-500">
+          {Object.entries(counts).map(([label, n]) => `${n} ${label.toLowerCase()}`).join(" · ")}
+        </span>
+      </div>
+      <div className="max-h-64 overflow-y-auto divide-y divide-gray-100">
+        {rows.map((r) => (
+          <div key={r.name} className="flex items-center justify-between gap-3 px-3 py-1.5" title={r.detail}>
+            <span className="min-w-0 truncate font-mono text-xs text-gray-800">{r.name}</span>
+            <span className={`shrink-0 rounded-full border px-2 py-0.5 text-[10px] font-medium ${TABLE_TONE_CLASS[r.tone]}`}>
+              {r.label}
+            </span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 function CreateTablesStep({ setupStatus, creating, tablesJustCreated, preflightResult, preflightLoading, onRecheck }: {
   setupStatus: SetupStatus | null;
   creating: boolean;
@@ -1184,13 +1261,6 @@ function CreateTablesStep({ setupStatus, creating, tablesJustCreated, preflightR
   }
 
   if (tablesJustCreated || setupStatus?.all_tables_exist) {
-    // Prefer task.table_progress (all 11 tables) over setupStatus.tables (6 MVs only)
-    const doneEntries: [string, string][] = setupStatus?.task?.table_progress
-      ? Object.entries(setupStatus.task.table_progress)
-      : setupStatus
-      ? Object.entries(setupStatus.tables).map(([t, exists]) => [t, exists ? "done" : "error"] as [string, string])
-      : [];
-
     return (
       <div className="space-y-4">
         <div className="rounded-lg border border-green-200 bg-green-50 px-4 py-3 flex items-center gap-3">
@@ -1200,18 +1270,11 @@ function CreateTablesStep({ setupStatus, creating, tablesJustCreated, preflightR
           <p className="text-sm font-medium text-green-800">Tables created successfully. Click <strong>Next</strong> to continue.</p>
         </div>
         <UserGrantsNotice grants={setupStatus?.task?.user_grants} />
-        {doneEntries.length > 0 && (
-          <div className="space-y-1">
-            {doneEntries.map(([table, state]) => (
-              <div key={table} className="flex items-center gap-2 px-3 py-1 text-sm">
-                <svg className={`h-4 w-4 ${state === "done" ? "text-green-500" : "text-amber-400"}`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d={state === "done" ? "M5 13l4 4L19 7" : "M6 18L18 6M6 6l12 12"} />
-                </svg>
-                <span className="font-mono text-xs">{table}</span>
-              </div>
-            ))}
-          </div>
-        )}
+        <CreatedTablesList
+          catalog={setupStatus?.catalog}
+          schema={setupStatus?.schema}
+          results={setupStatus?.task?.table_results}
+        />
       </div>
     );
   }

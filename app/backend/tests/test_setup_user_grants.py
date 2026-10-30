@@ -42,3 +42,18 @@ def test_no_identity_is_reported_not_silent(monkeypatch):
     ran = _exec(monkeypatch)
     out = setup._grant_user_catalog_visibility("cat", "sch", "", "")
     assert not out["ok"] and out["error"] and ran == []
+
+
+def test_created_tables_lists_gold_and_config_tables(monkeypatch):
+    import asyncio
+    monkeypatch.setattr(setup, "get_catalog_schema", lambda: ("cat", "sch"))
+    monkeypatch.setattr(
+        setup, "check_materialized_views_exist",
+        lambda catalog, schema, names: {n: n != "daily_sku_breakdown" for n in names},
+    )
+    out = asyncio.run(setup.get_created_tables())
+    assert (out["catalog"], out["schema"]) == ("cat", "sch")
+    by_name = {t["name"]: t["exists"] for t in out["tables"]}
+    assert by_name["daily_sku_breakdown"] is False
+    assert by_name["daily_usage_summary"] is True
+    assert by_name["app_workspace_filter"] is True

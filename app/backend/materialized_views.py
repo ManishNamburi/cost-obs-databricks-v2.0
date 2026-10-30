@@ -2142,8 +2142,8 @@ def drop_unified_views(catalog: str | None = None, schema: str | None = None) ->
             logger.debug("drop unified view %s failed (non-fatal): %s", t, e)
 
 
-def check_materialized_views_exist(catalog: str | None = None, schema: str | None = None) -> dict:
-    """Check which materialized view tables exist.
+def check_materialized_views_exist(catalog: str | None = None, schema: str | None = None, table_names: list[str] | None = None) -> dict:
+    """Check which materialized view tables (or the given table_names) exist.
 
     Uses the Unity Catalog REST API (no SQL warehouse required) so this is
     fast even when the warehouse is cold/starting. Avoids the thread-exhaustion
@@ -2157,7 +2157,7 @@ def check_materialized_views_exist(catalog: str | None = None, schema: str | Non
         catalog = catalog or cat
         schema = schema or sch
 
-    table_names = _MV_TABLES
+    table_names = table_names or _MV_TABLES
 
     # Use the Unity Catalog REST API (no SQL warehouse needed — fast even when cold).
     # Databricks Apps creates a new SP on every redeploy, so the SP may have no grants
