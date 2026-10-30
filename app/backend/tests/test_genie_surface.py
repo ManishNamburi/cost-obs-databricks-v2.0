@@ -67,14 +67,105 @@ def test_stamp_records_the_version(monkeypatch):
     assert calls == ["ALTER TABLE `c`.`s`.`t` SET TBLPROPERTIES ('cost_obs.definition_version' = '2')"]
 
 
-def test_rebuilt_tables_get_a_full_lakebase_copy(monkeypatch):
+def test_rebuilt_tables_are_rewritten_not_emptied(monkeypatch):
     seen = {}
     monkeypatch.setattr("backend.db.lakebase_available", lambda: True)
     monkeypatch.setattr("backend.db.get_pg_conn", lambda: (_ for _ in ()).throw(RuntimeError("no pg")))
     monkeypatch.setattr(
         lakebase_sync, "sync_one_aggregate",
-        lambda catalog, schema, table, cfg, *, full=False: seen.setdefault(table, full),
+        lambda catalog, schema, table, cfg, *, full=False, rewrite=False: seen.setdefault(table, (full, rewrite)),
     )
     lakebase_sync.sync_all_aggregates("c", "s", full_tables={"daily_sku_breakdown"})
-    assert seen["daily_sku_breakdown"] is True
-    assert seen["daily_usage_summary"] is False
+    assert seen["daily_sku_breakdown"] == (False, True)
+    assert seen["daily_usage_summary"] == (False, False)
+
+
+def test_rewrite_replaces_every_chunk_without_emptying(monkeypatch):
+    import datetime as dt
+    from contextlib import contextmanager
+
+    ran: list[str] = []
+
+    class _Cur:
+        def __init__(self):
+            self._one = None
+
+        def execute(self, sql, params=None):
+            ran.append(sql)
+            self._one = ("2026-10-01",) if ("backfilled_at" in sql or "LIMIT 1" in sql) else None
+
+        def executemany(self, sql, rows):
+            ran.append(f"INSERT x{len(rows)}")
+
+        def fetchone(self):
+            return self._one
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+    class _Conn:
+        def cursor(self):
+            return _Cur()
+
+        def commit(self):
+            pass
+
+        def rollback(self):
+            pass
+
+    @contextmanager
+    def _pg():
+        yield _Conn()
+
+    def _query(sql, *a, **k):
+        if "MIN(" in sql:
+            return [{"mn": dt.date(2026, 10, 1), "mx": dt.date(2026, 10, 20)}]
+        return [{"usage_date": dt.date(2026, 10, 1), "total_spend": 1.0}]
+
+    monkeypatch.setattr("backend.db.get_pg_conn", _pg)
+    monkeypatch.setattr("backend.db.execute_query", _query)
+    monkeypatch.setattr(lakebase_sync, "_describe_delta_columns", lambda *a: [("usage_date", "date"), ("total_spend", "double")])
+    monkeypatch.setattr(lakebase_sync, "_ensure_pg_table", lambda *a: None)
+    monkeypatch.setattr(lakebase_sync, "_ensure_sync_state_table", lambda *a: None)
+    monkeypatch.setattr(lakebase_sync, "_finish", lambda *a: None)
+
+    cfg = {"pk": ["usage_date"], "source_date_col": "usage_date", "reprocess_days": 14}
+    out = lakebase_sync.sync_one_aggregate("c", "s", "daily_sku_breakdown", cfg, rewrite=True)
+
+    assert out["mode"] == "rewrite" and out["window_start"] == "2026-10-01"
+    assert not any("TRUNCATE" in q or "backfilled_at = NULL" in q for q in ran)
+    assert sum(q.startswith('DELETE FROM "daily_sku_breakdown" WHERE "usage_date" BETWEEN') for q in ran) == 3
+    assert ran[-1].startswith('DELETE FROM "daily_sku_breakdown" WHERE "usage_date" < %s OR')
+
+
+class _ClearCur:
+    def __init__(self, refuse):
+        self.ran, self._refuse = [], refuse
+
+    def execute(self, sql, params=None):
+        self.ran.append(sql)
+        for frag, err in self._refuse.items():
+            if sql.startswith(frag):
+                raise RuntimeError(err)
+
+
+def test_clear_falls_back_to_delete_without_truncate_privilege():
+    cur = _ClearCur({"TRUNCATE": "permission denied for table daily_sku_breakdown"})
+    lakebase_sync._clear_table(cur, "daily_sku_breakdown")
+    assert cur.ran == [
+        "SAVEPOINT clear_table",
+        'TRUNCATE TABLE "daily_sku_breakdown"',
+        "ROLLBACK TO SAVEPOINT clear_table",
+        'DELETE FROM "daily_sku_breakdown"',
+        "RELEASE SAVEPOINT clear_table",
+    ]
+
+
+def test_clear_failure_propagates_so_the_loading_flag_rolls_back():
+    import pytest
+    cur = _ClearCur({"TRUNCATE": "permission denied for table t", "DELETE": "permission denied for table t"})
+    with pytest.raises(RuntimeError):
+        lakebase_sync._clear_table(cur, "t")

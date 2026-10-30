@@ -1178,7 +1178,9 @@ function CreatedTablesList({ catalog, schema, results }: {
   const rows: CreatedTableRow[] = hasResults
     ? Object.entries(results!).map(([name, result]) => ({ name, ...describeTableResult(result) }))
     : (existing?.tables ?? []).map(({ name, exists }) => (
-      exists ? { name, label: "Exists", tone: "ok" as const } : { name, label: "Missing", tone: "warn" as const }
+      // Optional sources (cloud invoices, use-case objects) are legitimately absent,
+      // so an absent table is "not created", not a warning.
+      exists ? { name, label: "Present", tone: "ok" as const } : { name, label: "Not created", tone: "muted" as const }
     ));
   const cat = catalog || existing?.catalog;
   const sch = schema || existing?.schema;

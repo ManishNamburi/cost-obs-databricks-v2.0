@@ -1648,7 +1648,7 @@ def create_materialized_views(catalog: str | None = None, schema: str | None = N
             try:
                 from backend.lakebase_sync import sync_all_aggregates
                 # A rebuilt table can differ outside the incremental window (e.g. a
-                # definition_version bump), so its Lakebase copy is replaced whole.
+                # definition_version bump), so its whole Lakebase copy is rewritten.
                 rebuilt = {t for t, v in result.items() if v == "created"} if isinstance(result, dict) else set()
                 sync_summary = sync_all_aggregates(catalog, schema, full=force_full_rebuild, full_tables=rebuilt)
                 if isinstance(result, dict):
