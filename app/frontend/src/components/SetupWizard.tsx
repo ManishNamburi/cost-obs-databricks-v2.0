@@ -1,11 +1,12 @@
 import { useState, useEffect, useCallback, useRef, Fragment } from "react";
 import { createPortal } from "react-dom";
+import { useQueryClient } from "@tanstack/react-query";
 import { Spinner } from "./Spinner";
 import { ReadinessChecks, normalizeReadinessResult } from "./settings/ReadinessChecks";
 import { VirtualizedList } from "./VirtualizedList";
 import type { ReadinessResult } from "./settings/ReadinessChecks";
 import { isAccessError, isGrantableCatalogError, setupBuildOutcome } from "../utils/setupBuild";
-import type { SetupBuildTask } from "../utils/setupBuild";
+import type { SetupBuildTask, SetupUserGrants } from "../utils/setupBuild";
 
 interface SetupWizardProps {
   onComplete: () => void;
@@ -141,7 +142,17 @@ function PermissionErrorBlock({ error, onGranted }: { error: string; onGranted: 
   );
 }
 
+const SCOPE_INDEPENDENT_QUERIES = new Set([
+  "user", "user-permissions", "unified-settings", "app-config", "warehouses",
+  "cloud-provider", "cloud-connections", "health", "debug-run", "mv-sources",
+]);
+
+function isScopeIndependentQuery(head: string): boolean {
+  return SCOPE_INDEPENDENT_QUERIES.has(head) || head.startsWith("settings-") || head.startsWith("setup-");
+}
+
 export function SetupWizard({ onComplete, onClose, embedded }: SetupWizardProps) {
+  const queryClient = useQueryClient();
   const [step, setStep] = useState<WizardStep>("welcome");
   const [config, setConfig] = useState<ConfigData | null>(null);
   const [cloud, setCloud] = useState<CloudData | null>(null);
@@ -179,8 +190,8 @@ export function SetupWizard({ onComplete, onClose, embedded }: SetupWizardProps)
   const [selectedWsIds, setSelectedWsIds] = useState<Set<string>>(new Set());
   const [wsSaved, setWsSaved] = useState(false);
   const [wsSaving, setWsSaving] = useState(false);
-  const [wsLocked, setWsLocked] = useState(false);
-  const [lockedWsIds, setLockedWsIds] = useState<string[]>([]);
+  // The pool saved by a previous run of this step. [] = all workspaces.
+  const [savedWsIds, setSavedWsIds] = useState<string[]>([]);
 
   // Load initial data
   useEffect(() => {
@@ -366,25 +377,22 @@ export function SetupWizard({ onComplete, onClose, embedded }: SetupWizardProps)
 
   const loadWorkspaces = useCallback(async () => {
     setWsLoading(true);
+    setWsSaved(false);
     try {
       const [filterRes, listRes] = await Promise.all([
         fetch("/api/setup/workspace-filter"),
         fetch("/api/setup/list-workspaces"),
       ]);
-      if (filterRes.ok) {
-        const filterData = await filterRes.json();
-        if (filterData.locked) {
-          setWsLocked(true);
-          setLockedWsIds(filterData.workspace_ids ?? []);
-          setWsSaved(true);
-          return;
-        }
-      }
+      const saved: string[] = filterRes.ok ? ((await filterRes.json()).workspace_ids ?? []) : [];
+      setSavedWsIds(saved);
       if (listRes.ok) {
         const data = await listRes.json();
-        setAllWorkspaces(data.workspaces ?? []);
-        // Pre-select all by default
-        setSelectedWsIds(new Set((data.workspaces ?? []).map((w: { id: string }) => w.id)));
+        const list: { id: string; name: string; historical?: boolean }[] = data.workspaces ?? [];
+        // Keep saved ids the list didn't return selectable, so saving again can't drop them silently.
+        const missing = saved.filter((id) => !list.some((w) => w.id === id));
+        setAllWorkspaces([...list, ...missing.map((id) => ({ id, name: id, historical: true }))]);
+        // Start from the saved pool; with none saved, everything is selected.
+        setSelectedWsIds(new Set(saved.length > 0 ? saved : list.map((w) => w.id)));
       }
     } catch {
       // non-fatal — user can skip
@@ -396,7 +404,6 @@ export function SetupWizard({ onComplete, onClose, embedded }: SetupWizardProps)
   // Returns false (and shows the error) when the save failed, so the wizard stays on
   // this step instead of moving on as if the filter had been saved.
   const saveWorkspaceFilter = async (): Promise<boolean> => {
-    if (wsLocked) return true;
     // Every workspace selected means "no filter". Sending the explicit list would lock
     // the pool to today's workspaces and hide any created later.
     const ids = selectedWsIds.size === allWorkspaces.length ? [] : Array.from(selectedWsIds);
@@ -413,7 +420,16 @@ export function SetupWizard({ onComplete, onClose, embedded }: SetupWizardProps)
         setError(body.detail || `Could not save the workspace filter (HTTP ${res.status})`);
         return false;
       }
-      if (ids.length > 0) setWsSaved(true);
+      setWsSaved(true);
+      setSavedWsIds(ids);
+      // Every cached tab payload belongs to the previous scope. Reset rather than
+      // invalidate so tabs show their loading state, not the old numbers, while
+      // they refetch. Identity and settings queries don't depend on the scope;
+      // resetting them would blank the dialog this wizard runs in.
+      await queryClient.resetQueries({
+        predicate: (q) => !isScopeIndependentQuery(String(q.queryKey[0] ?? "")),
+      });
+      queryClient.invalidateQueries({ queryKey: ["setup-workspace-filter"] });
       return true;
     } catch (e) {
       setError(`Could not save the workspace filter: ${e}`);
@@ -560,8 +576,7 @@ export function SetupWizard({ onComplete, onClose, embedded }: SetupWizardProps)
               onSelectAll={() => setSelectedWsIds(new Set(allWorkspaces.map((w) => w.id)))}
               onClearAll={() => setSelectedWsIds(new Set())}
               saved={wsSaved}
-              locked={wsLocked}
-              lockedIds={lockedWsIds}
+              savedIds={savedWsIds}
             />
           )}
 
@@ -590,14 +605,12 @@ export function SetupWizard({ onComplete, onClose, embedded }: SetupWizardProps)
               </button>
             ) : step === "workspace-filter" ? (
               <div className="flex items-center gap-2">
-                {!wsLocked && (
-                  <button
-                    onClick={goNext}
-                    className="rounded-lg border border-gray-300 px-4 py-2 text-sm font-medium text-gray-600 hover:bg-gray-50"
-                  >
-                    Skip
-                  </button>
-                )}
+                <button
+                  onClick={goNext}
+                  className="rounded-lg border border-gray-300 px-4 py-2 text-sm font-medium text-gray-600 hover:bg-gray-50"
+                >
+                  Skip
+                </button>
                 <button
                   onClick={async () => { if (await saveWorkspaceFilter()) goNext(); }}
                   disabled={wsLoading || wsSaving}
@@ -1088,6 +1101,30 @@ function WizardPermissionsStep({
   );
 }
 
+function UserGrantsNotice({ grants }: { grants?: SetupUserGrants | null }) {
+  if (!grants) return null;
+  if (grants.ok) {
+    return (
+      <p className="px-1 text-xs text-gray-600">
+        Granted <span className="font-medium">{grants.grantee}</span> USE CATALOG, USE SCHEMA and MANAGE on the app catalog and schema.
+      </p>
+    );
+  }
+  return (
+    <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 space-y-2">
+      <p className="text-sm font-medium text-amber-800">
+        Could not grant {grants.grantee || "you"} access to the app catalog
+      </p>
+      <p className="text-xs text-amber-700">
+        {grants.error || grants.failed[0]?.error || "The grant was refused."} The dashboard still works; you just can't browse or manage these tables in Catalog Explorer until a catalog owner runs:
+      </p>
+      {grants.manual_sql && (
+        <pre className="overflow-x-auto whitespace-pre rounded border border-amber-200 bg-white px-2 py-1.5 font-mono text-[11px] text-gray-800">{grants.manual_sql}</pre>
+      )}
+    </div>
+  );
+}
+
 function CreateTablesStep({ setupStatus, creating, tablesJustCreated, preflightResult, preflightLoading, onRecheck }: {
   setupStatus: SetupStatus | null;
   creating: boolean;
@@ -1162,6 +1199,7 @@ function CreateTablesStep({ setupStatus, creating, tablesJustCreated, preflightR
           </svg>
           <p className="text-sm font-medium text-green-800">Tables created successfully. Click <strong>Next</strong> to continue.</p>
         </div>
+        <UserGrantsNotice grants={setupStatus?.task?.user_grants} />
         {doneEntries.length > 0 && (
           <div className="space-y-1">
             {doneEntries.map(([table, state]) => (
@@ -1226,8 +1264,7 @@ function WorkspaceFilterStep({
   onSelectAll,
   onClearAll,
   saved,
-  locked,
-  lockedIds,
+  savedIds,
 }: {
   loading: boolean;
   workspaces: { id: string; name: string; historical?: boolean }[];
@@ -1236,46 +1273,25 @@ function WorkspaceFilterStep({
   onSelectAll: () => void;
   onClearAll: () => void;
   saved: boolean;
-  locked: boolean;
-  lockedIds: string[];
+  savedIds: string[];
 }) {
   if (loading) return <LoadingSpinner text="Loading workspaces..." />;
 
-  if (locked) {
-    return (
-      <div className="space-y-4">
-        <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3">
-          <div className="flex items-center gap-2 mb-1">
-            <svg className="h-4 w-4 text-amber-600 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
-            </svg>
-            <span className="text-sm font-semibold text-amber-800">Workspace filter already configured</span>
-          </div>
-          <p className="text-xs text-amber-700">
-            This setting was locked during initial setup and cannot be changed. To modify the workspace filter, delete this app deployment and run setup again.
-          </p>
-        </div>
-        <div className="rounded-lg border border-gray-200 bg-gray-50 px-4 py-3">
-          <div className="text-xs font-medium text-gray-500 mb-2">Currently scoped to:</div>
-          {lockedIds.length === 0 ? (
-            <span className="text-sm text-gray-700">All workspaces</span>
-          ) : (
-            <div className="space-y-1">
-              {lockedIds.map((id) => (
-                <div key={id} className="text-xs font-mono text-gray-700 bg-white rounded border border-gray-200 px-2 py-1">{id}</div>
-              ))}
-            </div>
-          )}
-        </div>
-      </div>
-    );
-  }
+  const nameOf = (id: string) => workspaces.find((w) => w.id === id)?.name || id;
+  const currentScope = savedIds.length === 0
+    ? "All workspaces"
+    : savedIds.length === 1
+    ? nameOf(savedIds[0])
+    : `${savedIds.length} workspaces`;
 
   return (
     <div className="space-y-4">
       <p className="text-sm text-gray-600">
-        Choose which workspaces this app should display data for. You can adjust this after setup in the workspace filter dropdown.
+        Choose which workspaces this app should display data for. Admins can come back to this step at any time to change it.
       </p>
+      <div className="rounded-lg border border-gray-200 bg-gray-50 px-4 py-2.5 text-xs text-gray-600">
+        Currently scoped to: <span className="font-medium text-gray-800">{currentScope}</span>
+      </div>
 
       {workspaces.length === 0 ? (
         <div className="rounded-lg bg-amber-50 p-3 text-sm text-amber-700">
@@ -1336,7 +1352,7 @@ function WorkspaceFilterStep({
 
       {saved && (
         <div className="rounded-lg border border-green-200 bg-green-50 px-4 py-2.5">
-          <p className="text-xs font-medium text-green-800">Workspace filter saved and locked. This setting persists across redeploys.</p>
+          <p className="text-xs font-medium text-green-800">Workspace scope saved. It persists across redeploys.</p>
         </div>
       )}
     </div>

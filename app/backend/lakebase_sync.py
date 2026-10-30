@@ -543,8 +543,12 @@ def sync_all_aggregates(
     schema: str | None = None,
     *,
     full: bool = False,
+    full_tables: set[str] | frozenset[str] = frozenset(),
 ) -> dict[str, Any]:
     """Sync every daily_* aggregate into Lakebase. Best-effort, per-table isolated.
+
+    `full_tables` get a full copy even when `full` is False — used for tables the
+    Delta build just recreated, whose history may have changed.
 
     No-op (returns skipped) when Lakebase is unavailable, so warehouse-only
     deploys are unaffected. Never raises — a failing table is recorded and the
@@ -584,7 +588,9 @@ def sync_all_aggregates(
     ok = 0
     for table in tables_to_sync:
         try:
-            results[table] = sync_one_aggregate(catalog, schema, table, _TABLE_REFRESH_CONFIG[table], full=full)
+            results[table] = sync_one_aggregate(
+                catalog, schema, table, _TABLE_REFRESH_CONFIG[table], full=full or table in full_tables,
+            )
             ok += 1
         except Exception as e:  # isolate per-table failures
             logger.warning("lakebase_sync: %s failed (non-fatal): %s", table, e)
